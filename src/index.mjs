@@ -197,6 +197,33 @@ async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd())
   const initialStatus = await getGitStatus(rootDir)
   const hasPendingChanges = initialStatus.length > 0
 
+  const statusReport = await runCommandCapture('git', ['status', '--short', '--branch'], {
+    cwd: rootDir
+  })
+
+  const lines = statusReport.split(/\r?\n/)
+  const branchLine = lines[0] || ''
+  const aheadMatch = branchLine.match(/ahead (\d+)/)
+  const behindMatch = branchLine.match(/behind (\d+)/)
+  const aheadCount = aheadMatch ? parseInt(aheadMatch[1], 10) : 0
+  const behindCount = behindMatch ? parseInt(behindMatch[1], 10) : 0
+
+  if (aheadCount > 0) {
+    logWarning(`Local branch ${currentBranch} is ahead of upstream by ${aheadCount} commit${aheadCount === 1 ? '' : 's'}.`)
+  }
+
+  if (behindCount > 0) {
+    logProcessing(`Synchronizing local branch ${currentBranch} with its upstream...`)
+    try {
+      await runCommand('git', ['pull', '--ff-only'], { cwd: rootDir })
+      logSuccess('Local branch fast-forwarded with upstream changes.')
+    } catch (error) {
+      throw new Error(
+        `Unable to fast-forward ${currentBranch} with upstream changes. Resolve conflicts manually, then rerun the deployment.\n${error.message}`
+      )
+    }
+  }
+
   if (currentBranch !== targetBranch) {
     if (hasPendingChanges) {
       throw new Error(
