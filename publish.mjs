@@ -97,6 +97,18 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef) {
     return
   }
 
+  const [remoteName, ...branchParts] = upstreamRef.split('/')
+  const remoteBranch = branchParts.join('/')
+
+  if (remoteName && remoteBranch) {
+    logStep(`Fetching latest updates from ${remoteName}/${remoteBranch}...`)
+    try {
+      await runCommand('git', ['fetch', remoteName, remoteBranch])
+    } catch (error) {
+      throw new Error(`Failed to fetch ${upstreamRef}: ${error.message}`)
+    }
+  }
+
   const aheadResult = await runCommand('git', ['rev-list', '--count', `${upstreamRef}..HEAD`], {
     capture: true
   })
@@ -108,6 +120,20 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef) {
   const behind = Number.parseInt(behindResult.stdout || '0', 10)
 
   if (Number.isFinite(behind) && behind > 0) {
+    if (remoteName && remoteBranch) {
+      logStep(`Fast-forwarding ${branch} with ${upstreamRef}...`)
+
+      try {
+        await runCommand('git', ['pull', '--ff-only', remoteName, remoteBranch])
+      } catch (error) {
+        throw new Error(
+          `Unable to fast-forward ${branch} with ${upstreamRef}. Resolve conflicts manually, then rerun the release.\n${error.message}`
+        )
+      }
+
+      return ensureUpToDateWithUpstream(branch, upstreamRef)
+    }
+
     throw new Error(
       `Branch ${branch} is behind ${upstreamRef} by ${behind} commit${behind === 1 ? '' : 's'}. Pull or rebase first.`
     )
