@@ -3,7 +3,8 @@
   "version": "0.1.1",
   "type": "module",
   "scripts": {
-    "test": "vitest"
+    "test": "vitest",
+    "release": "node publish.mjs"
   },
   "bin": {
     "zephyr": "bin/zephyr.mjs"
