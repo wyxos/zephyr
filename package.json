@@ -6,7 +6,7 @@
     "test": "vitest"
   },
   "bin": {
-    "zephyr": "./bin/zephyr.mjs"
+    "zephyr": "bin/zephyr.mjs"
   },
   "dependencies": {
     "chalk": "5.3.0",
