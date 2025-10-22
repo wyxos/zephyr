@@ -6,7 +6,10 @@ import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { NodeSSH } from 'node-ssh'
 
-const RELEASE_FILE = 'release.json'
+const PROJECT_CONFIG_DIR = '.zephyr'
+const PROJECT_CONFIG_FILE = 'config.json'
+const GLOBAL_CONFIG_DIR = path.join(os.homedir(), '.config', 'zephyr')
+const SERVERS_FILE = path.join(GLOBAL_CONFIG_DIR, 'servers.json')
 
 const logProcessing = (message = '') => console.log(chalk.yellow(message))
 const logSuccess = (message = '') => console.log(chalk.green(message))
@@ -245,6 +248,7 @@ async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd())
 
 async function ensureGitignoreEntry(rootDir) {
   const gitignorePath = path.join(rootDir, '.gitignore')
+  const targetEntry = `${PROJECT_CONFIG_DIR}/`
   let existingContent = ''
 
   try {
@@ -257,18 +261,18 @@ async function ensureGitignoreEntry(rootDir) {
 
   const hasEntry = existingContent
     .split(/\r?\n/)
-    .some((line) => line.trim() === RELEASE_FILE)
+    .some((line) => line.trim() === targetEntry)
 
   if (hasEntry) {
     return
   }
 
   const updatedContent = existingContent
-    ? `${existingContent.replace(/\s*$/, '')}\n${RELEASE_FILE}\n`
-    : `${RELEASE_FILE}\n`
+    ? `${existingContent.replace(/\s*$/, '')}\n${targetEntry}\n`
+    : `${targetEntry}\n`
 
   await fs.writeFile(gitignorePath, updatedContent)
-  logSuccess('Added release.json to .gitignore')
+  logSuccess('Added .zephyr/ to .gitignore')
 
   let isGitRepo = false
   try {
@@ -287,7 +291,7 @@ async function ensureGitignoreEntry(rootDir) {
 
   try {
     await runCommand('git', ['add', '.gitignore'], { cwd: rootDir })
-    await runCommand('git', ['commit', '-m', 'chore: ignore release config'], { cwd: rootDir })
+    await runCommand('git', ['commit', '-m', 'chore: ignore zephyr config'], { cwd: rootDir })
   } catch (error) {
     if (error.exitCode === 1) {
       logWarning('Git commit skipped: nothing to commit or pre-commit hook prevented commit.')
@@ -297,9 +301,13 @@ async function ensureGitignoreEntry(rootDir) {
   }
 }
 
-async function loadReleases(filePath) {
+async function ensureDirectory(dirPath) {
+  await fs.mkdir(dirPath, { recursive: true })
+}
+
+async function loadServers() {
   try {
-    const raw = await fs.readFile(filePath, 'utf8')
+    const raw = await fs.readFile(SERVERS_FILE, 'utf8')
     const data = JSON.parse(raw)
     return Array.isArray(data) ? data : []
   } catch (error) {
@@ -307,14 +315,45 @@ async function loadReleases(filePath) {
       return []
     }
 
-    logWarning('Failed to read release.json, starting with an empty list.')
+    logWarning('Failed to read servers.json, starting with an empty list.')
     return []
   }
 }
 
-async function saveReleases(filePath, releases) {
-  const payload = JSON.stringify(releases, null, 2)
-  await fs.writeFile(filePath, `${payload}\n`)
+async function saveServers(servers) {
+  await ensureDirectory(GLOBAL_CONFIG_DIR)
+  const payload = JSON.stringify(servers, null, 2)
+  await fs.writeFile(SERVERS_FILE, `${payload}\n`)
+}
+
+function getProjectConfigPath(rootDir) {
+  return path.join(rootDir, PROJECT_CONFIG_DIR, PROJECT_CONFIG_FILE)
+}
+
+async function loadProjectConfig(rootDir) {
+  const configPath = getProjectConfigPath(rootDir)
+
+  try {
+    const raw = await fs.readFile(configPath, 'utf8')
+    const data = JSON.parse(raw)
+    return {
+      apps: Array.isArray(data?.apps) ? data.apps : []
+    }
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return { apps: [] }
+    }
+
+    logWarning('Failed to read .zephyr/config.json, starting with an empty list of apps.')
+    return { apps: [] }
+  }
+}
+
+async function saveProjectConfig(rootDir, config) {
+  const configDir = path.join(rootDir, PROJECT_CONFIG_DIR)
+  await ensureDirectory(configDir)
+  const payload = JSON.stringify({ apps: config.apps ?? [] }, null, 2)
+  await fs.writeFile(path.join(configDir, PROJECT_CONFIG_FILE), `${payload}\n`)
 }
 
 function defaultProjectPath(currentDir) {
@@ -719,14 +758,10 @@ async function runRemoteTasks(config) {
   }
 }
 
-async function collectServerConfig(currentDir) {
-  const branches = await listGitBranches(currentDir)
-  const defaultBranch = branches.includes('master') ? 'master' : branches[0]
+async function promptServerDetails(existingServers = []) {
   const defaults = {
-    serverName: 'home',
-    serverIp: '1.1.1.1',
-    projectPath: defaultProjectPath(currentDir),
-    branch: defaultBranch
+    serverName: existingServers.length === 0 ? 'home' : `server-${existingServers.length + 1}`,
+    serverIp: '1.1.1.1'
   }
 
   const answers = await runPrompt([
@@ -739,19 +774,77 @@ async function collectServerConfig(currentDir) {
     {
       type: 'input',
       name: 'serverIp',
-      message: 'Server IP',
+      message: 'Server IP address',
       default: defaults.serverIp
-    },
+    }
+  ])
+
+  return {
+    serverName: answers.serverName.trim() || defaults.serverName,
+    serverIp: answers.serverIp.trim() || defaults.serverIp
+  }
+}
+
+async function selectServer(servers) {
+  if (servers.length === 0) {
+    logProcessing("No servers configured. Let's create one.")
+    const server = await promptServerDetails()
+    servers.push(server)
+    await saveServers(servers)
+    logSuccess('Saved server configuration to ~/.config/zephyr/servers.json')
+    return server
+  }
+
+  const choices = servers.map((server, index) => ({
+    name: `${server.serverName} (${server.serverIp})`,
+    value: index
+  }))
+
+  choices.push(new inquirer.Separator(), {
+    name: '➕ Register a new server',
+    value: 'create'
+  })
+
+  const { selection } = await runPrompt([
+    {
+      type: 'list',
+      name: 'selection',
+      message: 'Select server or register new',
+      choices,
+      default: 0
+    }
+  ])
+
+  if (selection === 'create') {
+    const server = await promptServerDetails(servers)
+    servers.push(server)
+    await saveServers(servers)
+    logSuccess('Appended server configuration to ~/.config/zephyr/servers.json')
+    return server
+  }
+
+  return servers[selection]
+}
+
+async function promptAppDetails(currentDir, existing = {}) {
+  const branches = await listGitBranches(currentDir)
+  const defaultBranch = existing.branch || (branches.includes('master') ? 'master' : branches[0])
+  const defaults = {
+    projectPath: existing.projectPath || defaultProjectPath(currentDir),
+    branch: defaultBranch
+  }
+
+  const answers = await runPrompt([
     {
       type: 'input',
       name: 'projectPath',
-      message: 'Project path',
+      message: 'Remote project path',
       default: defaults.projectPath
     },
     {
       type: 'list',
       name: 'branchSelection',
-      message: 'Branch',
+      message: 'Branch to deploy',
       choices: [
         ...branches.map((branch) => ({ name: branch, value: branch })),
         new inquirer.Separator(),
@@ -764,7 +857,7 @@ async function collectServerConfig(currentDir) {
   let branch = answers.branchSelection
 
   if (branch === '__custom') {
-    const { customBranch } = await inquirer.prompt([
+    const { customBranch } = await runPrompt([
       {
         type: 'input',
         name: 'customBranch',
@@ -776,25 +869,41 @@ async function collectServerConfig(currentDir) {
     branch = customBranch.trim() || defaults.branch
   }
 
-  const sshDetails = await promptSshDetails(currentDir)
+  const sshDetails = await promptSshDetails(currentDir, existing)
 
   return {
-    serverName: answers.serverName,
-    serverIp: answers.serverIp,
-    projectPath: answers.projectPath,
+    projectPath: answers.projectPath.trim() || defaults.projectPath,
     branch,
     ...sshDetails
   }
 }
 
-async function promptSelection(releases) {
-  const choices = releases.map((entry, index) => ({
-    name: `${entry.serverName} (${entry.serverIp})` || `Server ${index + 1}`,
+async function selectApp(projectConfig, server, currentDir) {
+  const apps = projectConfig.apps ?? []
+  const matches = apps
+    .map((app, index) => ({ app, index }))
+    .filter(({ app }) => app.serverName === server.serverName)
+
+  if (matches.length === 0) {
+    logProcessing(`No applications configured for ${server.serverName}. Let's create one.`)
+    const appDetails = await promptAppDetails(currentDir)
+    const appConfig = {
+      serverName: server.serverName,
+      ...appDetails
+    }
+    projectConfig.apps.push(appConfig)
+    await saveProjectConfig(currentDir, projectConfig)
+    logSuccess('Saved deployment configuration to .zephyr/config.json')
+    return appConfig
+  }
+
+  const choices = matches.map(({ app, index }) => ({
+    name: `${app.projectPath} (${app.branch})`,
     value: index
   }))
 
   choices.push(new inquirer.Separator(), {
-    name: '➕ Create new deployment target',
+    name: '➕ Configure new application for this server',
     value: 'create'
   })
 
@@ -802,55 +911,58 @@ async function promptSelection(releases) {
     {
       type: 'list',
       name: 'selection',
-      message: 'Select server or create new',
+      message: `Select application for ${server.serverName}`,
       choices,
       default: 0
     }
   ])
 
-  return selection
+  if (selection === 'create') {
+    const appDetails = await promptAppDetails(currentDir)
+    const appConfig = {
+      serverName: server.serverName,
+      ...appDetails
+    }
+    projectConfig.apps.push(appConfig)
+    await saveProjectConfig(currentDir, projectConfig)
+    logSuccess('Appended deployment configuration to .zephyr/config.json')
+    return appConfig
+  }
+
+  const chosen = projectConfig.apps[selection]
+  return chosen
 }
 
 async function main() {
   const rootDir = process.cwd()
-  const releasePath = path.join(rootDir, RELEASE_FILE)
 
   await ensureGitignoreEntry(rootDir)
 
-  const releases = await loadReleases(releasePath)
+  const servers = await loadServers()
+  const server = await selectServer(servers)
+  const projectConfig = await loadProjectConfig(rootDir)
+  const appConfig = await selectApp(projectConfig, server, rootDir)
 
-  if (releases.length === 0) {
-    logProcessing("No deployment targets found. Let's create one.")
-    const config = await collectServerConfig(rootDir)
-    releases.push(config)
-    await saveReleases(releasePath, releases)
-    logSuccess('Saved deployment configuration to release.json')
-    await runRemoteTasks(config)
-    return
-  }
-
-  const selection = await promptSelection(releases)
-
-  if (selection === 'create') {
-    const config = await collectServerConfig(rootDir)
-    releases.push(config)
-    await saveReleases(releasePath, releases)
-    logSuccess('Appended new deployment configuration to release.json')
-    await runRemoteTasks(config)
-    return
-  }
-
-  const chosen = releases[selection]
-  const updated = await ensureSshDetails(chosen, rootDir)
+  const updated = await ensureSshDetails(appConfig, rootDir)
 
   if (updated) {
-    await saveReleases(releasePath, releases)
-    logSuccess('Updated release.json with SSH details.')
+    await saveProjectConfig(rootDir, projectConfig)
+    logSuccess('Updated .zephyr/config.json with SSH details.')
   }
-  logProcessing('\nSelected deployment target:')
-  console.log(JSON.stringify(chosen, null, 2))
 
-  await runRemoteTasks(chosen)
+  const deploymentConfig = {
+    serverName: server.serverName,
+    serverIp: server.serverIp,
+    projectPath: appConfig.projectPath,
+    branch: appConfig.branch,
+    sshUser: appConfig.sshUser,
+    sshKey: appConfig.sshKey
+  }
+
+  logProcessing('\nSelected deployment target:')
+  console.log(JSON.stringify(deploymentConfig, null, 2))
+
+  await runRemoteTasks(deploymentConfig)
 }
 
 export {
@@ -859,9 +971,14 @@ export {
   resolveRemotePath,
   isPrivateKeyFile,
   runRemoteTasks,
-  collectServerConfig,
+  promptServerDetails,
+  selectServer,
+  promptAppDetails,
+  selectApp,
   promptSshDetails,
   ensureSshDetails,
   ensureLocalRepositoryState,
+  loadServers,
+  loadProjectConfig,
   main
 }

@@ -4,6 +4,7 @@ const mockReadFile = vi.fn()
 const mockReaddir = vi.fn()
 const mockAccess = vi.fn()
 const mockWriteFile = vi.fn()
+const mockMkdir = vi.fn()
 const mockExecCommand = vi.fn()
 const mockConnect = vi.fn()
 const mockDispose = vi.fn()
@@ -14,12 +15,14 @@ vi.mock('node:fs/promises', () => ({
     readFile: mockReadFile,
     readdir: mockReaddir,
     access: mockAccess,
-    writeFile: mockWriteFile
+    writeFile: mockWriteFile,
+    mkdir: mockMkdir
   },
   readFile: mockReadFile,
   readdir: mockReaddir,
   access: mockAccess,
-  writeFile: mockWriteFile
+  writeFile: mockWriteFile,
+  mkdir: mockMkdir
 }))
 
 const spawnQueue = []
@@ -90,11 +93,18 @@ vi.mock('node:child_process', () => ({
   }
 }))
 
-vi.mock('inquirer', () => ({
-  default: {
+vi.mock('inquirer', () => {
+  class Separator {}
+
+  return {
+    default: {
+      prompt: mockPrompt,
+      Separator
+    },
+    Separator,
     prompt: mockPrompt
   }
-}))
+})
 
 vi.mock('node-ssh', () => ({
   NodeSSH: vi.fn(() => ({
@@ -122,6 +132,7 @@ describe('zephyr deployment helpers', () => {
     mockReaddir.mockReset()
     mockAccess.mockReset()
     mockWriteFile.mockReset()
+  mockMkdir.mockReset()
     mockExecCommand.mockReset()
     mockConnect.mockReset()
     mockDispose.mockReset()
@@ -193,6 +204,52 @@ describe('zephyr deployment helpers', () => {
     expect(result).toEqual({
       sshDir: path.default.join('/home/local', '.ssh'),
       keys: ['id_rsa', 'deploy_key']
+    })
+  })
+
+  describe('configuration management', () => {
+    it('registers a new server when none exist', async () => {
+      mockPrompt.mockResolvedValueOnce({ serverName: 'production', serverIp: '203.0.113.10' })
+
+      const { selectServer } = await import('../src/index.mjs')
+
+      const servers = []
+      const server = await selectServer(servers)
+
+      expect(server).toEqual({ serverName: 'production', serverIp: '203.0.113.10' })
+      expect(servers).toHaveLength(1)
+      expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining('.config/zephyr'), { recursive: true })
+      const [writePath, payload] = mockWriteFile.mock.calls.at(-1)
+      expect(writePath).toContain('servers.json')
+      expect(payload).toContain('production')
+    })
+
+    it('creates a new application configuration when none exist for a server', async () => {
+      queueSpawnResponse({ stdout: 'main\n' })
+      mockPrompt
+        .mockResolvedValueOnce({ projectPath: '~/webapps/demo', branchSelection: 'main' })
+        .mockResolvedValueOnce({ sshUser: 'forge', sshKeySelection: '/home/local/.ssh/id_rsa' })
+      mockReaddir.mockResolvedValue([])
+
+      const { selectApp } = await import('../src/index.mjs')
+
+      const projectConfig = { apps: [] }
+      const server = { serverName: 'production', serverIp: '203.0.113.10' }
+
+      const app = await selectApp(projectConfig, server, process.cwd())
+
+      expect(app).toMatchObject({
+        serverName: 'production',
+        projectPath: '~/webapps/demo',
+        branch: 'main',
+        sshUser: 'forge',
+        sshKey: '/home/local/.ssh/id_rsa'
+      })
+      expect(projectConfig.apps).toHaveLength(1)
+      expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining('.zephyr'), { recursive: true })
+      const [writePath, payload] = mockWriteFile.mock.calls.at(-1)
+      expect(writePath).toContain('.zephyr/config.json')
+      expect(payload).toContain('~/webapps/demo')
     })
   })
 
