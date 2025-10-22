@@ -96,6 +96,90 @@ async function getGitStatus(rootDir) {
   return output.trim()
 }
 
+async function getUpstreamRef(rootDir) {
+  try {
+    const output = await runCommandCapture('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], {
+      cwd: rootDir
+    })
+
+    const ref = output.trim()
+    return ref.length > 0 ? ref : null
+  } catch {
+    return null
+  }
+}
+
+async function ensureCommittedChangesPushed(targetBranch, rootDir) {
+  const upstreamRef = await getUpstreamRef(rootDir)
+
+  if (!upstreamRef) {
+    logWarning(`Branch ${targetBranch} does not track a remote upstream; skipping automatic push of committed changes.`)
+    return { pushed: false, upstreamRef: null }
+  }
+
+  const [remoteName, ...upstreamParts] = upstreamRef.split('/')
+  const upstreamBranch = upstreamParts.join('/')
+
+  if (!remoteName || !upstreamBranch) {
+    logWarning(`Unable to determine remote destination for ${targetBranch}. Skipping automatic push.`)
+    return { pushed: false, upstreamRef }
+  }
+
+  try {
+    await runCommand('git', ['fetch', remoteName], { cwd: rootDir, silent: true })
+  } catch (error) {
+    logWarning(`Unable to fetch from ${remoteName} before push: ${error.message}`)
+  }
+
+  let remoteExists = true
+
+  try {
+    await runCommand('git', ['show-ref', '--verify', '--quiet', `refs/remotes/${upstreamRef}`], {
+      cwd: rootDir,
+      silent: true
+    })
+  } catch {
+    remoteExists = false
+  }
+
+  let aheadCount = 0
+  let behindCount = 0
+
+  if (remoteExists) {
+    const aheadOutput = await runCommandCapture('git', ['rev-list', '--count', `${upstreamRef}..HEAD`], {
+      cwd: rootDir
+    })
+
+    aheadCount = parseInt(aheadOutput.trim() || '0', 10)
+
+    const behindOutput = await runCommandCapture('git', ['rev-list', '--count', `HEAD..${upstreamRef}`], {
+      cwd: rootDir
+    })
+
+    behindCount = parseInt(behindOutput.trim() || '0', 10)
+  } else {
+    aheadCount = 1
+  }
+
+  if (Number.isFinite(behindCount) && behindCount > 0) {
+    throw new Error(
+      `Local branch ${targetBranch} is behind ${upstreamRef} by ${behindCount} commit${behindCount === 1 ? '' : 's'}. Pull or rebase before deployment.`
+    )
+  }
+
+  if (!Number.isFinite(aheadCount) || aheadCount <= 0) {
+    return { pushed: false, upstreamRef }
+  }
+
+  const commitLabel = aheadCount === 1 ? 'commit' : 'commits'
+  logProcessing(`Found ${aheadCount} ${commitLabel} not yet pushed to ${upstreamRef}. Pushing before deployment...`)
+
+  await runCommand('git', ['push', remoteName, `${targetBranch}:${upstreamBranch}`], { cwd: rootDir })
+  logSuccess(`Pushed committed changes to ${upstreamRef}.`)
+
+  return { pushed: true, upstreamRef }
+}
+
 async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd()) {
   if (!targetBranch) {
     throw new Error('Deployment branch is not defined in the release configuration.')
@@ -125,6 +209,7 @@ async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd())
   const statusAfterCheckout = currentBranch === targetBranch ? initialStatus : await getGitStatus(rootDir)
 
   if (statusAfterCheckout.length === 0) {
+    await ensureCommittedChangesPushed(targetBranch, rootDir)
     logProcessing('Local repository is clean. Proceeding with deployment.')
     return
   }
@@ -154,6 +239,7 @@ async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd())
     throw new Error('Local repository still has uncommitted changes after commit. Aborting deployment.')
   }
 
+  await ensureCommittedChangesPushed(targetBranch, rootDir)
   logProcessing('Local repository is clean after committing pending changes.')
 }
 
