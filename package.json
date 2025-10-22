@@ -1,14 +1,42 @@
 {
   "name": "@wyxos/zephyr",
   "version": "0.1.4",
+  "description": "A streamlined deployment tool for web applications with intelligent Laravel project detection",
   "type": "module",
+  "main": "./src/index.mjs",
+  "bin": {
+    "zephyr": "bin/zephyr.mjs"
+  },
   "scripts": {
     "test": "vitest",
     "release": "node publish.mjs"
   },
-  "bin": {
-    "zephyr": "bin/zephyr.mjs"
+  "keywords": [
+    "deployment",
+    "laravel",
+    "ssh",
+    "automation",
+    "devops",
+    "git"
+  ],
+  "author": "wyxos",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wyxos/zephyr.git"
   },
+  "bugs": {
+    "url": "https://github.com/wyxos/zephyr/issues"
+  },
+  "homepage": "https://github.com/wyxos/zephyr#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md"
+  ],
   "dependencies": {
     "chalk": "5.3.0",
     "inquirer": "^9.2.12",
