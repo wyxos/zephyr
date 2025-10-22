@@ -184,12 +184,14 @@ describe('zephyr deployment helpers', () => {
       return 'invalid'
     })
 
+    // Import path module to ensure cross-platform path handling
+    const path = await import('node:path')
     const { listSshKeys } = await import('../src/index.mjs')
 
     const result = await listSshKeys()
 
     expect(result).toEqual({
-      sshDir: '/home/local/.ssh',
+      sshDir: path.default.join('/home/local', '.ssh'),
       keys: ['id_rsa', 'deploy_key']
     })
   })
