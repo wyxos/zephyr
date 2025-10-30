@@ -10,6 +10,8 @@ const PROJECT_CONFIG_DIR = '.zephyr'
 const PROJECT_CONFIG_FILE = 'config.json'
 const GLOBAL_CONFIG_DIR = path.join(os.homedir(), '.config', 'zephyr')
 const SERVERS_FILE = path.join(GLOBAL_CONFIG_DIR, 'servers.json')
+const RELEASE_SCRIPT_NAME = 'release'
+const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@release'
 
 const logProcessing = (message = '') => console.log(chalk.yellow(message))
 const logSuccess = (message = '') => console.log(chalk.green(message))
@@ -271,6 +273,60 @@ async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd())
 
   await ensureCommittedChangesPushed(targetBranch, rootDir)
   logProcessing('Local repository is clean after committing pending changes.')
+}
+
+async function ensureProjectReleaseScript(rootDir) {
+  const packageJsonPath = path.join(rootDir, 'package.json')
+
+  let raw
+  try {
+    raw = await fs.readFile(packageJsonPath, 'utf8')
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return false
+    }
+
+    throw error
+  }
+
+  let packageJson
+  try {
+    packageJson = JSON.parse(raw)
+  } catch (error) {
+    logWarning('Unable to parse package.json; skipping release script injection.')
+    return false
+  }
+
+  const currentCommand = packageJson?.scripts?.[RELEASE_SCRIPT_NAME]
+
+  if (currentCommand && currentCommand.includes('@wyxos/zephyr')) {
+    return false
+  }
+
+  const { installReleaseScript } = await runPrompt([
+    {
+      type: 'confirm',
+      name: 'installReleaseScript',
+      message: 'Add "release" script to package.json that runs "npx @wyxos/zephyr@release"?',
+      default: true
+    }
+  ])
+
+  if (!installReleaseScript) {
+    return false
+  }
+
+  if (!packageJson.scripts || typeof packageJson.scripts !== 'object') {
+    packageJson.scripts = {}
+  }
+
+  packageJson.scripts[RELEASE_SCRIPT_NAME] = RELEASE_SCRIPT_COMMAND
+
+  const updatedPayload = `${JSON.stringify(packageJson, null, 2)}\n`
+  await fs.writeFile(packageJsonPath, updatedPayload)
+  logSuccess('Added release script to package.json.')
+
+  return true
 }
 
 async function ensureGitignoreEntry(rootDir) {
@@ -964,6 +1020,7 @@ async function main() {
   const rootDir = process.cwd()
 
   await ensureGitignoreEntry(rootDir)
+  await ensureProjectReleaseScript(rootDir)
 
   const servers = await loadServers()
   const server = await selectServer(servers)
@@ -994,6 +1051,7 @@ async function main() {
 
 export {
   ensureGitignoreEntry,
+  ensureProjectReleaseScript,
   listSshKeys,
   resolveRemotePath,
   isPrivateKeyFile,
