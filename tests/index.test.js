@@ -5,6 +5,7 @@ const mockReaddir = vi.fn()
 const mockAccess = vi.fn()
 const mockWriteFile = vi.fn()
 const mockMkdir = vi.fn()
+const mockUnlink = vi.fn()
 const mockExecCommand = vi.fn()
 const mockConnect = vi.fn()
 const mockDispose = vi.fn()
@@ -16,13 +17,15 @@ vi.mock('node:fs/promises', () => ({
     readdir: mockReaddir,
     access: mockAccess,
     writeFile: mockWriteFile,
-    mkdir: mockMkdir
+    mkdir: mockMkdir,
+    unlink: mockUnlink
   },
   readFile: mockReadFile,
   readdir: mockReaddir,
   access: mockAccess,
   writeFile: mockWriteFile,
-  mkdir: mockMkdir
+  mkdir: mockMkdir,
+  unlink: mockUnlink
 }))
 
 const spawnQueue = []
@@ -132,6 +135,7 @@ describe('zephyr deployment helpers', () => {
     mockReaddir.mockReset()
     mockAccess.mockReset()
     mockWriteFile.mockReset()
+  mockUnlink.mockReset()
   mockMkdir.mockReset()
     mockExecCommand.mockReset()
     mockConnect.mockReset()
