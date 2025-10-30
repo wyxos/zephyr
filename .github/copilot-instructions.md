@@ -11,6 +11,8 @@
 - `main()` now sequences: ensure `.zephyr/` ignored, load servers, pick/create one, load project config, pick/create app, ensure SSH details, run deployment.
 - When adding config logic, reuse helpers: `selectServer`, `promptServerDetails`, `selectApp`, `promptAppDetails`, `ensureProjectConfig`.
 - `ensureProjectReleaseScript()` offers to inject a `release` npm script (`npx @wyxos/zephyr@release`) into the host project's `package.json`; prefer updating that helper if the script text changes.
+- Deployments acquire a lock at `.zephyr/deploy.lock`; always release it via the existing helpers and keep error paths wrapped in `try/finally`.
+- Pending task plans live in `.zephyr/pending-tasks.json` and are mirrored on the remote host; leave snapshots in place on failures so users can resume safely.
 
 ## Deployment Flow Highlights
 - Always call `ensureLocalRepositoryState(branch)` before SSH. It:

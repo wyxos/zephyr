@@ -10,6 +10,8 @@ const PROJECT_CONFIG_DIR = '.zephyr'
 const PROJECT_CONFIG_FILE = 'config.json'
 const GLOBAL_CONFIG_DIR = path.join(os.homedir(), '.config', 'zephyr')
 const SERVERS_FILE = path.join(GLOBAL_CONFIG_DIR, 'servers.json')
+const PROJECT_LOCK_FILE = 'deploy.lock'
+const PENDING_TASKS_FILE = 'pending-tasks.json'
 const RELEASE_SCRIPT_NAME = 'release'
 const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@release'
 
@@ -329,6 +331,97 @@ async function ensureProjectReleaseScript(rootDir) {
   return true
 }
 
+function getProjectConfigDir(rootDir) {
+  return path.join(rootDir, PROJECT_CONFIG_DIR)
+}
+
+function getPendingTasksPath(rootDir) {
+  return path.join(getProjectConfigDir(rootDir), PENDING_TASKS_FILE)
+}
+
+function getLockFilePath(rootDir) {
+  return path.join(getProjectConfigDir(rootDir), PROJECT_LOCK_FILE)
+}
+
+async function acquireProjectLock(rootDir) {
+  const lockDir = getProjectConfigDir(rootDir)
+  await ensureDirectory(lockDir)
+  const lockPath = getLockFilePath(rootDir)
+
+  try {
+    const existing = await fs.readFile(lockPath, 'utf8')
+    let details = {}
+    try {
+      details = JSON.parse(existing)
+    } catch (error) {
+      details = { raw: existing }
+    }
+
+    const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
+    const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
+    throw new Error(
+      `Another deployment is currently in progress (started by ${startedBy}${startedAt}). Remove ${lockPath} if you are sure it is stale.`
+    )
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error
+    }
+  }
+
+  const payload = {
+    user: os.userInfo().username,
+    pid: process.pid,
+    hostname: os.hostname(),
+    startedAt: new Date().toISOString()
+  }
+
+  await fs.writeFile(lockPath, `${JSON.stringify(payload, null, 2)}\n`)
+  return lockPath
+}
+
+async function releaseProjectLock(rootDir) {
+  const lockPath = getLockFilePath(rootDir)
+  try {
+    await fs.unlink(lockPath)
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error
+    }
+  }
+}
+
+async function loadPendingTasksSnapshot(rootDir) {
+  const snapshotPath = getPendingTasksPath(rootDir)
+
+  try {
+    const raw = await fs.readFile(snapshotPath, 'utf8')
+    return JSON.parse(raw)
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null
+    }
+
+    throw error
+  }
+}
+
+async function savePendingTasksSnapshot(rootDir, snapshot) {
+  const configDir = getProjectConfigDir(rootDir)
+  await ensureDirectory(configDir)
+  const payload = `${JSON.stringify(snapshot, null, 2)}\n`
+  await fs.writeFile(getPendingTasksPath(rootDir), payload)
+}
+
+async function clearPendingTasksSnapshot(rootDir) {
+  try {
+    await fs.unlink(getPendingTasksPath(rootDir))
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error
+    }
+  }
+}
+
 async function ensureGitignoreEntry(rootDir) {
   const gitignorePath = path.join(rootDir, '.gitignore')
   const targetEntry = `${PROJECT_CONFIG_DIR}/`
@@ -629,8 +722,10 @@ function resolveRemotePath(projectPath, remoteHome) {
   return `${sanitizedHome}/${projectPath}`
 }
 
-async function runRemoteTasks(config) {
-  await ensureLocalRepositoryState(config.branch, process.cwd())
+async function runRemoteTasks(config, options = {}) {
+  const { snapshot = null, rootDir = process.cwd() } = options
+
+  await ensureLocalRepositoryState(config.branch, rootDir)
 
   const ssh = createSshClient()
   const sshUser = config.sshUser || os.userInfo().username
@@ -690,7 +785,10 @@ async function runRemoteTasks(config) {
 
     let changedFiles = []
 
-    if (isLaravel) {
+    if (snapshot && snapshot.changedFiles) {
+      changedFiles = snapshot.changedFiles
+      logProcessing('Resuming deployment with saved task snapshot.')
+    } else if (isLaravel) {
       await executeRemote(`Fetch latest changes for ${config.branch}`, `git fetch origin ${config.branch}`)
 
       const diffResult = await executeRemote(
@@ -818,6 +916,31 @@ async function runRemoteTasks(config) {
       })
     }
 
+    const usefulSteps = steps.length > 1
+
+    let pendingSnapshot
+
+    if (usefulSteps) {
+      pendingSnapshot = snapshot ?? {
+        serverName: config.serverName,
+        branch: config.branch,
+        projectPath: config.projectPath,
+        sshUser: config.sshUser,
+        createdAt: new Date().toISOString(),
+        changedFiles,
+        taskLabels: steps.map((step) => step.label)
+      }
+
+      await savePendingTasksSnapshot(rootDir, pendingSnapshot)
+
+      const payload = Buffer.from(JSON.stringify(pendingSnapshot)).toString('base64')
+      await executeRemote(
+        'Record pending deployment tasks',
+        `mkdir -p .zephyr && echo '${payload}' | base64 --decode > .zephyr/${PENDING_TASKS_FILE}`,
+        { printStdout: false }
+      )
+    }
+
     if (steps.length === 1) {
       logProcessing('No additional maintenance tasks scheduled beyond git pull.')
     } else {
@@ -829,8 +952,23 @@ async function runRemoteTasks(config) {
       logProcessing(`Additional tasks scheduled: ${extraTasks}`)
     }
 
-    for (const step of steps) {
-      await executeRemote(step.label, step.command)
+    let completed = false
+
+    try {
+      for (const step of steps) {
+        await executeRemote(step.label, step.command)
+      }
+
+      completed = true
+    } finally {
+      if (usefulSteps && completed) {
+        await executeRemote(
+          'Clear pending deployment snapshot',
+          `rm -f .zephyr/${PENDING_TASKS_FILE}`,
+          { printStdout: false, allowFailure: true }
+        )
+        await clearPendingTasksSnapshot(rootDir)
+      }
     }
 
     logSuccess('\nDeployment commands completed successfully.')
@@ -1046,7 +1184,53 @@ async function main() {
   logProcessing('\nSelected deployment target:')
   console.log(JSON.stringify(deploymentConfig, null, 2))
 
-  await runRemoteTasks(deploymentConfig)
+  const existingSnapshot = await loadPendingTasksSnapshot(rootDir)
+  let snapshotToUse = null
+
+  if (existingSnapshot) {
+    const matchesSelection =
+      existingSnapshot.serverName === deploymentConfig.serverName &&
+      existingSnapshot.branch === deploymentConfig.branch
+
+    const messageLines = [
+      'Pending deployment tasks were detected from a previous run.',
+      `Server: ${existingSnapshot.serverName}`,
+      `Branch: ${existingSnapshot.branch}`
+    ]
+
+    if (existingSnapshot.taskLabels && existingSnapshot.taskLabels.length > 0) {
+      messageLines.push(`Tasks: ${existingSnapshot.taskLabels.join(', ')}`)
+    }
+
+    const { resumePendingTasks } = await runPrompt([
+      {
+        type: 'confirm',
+        name: 'resumePendingTasks',
+        message: `${messageLines.join(' | ')}. Resume using this plan?`,
+        default: matchesSelection
+      }
+    ])
+
+    if (resumePendingTasks) {
+      snapshotToUse = existingSnapshot
+      logProcessing('Resuming deployment using saved task snapshot...')
+    } else {
+      await clearPendingTasksSnapshot(rootDir)
+      logWarning('Discarded pending deployment snapshot.')
+    }
+  }
+
+  let lockAcquired = false
+
+  try {
+    await acquireProjectLock(rootDir)
+    lockAcquired = true
+    await runRemoteTasks(deploymentConfig, { rootDir, snapshot: snapshotToUse })
+  } finally {
+    if (lockAcquired) {
+      await releaseProjectLock(rootDir)
+    }
+  }
 }
 
 export {
