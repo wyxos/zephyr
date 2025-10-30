@@ -267,6 +267,9 @@ describe('zephyr deployment helpers', () => {
       })
     )
     mockPrompt.mockResolvedValueOnce({ installReleaseScript: true })
+    queueSpawnResponse({}) // git rev-parse
+    queueSpawnResponse({}) // git add package.json
+    queueSpawnResponse({}) // git commit
 
     const { ensureProjectReleaseScript } = await import('../src/index.mjs')
 
@@ -296,7 +299,7 @@ describe('zephyr deployment helpers', () => {
         return { ...response, stdout: 'yes' }
       }
 
-      if (command.startsWith('git diff')) {
+      if (command.includes('git diff')) {
         return {
           ...response,
           stdout:

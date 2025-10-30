@@ -328,6 +328,29 @@ async function ensureProjectReleaseScript(rootDir) {
   await fs.writeFile(packageJsonPath, updatedPayload)
   logSuccess('Added release script to package.json.')
 
+  let isGitRepo = false
+
+  try {
+    await runCommand('git', ['rev-parse', '--is-inside-work-tree'], { cwd: rootDir, silent: true })
+    isGitRepo = true
+  } catch (error) {
+    logWarning('Not a git repository; skipping commit for release script addition.')
+  }
+
+  if (isGitRepo) {
+    try {
+      await runCommand('git', ['add', 'package.json'], { cwd: rootDir, silent: true })
+      await runCommand('git', ['commit', '-m', 'chore: add zephyr release script'], { cwd: rootDir, silent: true })
+      logSuccess('Committed package.json release script addition.')
+    } catch (error) {
+      if (error.exitCode === 1) {
+        logWarning('Git commit skipped: nothing to commit or pre-commit hook prevented commit.')
+      } else {
+        throw error
+      }
+    }
+  }
+
   return true
 }
 
@@ -747,10 +770,19 @@ async function runRemoteTasks(config, options = {}) {
 
     logProcessing(`Connection established. Running deployment commands in ${remoteCwd}...`)
 
+    const profileBootstrap = [
+      'if [ -f "$HOME/.profile" ]; then . "$HOME/.profile"; fi',
+      'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"; fi',
+      'if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi',
+      'if [ -f "$HOME/.zprofile" ]; then . "$HOME/.zprofile"; fi',
+      'if [ -f "$HOME/.zshrc" ]; then . "$HOME/.zshrc"; fi'
+    ].join('; ')
+
     const executeRemote = async (label, command, options = {}) => {
-      const { cwd = remoteCwd, allowFailure = false, printStdout = true } = options
+      const { cwd = remoteCwd, allowFailure = false, printStdout = true, bootstrapEnv = true } = options
       logProcessing(`\n→ ${label}`)
-      const result = await ssh.execCommand(command, { cwd })
+      const wrappedCommand = bootstrapEnv ? `${profileBootstrap}; ${command}` : command
+      const result = await ssh.execCommand(wrappedCommand, { cwd })
 
       if (printStdout && result.stdout && result.stdout.trim()) {
         console.log(result.stdout.trim())
@@ -765,6 +797,13 @@ async function runRemoteTasks(config, options = {}) {
       }
 
       if (result.code !== 0 && !allowFailure) {
+        const stderr = result.stderr?.trim() ?? ''
+        if (/command not found/.test(stderr) || /is not recognized/.test(stderr)) {
+          throw new Error(
+            `Command failed: ${command}. Ensure the remote environment loads required tools for non-interactive shells (e.g. export PATH in profile scripts).`
+          )
+        }
+
         throw new Error(`Command failed: ${command}`)
       }
 
