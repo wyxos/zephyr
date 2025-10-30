@@ -253,6 +253,27 @@ describe('zephyr deployment helpers', () => {
     })
   })
 
+  it('adds release script to package.json when user agrees', async () => {
+    mockReadFile.mockResolvedValueOnce(
+      JSON.stringify({
+        name: 'demo-app',
+        scripts: {
+          test: 'vitest'
+        }
+      })
+    )
+    mockPrompt.mockResolvedValueOnce({ installReleaseScript: true })
+
+    const { ensureProjectReleaseScript } = await import('../src/index.mjs')
+
+    await ensureProjectReleaseScript('/workspace/project')
+
+    expect(mockWriteFile).toHaveBeenCalledWith(
+      expect.stringContaining('/workspace/project/package.json'),
+      expect.stringContaining('"release": "npx @wyxos/zephyr@release"')
+    )
+  })
+
   it('schedules Laravel tasks based on diff', async () => {
     queueSpawnResponse({ stdout: 'main\n' })
     queueSpawnResponse({ stdout: '' })
