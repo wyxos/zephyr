@@ -778,11 +778,22 @@ async function runRemoteTasks(config, options = {}) {
       'if [ -f "$HOME/.zshrc" ]; then . "$HOME/.zshrc"; fi'
     ].join('; ')
 
+    const escapeForDoubleQuotes = (value) => value.replace(/(["\\$`])/g, '\\$1')
+
     const executeRemote = async (label, command, options = {}) => {
       const { cwd = remoteCwd, allowFailure = false, printStdout = true, bootstrapEnv = true } = options
       logProcessing(`\n→ ${label}`)
-      const wrappedCommand = bootstrapEnv ? `${profileBootstrap}; ${command}` : command
-      const result = await ssh.execCommand(wrappedCommand, { cwd })
+
+      let wrappedCommand = command
+      let execOptions = { cwd }
+
+      if (bootstrapEnv) {
+        const cwdForShell = escapeForDoubleQuotes(cwd)
+        wrappedCommand = `${profileBootstrap}; cd "${cwdForShell}" && ${command}`
+        execOptions = {}
+      }
+
+      const result = await ssh.execCommand(wrappedCommand, execOptions)
 
       if (printStdout && result.stdout && result.stdout.trim()) {
         console.log(result.stdout.trim())
@@ -798,7 +809,7 @@ async function runRemoteTasks(config, options = {}) {
 
       if (result.code !== 0 && !allowFailure) {
         const stderr = result.stderr?.trim() ?? ''
-        if (/command not found/.test(stderr) || /is not recognized/.test(stderr)) {
+  if (/command not found/.test(stderr) || /is not recognized/.test(stderr)) {
           throw new Error(
             `Command failed: ${command}. Ensure the remote environment loads required tools for non-interactive shells (e.g. export PATH in profile scripts).`
           )
