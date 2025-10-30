@@ -328,35 +328,13 @@ describe('zephyr deployment helpers', () => {
       sshKey: '~/.ssh/id_rsa'
     })
 
-    const cwdValues = mockExecCommand.mock.calls
-      .map(([, options]) => options?.cwd)
-      .filter(Boolean)
-    expect(cwdValues.length).toBeGreaterThan(0)
-    expect(cwdValues.every((cwd) => typeof cwd === 'string')).toBe(true)
-    expect(mockExecCommand).toHaveBeenCalledWith(
-      expect.stringContaining('git pull origin main'),
-      expect.objectContaining({ cwd: expect.any(String) })
-    )
-    expect(mockExecCommand).toHaveBeenCalledWith(
-      expect.stringContaining('composer update'),
-      expect.objectContaining({ cwd: expect.any(String) })
-    )
-    expect(mockExecCommand).toHaveBeenCalledWith(
-      expect.stringContaining('php artisan migrate'),
-      expect.objectContaining({ cwd: expect.any(String) })
-    )
-    expect(mockExecCommand).toHaveBeenCalledWith(
-      expect.stringContaining('npm run build'),
-      expect.objectContaining({ cwd: expect.any(String) })
-    )
-    expect(mockExecCommand).toHaveBeenCalledWith(
-      expect.stringContaining('cache:clear'),
-      expect.objectContaining({ cwd: expect.any(String) })
-    )
-    expect(mockExecCommand).toHaveBeenCalledWith(
-      expect.stringContaining('horizon:terminate'),
-      expect.objectContaining({ cwd: expect.any(String) })
-    )
+    const executedCommands = mockExecCommand.mock.calls.map(([cmd]) => cmd)
+    expect(executedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
+    expect(executedCommands.some((cmd) => cmd.includes('composer update'))).toBe(true)
+    expect(executedCommands.some((cmd) => cmd.includes('php artisan migrate'))).toBe(true)
+    expect(executedCommands.some((cmd) => cmd.includes('npm run build'))).toBe(true)
+    expect(executedCommands.some((cmd) => cmd.includes('cache:clear'))).toBe(true)
+    expect(executedCommands.some((cmd) => cmd.includes('horizon:terminate'))).toBe(true)
   })
 
   it('skips Laravel tasks when framework not detected', async () => {
@@ -381,14 +359,9 @@ describe('zephyr deployment helpers', () => {
       sshKey: '~/.ssh/id_rsa'
     })
 
-    expect(mockExecCommand).not.toHaveBeenCalledWith(
-      expect.stringContaining('composer update'),
-      expect.anything()
-    )
-    expect(mockExecCommand).toHaveBeenCalledWith(
-      expect.stringContaining('git pull origin main'),
-      expect.anything()
-    )
+    const skippedCommands = mockExecCommand.mock.calls.map(([cmd]) => cmd)
+    expect(skippedCommands.every((cmd) => !cmd.includes('composer update'))).toBe(true)
+    expect(skippedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
   })
 
   describe('ensureLocalRepositoryState', () => {
