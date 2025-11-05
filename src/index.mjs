@@ -853,6 +853,11 @@ async function runRemoteTasks(config, options = {}) {
         throw new Error(`Command failed: ${command}`)
       }
 
+      // Show success confirmation with command
+      if (result.code === 0) {
+        logSuccess(`✓ ${command}`)
+      }
+
       return result
     }
 
