@@ -4,6 +4,7 @@ const mockReadFile = vi.fn()
 const mockReaddir = vi.fn()
 const mockAccess = vi.fn()
 const mockWriteFile = vi.fn()
+const mockAppendFile = vi.fn()
 const mockMkdir = vi.fn()
 const mockUnlink = vi.fn()
 const mockExecCommand = vi.fn()
@@ -17,6 +18,7 @@ vi.mock('node:fs/promises', () => ({
     readdir: mockReaddir,
     access: mockAccess,
     writeFile: mockWriteFile,
+    appendFile: mockAppendFile,
     mkdir: mockMkdir,
     unlink: mockUnlink
   },
@@ -24,6 +26,7 @@ vi.mock('node:fs/promises', () => ({
   readdir: mockReaddir,
   access: mockAccess,
   writeFile: mockWriteFile,
+  appendFile: mockAppendFile,
   mkdir: mockMkdir,
   unlink: mockUnlink
 }))
@@ -135,6 +138,7 @@ describe('zephyr deployment helpers', () => {
     mockReaddir.mockReset()
     mockAccess.mockReset()
     mockWriteFile.mockReset()
+    mockAppendFile.mockReset()
   mockUnlink.mockReset()
   mockMkdir.mockReset()
     mockExecCommand.mockReset()
