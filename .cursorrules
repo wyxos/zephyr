@@ -1,0 +1,217 @@
+# Zephyr - Cursor Instructions
+
+## Project Overview
+
+Zephyr is a command-line deployment tool for web applications with intelligent Laravel project detection. It's a Node.js ESM project that handles Git operations, SSH-based deployments, and smart task execution based on file changes.
+
+## Architecture
+
+- **Entry Point**: `bin/zephyr.mjs` delegates to `src/index.mjs` for all logic
+- **Module System**: Node.js ESM (`"type": "module"`) - use `import`/`export`, never CommonJS
+- **Main Function**: `main()` orchestrates the deployment flow
+
+## Code Style & Conventions
+
+### Imports
+- Use ESM `import` statements exclusively
+- Prefer Node.js built-in modules with `node:` prefix (e.g., `import fs from 'node:fs/promises'`)
+- Group imports: built-ins first, then third-party, then local
+
+### Logging
+- **Always use logging helpers** instead of raw `console.log`:
+  - `logProcessing(message)` - Yellow, for progress updates
+  - `logSuccess(message)` - Green, for success messages
+  - `logWarning(message)` - Yellow, for warnings
+  - `logError(message)` - Red, for errors
+- **Server task output**: All stdout/stderr from remote commands should be logged to `.zephyr/{timestamp}.log` using `writeToLogFile()`
+- **Terminal output**: Only show errors (non-zero exit codes) in terminal; keep task labels visible for progress
+- **Log file format**: Timestamped files in `.zephyr/` directory (format: `YYYY-MM-DDTHH-MM-SS.log`)
+
+### Async/Await
+- Always use `async/await` for asynchronous operations
+- Never use `.then()` chains
+- Always wrap in try/catch or use `finally` blocks for cleanup
+
+### Error Handling
+- Use descriptive error messages
+- Attach `exitCode` to errors from command execution
+- Always release locks and close resources in `finally` blocks
+- When deployment fails, preserve log files and task snapshots for debugging
+
+### Functions
+- Prefer `async function` declarations over arrow functions for top-level functions
+- Use arrow functions for callbacks and short utilities
+- Keep functions focused and single-purpose
+
+### Command Execution
+- Use `runCommand()` for local commands that should inherit stdio
+- Use `runCommandCapture()` for local commands that need output captured
+- Use `executeRemote()` for all remote SSH commands (provides logging and error handling)
+- Never use `exec()` directly - always use the provided helpers
+
+### Prompts
+- Always route prompts through `runPrompt()` helper (supports test injection)
+- Use `inquirer` for all interactive prompts
+- Provide sensible defaults when possible
+
+## Configuration Model
+
+### Global Configuration
+- **Location**: `~/.config/zephyr/servers.json`
+- **Structure**: Array of `{ serverName, serverIp }`
+- **Helpers**: `loadServers()`, `saveServers()`, `selectServer()`, `promptServerDetails()`
+
+### Project Configuration
+- **Location**: `.zephyr/config.json`
+- **Structure**: `{ apps: [{ serverName, projectPath, branch, sshUser, sshKey }] }`
+- **Helpers**: `loadProjectConfig()`, `saveProjectConfig()`, `selectApp()`, `promptAppDetails()`
+- **Ensure directory**: Always call `ensureDirectory()` before writing config files
+
+### Lock Files
+- **Location**: `.zephyr/deploy.lock`
+- **Purpose**: Prevent concurrent deployments
+- **Always**: Acquire lock at start, release in `finally` block
+- **Helpers**: `acquireProjectLock()`, `releaseProjectLock()`
+
+### Task Snapshots
+- **Location**: `.zephyr/pending-tasks.json` (local and remote)
+- **Purpose**: Resume deployments after failures
+- **Helpers**: `loadPendingTasksSnapshot()`, `savePendingTasksSnapshot()`, `clearPendingTasksSnapshot()`
+- **Note**: Leave snapshots in place on failures so users can resume
+
+## Deployment Flow
+
+### Pre-Deployment
+1. `ensureGitignoreEntry()` - Add `.zephyr/` to `.gitignore`
+2. `ensureProjectReleaseScript()` - Offer to add `release` script to `package.json`
+3. `selectServer()` - Load or create server configuration
+4. `selectApp()` - Load or create app configuration
+5. `ensureSshDetails()` - Validate SSH credentials
+
+### Local Repository State
+- `ensureLocalRepositoryState(branch)` **must** be called before SSH operations
+- Handles:
+  - Branch verification and switching
+  - Fast-forward with `git pull --ff-only`
+  - Commits uncommitted changes (with prompt)
+  - Pushes committed changes to `origin/<branch>`
+  - Warns if ahead of upstream
+
+### Remote Execution
+- All remote commands go through `executeRemote(label, command, options)`
+- Options:
+  - `cwd` - Remote working directory (defaults to `remoteCwd`)
+  - `allowFailure` - Don't throw on non-zero exit (default: `false`)
+  - `printStdout` - Legacy option, now ignored (all output goes to log file)
+  - `bootstrapEnv` - Load shell profile files (default: `true`)
+- **Logging**: All stdout/stderr automatically logged to file; only errors shown in terminal
+
+### Laravel Detection
+- Detects Laravel projects by checking for `artisan` and `composer.json` with `laravel/framework`
+- Analyzes changed files from `git diff HEAD..origin/<branch>`
+- Conditional tasks:
+  - **Composer files changed**: `composer update --no-dev --no-interaction --prefer-dist`
+  - **Migrations changed**: `php artisan migrate --force`
+  - **package.json changed**: `npm install`
+  - **Frontend files changed**: `npm run build`
+  - **PHP files changed**: Clear caches, restart queues
+
+### Task Execution
+- Always runs: `git pull origin <branch>`
+- Additional tasks based on file changes
+- Tasks are logged to `.zephyr/{timestamp}.log`
+- Errors are shown in terminal with full context
+
+## Testing
+
+### Test Suite
+- Framework: Vitest (`npm test`)
+- Location: `tests/index.test.js`
+- Mocks: fs, child_process, inquirer, node-ssh
+- **Always**: Extend existing mocks rather than shelling out
+- **Update tests** when altering:
+  - Prompts and their structure
+  - Configuration file formats
+  - Deployment steps and their order
+  - Logging output format
+
+### Test Injection
+- Use `globalThis.__zephyrSSHFactory` to inject SSH client mocks
+- Use `globalThis.__zephyrPrompt` to inject prompt mocks
+- This allows tests to be deterministic
+
+## File Management
+
+### Log Files
+- **Location**: `.zephyr/{YYYY-MM-DDTHH-MM-SS}.log`
+- **Format**: Timestamped entries with `[label] STDOUT:` and `[label] STDERR:` prefixes
+- **Lifecycle**: Created at start of deployment, closed at end
+- **Helpers**: `getLogFilePath()`, `writeToLogFile()`, `closeLogFile()`
+- **User notification**: Show log file path on success and error
+
+### Directory Management
+- Always use `ensureDirectory()` before writing files
+- Use `getProjectConfigDir()` for project config directory
+- Use `path.join()` for cross-platform path construction
+
+## Common Patterns
+
+### SSH Client Creation
+```javascript
+const ssh = createSshClient() // Supports test injection
+await ssh.connect({ host, username, privateKey })
+// ... use ssh
+ssh.dispose() // Always in finally block
+```
+
+### Remote Command Execution
+```javascript
+await executeRemote('Task label', 'command to run', {
+  cwd: remoteCwd,
+  allowFailure: false,
+  bootstrapEnv: true
+})
+```
+
+### Error Handling
+```javascript
+try {
+  // operations
+} catch (error) {
+  // Log error context
+  throw new Error(`Descriptive message: ${error.message}`)
+} finally {
+  // Always cleanup: close files, release locks, dispose SSH
+}
+```
+
+### Configuration Loading
+```javascript
+try {
+  const data = await fs.readFile(path, 'utf8')
+  return JSON.parse(data)
+} catch (error) {
+  if (error.code === 'ENOENT') {
+    return defaultValue // or null
+  }
+  throw error
+}
+```
+
+## Release Workflow
+
+- Automated via `publish.mjs` (`npm run release`)
+- Checks: clean working tree, fast-forward, tests pass
+- Version bump: `npm version <type>`
+- Publish: `npm publish --access public` (for scoped packages)
+
+## Important Notes
+
+- **Never** commit changes to `.zephyr/` directory (should be in `.gitignore`)
+- **Always** use provided helpers for config/file operations
+- **Always** release locks and close resources in `finally` blocks
+- **Always** log remote command output to file, show errors in terminal
+- **Always** update tests when changing behavior
+- Keep comments minimal - code should be self-documenting
+- Prefer ASCII in files (no emojis unless explicitly requested)
+

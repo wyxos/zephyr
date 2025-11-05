@@ -20,6 +20,33 @@ const logSuccess = (message = '') => console.log(chalk.green(message))
 const logWarning = (message = '') => console.warn(chalk.yellow(message))
 const logError = (message = '') => console.error(chalk.red(message))
 
+let logFilePath = null
+
+async function getLogFilePath(rootDir) {
+  if (logFilePath) {
+    return logFilePath
+  }
+
+  const configDir = getProjectConfigDir(rootDir)
+  await ensureDirectory(configDir)
+
+  const now = new Date()
+  const dateStr = now.toISOString().replace(/:/g, '-').replace(/\..+/, '')
+  logFilePath = path.join(configDir, `${dateStr}.log`)
+
+  return logFilePath
+}
+
+async function writeToLogFile(rootDir, message) {
+  const logPath = await getLogFilePath(rootDir)
+  const timestamp = new Date().toISOString()
+  await fs.appendFile(logPath, `${timestamp} - ${message}\n`)
+}
+
+async function closeLogFile() {
+  logFilePath = null
+}
+
 const createSshClient = () => {
   if (typeof globalThis !== 'undefined' && globalThis.__zephyrSSHFactory) {
     return globalThis.__zephyrSSHFactory()
@@ -795,15 +822,23 @@ async function runRemoteTasks(config, options = {}) {
 
       const result = await ssh.execCommand(wrappedCommand, execOptions)
 
-      if (printStdout && result.stdout && result.stdout.trim()) {
-        console.log(result.stdout.trim())
+      // Log all output to file
+      if (result.stdout && result.stdout.trim()) {
+        await writeToLogFile(rootDir, `[${label}] STDOUT:\n${result.stdout.trim()}`)
       }
 
       if (result.stderr && result.stderr.trim()) {
-        if (result.code === 0) {
-          logWarning(result.stderr.trim())
-        } else {
-          logError(result.stderr.trim())
+        await writeToLogFile(rootDir, `[${label}] STDERR:\n${result.stderr.trim()}`)
+      }
+
+      // Only show errors in terminal
+      if (result.code !== 0) {
+        if (result.stdout && result.stdout.trim()) {
+          logError(`\n[${label}] Output:\n${result.stdout.trim()}`)
+        }
+        
+        if (result.stderr && result.stderr.trim()) {
+          logError(`\n[${label}] Error:\n${result.stderr.trim()}`)
         }
       }
 
@@ -1022,9 +1057,17 @@ async function runRemoteTasks(config, options = {}) {
     }
 
     logSuccess('\nDeployment commands completed successfully.')
+    
+    const logPath = await getLogFilePath(rootDir)
+    logSuccess(`\nAll task output has been logged to: ${logPath}`)
   } catch (error) {
+    const logPath = logFilePath || await getLogFilePath(rootDir).catch(() => null)
+    if (logPath) {
+      logError(`\nTask output has been logged to: ${logPath}`)
+    }
     throw new Error(`Deployment failed: ${error.message}`)
   } finally {
+    await closeLogFile()
     ssh.dispose()
   }
 }
