@@ -13,7 +13,7 @@ const SERVERS_FILE = path.join(GLOBAL_CONFIG_DIR, 'servers.json')
 const PROJECT_LOCK_FILE = 'deploy.lock'
 const PENDING_TASKS_FILE = 'pending-tasks.json'
 const RELEASE_SCRIPT_NAME = 'release'
-const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@release'
+const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@latest'
 
 const logProcessing = (message = '') => console.log(chalk.yellow(message))
 const logSuccess = (message = '') => console.log(chalk.green(message))
@@ -336,7 +336,7 @@ async function ensureProjectReleaseScript(rootDir) {
     {
       type: 'confirm',
       name: 'installReleaseScript',
-      message: 'Add "release" script to package.json that runs "npx @wyxos/zephyr@release"?',
+      message: 'Add "release" script to package.json that runs "npx @wyxos/zephyr@latest"?',
       default: true
     }
   ])
