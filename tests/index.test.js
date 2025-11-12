@@ -130,7 +130,19 @@ vi.mock('node:os', () => ({
 }))
 
 describe('zephyr deployment helpers', () => {
+  let originalConsoleLog
+  let originalConsoleWarn
+  let originalConsoleError
+
   beforeEach(() => {
+    // Suppress console output during tests
+    originalConsoleLog = console.log
+    originalConsoleWarn = console.warn
+    originalConsoleError = console.error
+    console.log = vi.fn()
+    console.warn = vi.fn()
+    console.error = vi.fn()
+
     vi.resetModules()
     spawnQueue.length = 0
     mockSpawn.mockClear()
@@ -154,9 +166,14 @@ describe('zephyr deployment helpers', () => {
   })
 
   afterEach(() => {
+    // Restore console output after tests
+    console.log = originalConsoleLog
+    console.warn = originalConsoleWarn
+    console.error = originalConsoleError
     delete globalThis.__zephyrSSHFactory
     delete globalThis.__zephyrPrompt
   })
+
 
   it('resolves remote paths correctly', async () => {
     const { resolveRemotePath } = await import('../src/index.mjs')
