@@ -130,6 +130,24 @@ async function getGitStatus(rootDir) {
   return output.trim()
 }
 
+function hasStagedChanges(statusOutput) {
+  if (!statusOutput || statusOutput.length === 0) {
+    return false
+  }
+
+  const lines = statusOutput.split('\n').filter((line) => line.trim().length > 0)
+
+  return lines.some((line) => {
+    const firstChar = line[0]
+    // In git status --porcelain format:
+    // - First char is space: unstaged changes (e.g., " M file")
+    // - First char is '?': untracked files (e.g., "?? file")
+    // - First char is letter (M, A, D, etc.): staged changes (e.g., "M  file")
+    // Only return true for staged changes, not unstaged or untracked
+    return firstChar && firstChar !== ' ' && firstChar !== '?'
+  })
+}
+
 async function getUpstreamRef(rootDir) {
   try {
     const output = await runCommandCapture('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], {
@@ -275,7 +293,13 @@ async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd())
     return
   }
 
-  logWarning(`Uncommitted changes detected on ${targetBranch}. A commit is required before deployment.`)
+  if (!hasStagedChanges(statusAfterCheckout)) {
+    await ensureCommittedChangesPushed(targetBranch, rootDir)
+    logProcessing('No staged changes detected. Unstaged or untracked files will not affect deployment. Proceeding with deployment.')
+    return
+  }
+
+  logWarning(`Staged changes detected on ${targetBranch}. A commit is required before deployment.`)
 
   const { commitMessage } = await runPrompt([
     {
@@ -288,8 +312,7 @@ async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd())
 
   const message = commitMessage.trim()
 
-  logProcessing('Committing local changes before deployment...')
-  await runCommand('git', ['add', '-A'], { cwd: rootDir })
+  logProcessing('Committing staged changes before deployment...')
   await runCommand('git', ['commit', '-m', message], { cwd: rootDir })
   await runCommand('git', ['push', 'origin', targetBranch], { cwd: rootDir })
   logSuccess(`Committed and pushed changes to origin/${targetBranch}.`)
