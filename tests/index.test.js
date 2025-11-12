@@ -298,7 +298,7 @@ describe('zephyr deployment helpers', () => {
 
     expect(mockWriteFile).toHaveBeenCalledWith(
       expect.stringMatching(/[\\/]workspace[\\/]project[\\/]package\.json/),
-      expect.stringContaining('"release": "npx @wyxos/zephyr@release"')
+      expect.stringContaining('"release": "npx @wyxos/zephyr@latest"')
     )
   })
 
