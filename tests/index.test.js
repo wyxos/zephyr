@@ -226,7 +226,7 @@ describe('zephyr deployment helpers', () => {
 
       expect(server).toEqual({ serverName: 'production', serverIp: '203.0.113.10' })
       expect(servers).toHaveLength(1)
-      expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining('.config/zephyr'), { recursive: true })
+      expect(mockMkdir).toHaveBeenCalledWith(expect.stringMatching(/[\\/]\.config[\\/]zephyr/), { recursive: true })
       const [writePath, payload] = mockWriteFile.mock.calls.at(-1)
       expect(writePath).toContain('servers.json')
       expect(payload).toContain('production')
@@ -256,7 +256,7 @@ describe('zephyr deployment helpers', () => {
       expect(projectConfig.apps).toHaveLength(1)
       expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining('.zephyr'), { recursive: true })
       const [writePath, payload] = mockWriteFile.mock.calls.at(-1)
-      expect(writePath).toContain('.zephyr/config.json')
+      expect(writePath.replace(/\\/g, '/')).toContain('.zephyr/config.json')
       expect(payload).toContain('~/webapps/demo')
     })
   })
@@ -280,7 +280,7 @@ describe('zephyr deployment helpers', () => {
     await ensureProjectReleaseScript('/workspace/project')
 
     expect(mockWriteFile).toHaveBeenCalledWith(
-      expect.stringContaining('/workspace/project/package.json'),
+      expect.stringMatching(/[\\/]workspace[\\/]project[\\/]package\.json/),
       expect.stringContaining('"release": "npx @wyxos/zephyr@release"')
     )
   })
