@@ -666,22 +666,22 @@ async function promptSshDetails(currentDir, existing = {}) {
 
   const sshKeyPrompt = sshKeys.length
     ? {
-        type: 'list',
-        name: 'sshKeySelection',
-        message: 'SSH key',
-        choices: [
-          ...sshKeys.map((key) => ({ name: key, value: path.join(sshDir, key) })),
-          new inquirer.Separator(),
-          { name: 'Enter custom SSH key path…', value: '__custom' }
-        ],
-        default: preselectedKey
-      }
+      type: 'list',
+      name: 'sshKeySelection',
+      message: 'SSH key',
+      choices: [
+        ...sshKeys.map((key) => ({ name: key, value: path.join(sshDir, key) })),
+        new inquirer.Separator(),
+        { name: 'Enter custom SSH key path…', value: '__custom' }
+      ],
+      default: preselectedKey
+    }
     : {
-        type: 'input',
-        name: 'sshKeySelection',
-        message: 'SSH key path',
-        default: preselectedKey
-      }
+      type: 'input',
+      name: 'sshKeySelection',
+      message: 'SSH key path',
+      default: preselectedKey
+    }
 
   const answers = await runPrompt([
     {
@@ -696,7 +696,7 @@ async function promptSshDetails(currentDir, existing = {}) {
   let sshKey = answers.sshKeySelection
 
   if (sshKey === '__custom') {
-  const { customSshKey } = await runPrompt([
+    const { customSshKey } = await runPrompt([
       {
         type: 'input',
         name: 'customSshKey',
@@ -797,12 +797,30 @@ async function runRemoteTasks(config, options = {}) {
 
     logProcessing(`Connection established. Running deployment commands in ${remoteCwd}...`)
 
+    // Robust environment bootstrap that works even when profile files don't export PATH
+    // for non-interactive shells. This handles:
+    // 1. Sourcing profile files (may not export PATH for non-interactive shells)
+    // 2. Loading nvm if available (common Node.js installation method)
+    // 3. Finding and adding common Node.js/npm installation paths
     const profileBootstrap = [
+      // Source profile files (may set PATH, but often skip for non-interactive shells)
       'if [ -f "$HOME/.profile" ]; then . "$HOME/.profile"; fi',
       'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"; fi',
       'if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi',
       'if [ -f "$HOME/.zprofile" ]; then . "$HOME/.zprofile"; fi',
-      'if [ -f "$HOME/.zshrc" ]; then . "$HOME/.zshrc"; fi'
+      'if [ -f "$HOME/.zshrc" ]; then . "$HOME/.zshrc"; fi',
+      // Load nvm if available (common Node.js installation method)
+      'if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi',
+      'if [ -s "$HOME/.config/nvm/nvm.sh" ]; then . "$HOME/.config/nvm/nvm.sh"; fi',
+      'if [ -s "/usr/local/opt/nvm/nvm.sh" ]; then . "/usr/local/opt/nvm/nvm.sh"; fi',
+      // Try to find npm/node in common locations and add to PATH
+      'if command -v npm >/dev/null 2>&1; then :',
+      'elif [ -d "$HOME/.nvm/versions/node" ]; then NODE_VERSION=$(ls -1 "$HOME/.nvm/versions/node" | tail -1) && export PATH="$HOME/.nvm/versions/node/$NODE_VERSION/bin:$PATH"',
+      'elif [ -d "/usr/local/lib/node_modules/npm/bin" ]; then export PATH="/usr/local/lib/node_modules/npm/bin:$PATH"',
+      'elif [ -d "/opt/homebrew/bin" ] && [ -f "/opt/homebrew/bin/npm" ]; then export PATH="/opt/homebrew/bin:$PATH"',
+      'elif [ -d "/usr/local/bin" ] && [ -f "/usr/local/bin/npm" ]; then export PATH="/usr/local/bin:$PATH"',
+      'elif [ -d "$HOME/.local/bin" ] && [ -f "$HOME/.local/bin/npm" ]; then export PATH="$HOME/.local/bin:$PATH"',
+      'fi'
     ].join('; ')
 
     const escapeForDoubleQuotes = (value) => value.replace(/(["\\$`])/g, '\\$1')
@@ -836,7 +854,7 @@ async function runRemoteTasks(config, options = {}) {
         if (result.stdout && result.stdout.trim()) {
           logError(`\n[${label}] Output:\n${result.stdout.trim()}`)
         }
-        
+
         if (result.stderr && result.stderr.trim()) {
           logError(`\n[${label}] Error:\n${result.stderr.trim()}`)
         }
@@ -844,7 +862,7 @@ async function runRemoteTasks(config, options = {}) {
 
       if (result.code !== 0 && !allowFailure) {
         const stderr = result.stderr?.trim() ?? ''
-  if (/command not found/.test(stderr) || /is not recognized/.test(stderr)) {
+        if (/command not found/.test(stderr) || /is not recognized/.test(stderr)) {
           throw new Error(
             `Command failed: ${command}. Ensure the remote environment loads required tools for non-interactive shells (e.g. export PATH in profile scripts).`
           )
@@ -899,8 +917,7 @@ async function runRemoteTasks(config, options = {}) {
           .join('\n')
 
         logProcessing(
-          `Detected ${changedFiles.length} changed file(s):\n${preview}${
-            changedFiles.length > 20 ? '\n - ...' : ''
+          `Detected ${changedFiles.length} changed file(s):\n${preview}${changedFiles.length > 20 ? '\n - ...' : ''
           }`
         )
       } else {
@@ -1062,7 +1079,7 @@ async function runRemoteTasks(config, options = {}) {
     }
 
     logSuccess('\nDeployment commands completed successfully.')
-    
+
     const logPath = await getLogFilePath(rootDir)
     logSuccess(`\nAll task output has been logged to: ${logPath}`)
   } catch (error) {
