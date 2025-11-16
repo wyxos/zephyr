@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { readFile } from 'node:fs/promises'
+import process from 'node:process'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const PACKAGE_PATH = join(ROOT, 'package.json')
@@ -10,6 +11,8 @@ const PACKAGE_PATH = join(ROOT, 'package.json')
 const STEP_PREFIX = '→'
 const OK_PREFIX = '✔'
 const WARN_PREFIX = '⚠'
+
+const IS_WINDOWS = process.platform === 'win32'
 
 function logStep(message) {
   console.log(`${STEP_PREFIX} ${message}`)
@@ -25,9 +28,12 @@ function logWarning(message) {
 
 function runCommand(command, args, { cwd = ROOT, capture = false } = {}) {
   return new Promise((resolve, reject) => {
+    // On Windows, npm-related commands need .cmd extension or shell: true
+    // Using shell: true for cross-platform compatibility
     const spawnOptions = {
       cwd,
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      shell: IS_WINDOWS
     }
 
     const child = spawn(command, args, spawnOptions)
