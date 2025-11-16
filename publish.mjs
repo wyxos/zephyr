@@ -195,8 +195,15 @@ async function ensureNpmAuth() {
 
 async function bumpVersion(releaseType) {
   logStep(`Bumping package version with "npm version ${releaseType}"...`)
-  await runCommand('npm', ['version', releaseType, '--message', 'chore: release %s'])
+  // npm version will update package.json and create a commit with default message
+  await runCommand('npm', ['version', releaseType])
+  
   const pkg = await readPackage()
+  const commitMessage = `chore: release ${pkg.version}`
+  
+  // Amend the commit message to use our custom format
+  await runCommand('git', ['commit', '--amend', '-m', commitMessage])
+  
   logSuccess(`Version updated to ${pkg.version}.`)
   return pkg
 }
