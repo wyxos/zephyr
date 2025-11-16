@@ -26,14 +26,17 @@ function logWarning(message) {
   console.warn(`${WARN_PREFIX} ${message}`)
 }
 
-function runCommand(command, args, { cwd = ROOT, capture = false } = {}) {
+function runCommand(command, args, { cwd = ROOT, capture = false, useShell = false } = {}) {
   return new Promise((resolve, reject) => {
-    // On Windows, npm-related commands need .cmd extension or shell: true
-    // Using shell: true for cross-platform compatibility
+    // On Windows, npm-related commands need shell: true to resolve npx.cmd
+    // Git commands work fine without shell, so we only use it when explicitly requested
     const spawnOptions = {
       cwd,
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-      shell: IS_WINDOWS
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
+    }
+    
+    if (useShell || (IS_WINDOWS && (command === 'npm' || command === 'npx'))) {
+      spawnOptions.shell = true
     }
 
     const child = spawn(command, args, spawnOptions)
