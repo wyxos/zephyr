@@ -416,29 +416,26 @@ function getLockFilePath(rootDir) {
   return path.join(getProjectConfigDir(rootDir), PROJECT_LOCK_FILE)
 }
 
-async function acquireProjectLock(rootDir) {
-  const lockDir = getProjectConfigDir(rootDir)
-  await ensureDirectory(lockDir)
-  const lockPath = getLockFilePath(rootDir)
+async function acquireRemoteLock(ssh, remoteCwd) {
+  const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
+  const escapedLockPath = lockPath.replace(/'/g, "'\\''")
+  const checkCommand = `mkdir -p .zephyr && if [ -f '${escapedLockPath}' ]; then cat '${escapedLockPath}'; else echo "LOCK_NOT_FOUND"; fi`
 
-  try {
-    const existing = await fs.readFile(lockPath, 'utf8')
+  const checkResult = await ssh.execCommand(checkCommand, { cwd: remoteCwd })
+
+  if (checkResult.stdout && checkResult.stdout.trim() !== 'LOCK_NOT_FOUND' && checkResult.stdout.trim() !== '') {
     let details = {}
     try {
-      details = JSON.parse(existing)
+      details = JSON.parse(checkResult.stdout.trim())
     } catch (error) {
-      details = { raw: existing }
+      details = { raw: checkResult.stdout.trim() }
     }
 
     const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
     const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
     throw new Error(
-      `Another deployment is currently in progress (started by ${startedBy}${startedAt}). Remove ${lockPath} if you are sure it is stale.`
+      `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
     )
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      throw error
-    }
   }
 
   const payload = {
@@ -448,18 +445,27 @@ async function acquireProjectLock(rootDir) {
     startedAt: new Date().toISOString()
   }
 
-  await fs.writeFile(lockPath, `${JSON.stringify(payload, null, 2)}\n`)
+  const payloadJson = JSON.stringify(payload, null, 2)
+  const payloadBase64 = Buffer.from(payloadJson).toString('base64')
+  const createCommand = `mkdir -p .zephyr && echo '${payloadBase64}' | base64 --decode > '${escapedLockPath}'`
+
+  const createResult = await ssh.execCommand(createCommand, { cwd: remoteCwd })
+
+  if (createResult.code !== 0) {
+    throw new Error(`Failed to create lock file on server: ${createResult.stderr}`)
+  }
+
   return lockPath
 }
 
-async function releaseProjectLock(rootDir) {
-  const lockPath = getLockFilePath(rootDir)
-  try {
-    await fs.unlink(lockPath)
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      throw error
-    }
+async function releaseRemoteLock(ssh, remoteCwd) {
+  const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
+  const escapedLockPath = lockPath.replace(/'/g, "'\\''")
+  const removeCommand = `rm -f '${escapedLockPath}'`
+
+  const result = await ssh.execCommand(removeCommand, { cwd: remoteCwd })
+  if (result.code !== 0 && result.code !== 1) {
+    logWarning(`Failed to remove lock file: ${result.stderr}`)
   }
 }
 
@@ -586,22 +592,30 @@ async function loadProjectConfig(rootDir) {
     const raw = await fs.readFile(configPath, 'utf8')
     const data = JSON.parse(raw)
     return {
-      apps: Array.isArray(data?.apps) ? data.apps : []
+      apps: Array.isArray(data?.apps) ? data.apps : [],
+      presets: Array.isArray(data?.presets) ? data.presets : []
     }
   } catch (error) {
     if (error.code === 'ENOENT') {
-      return { apps: [] }
+      return { apps: [], presets: [] }
     }
 
     logWarning('Failed to read .zephyr/config.json, starting with an empty list of apps.')
-    return { apps: [] }
+    return { apps: [], presets: [] }
   }
 }
 
 async function saveProjectConfig(rootDir, config) {
   const configDir = path.join(rootDir, PROJECT_CONFIG_DIR)
   await ensureDirectory(configDir)
-  const payload = JSON.stringify({ apps: config.apps ?? [] }, null, 2)
+  const payload = JSON.stringify(
+    {
+      apps: config.apps ?? [],
+      presets: config.presets ?? []
+    },
+    null,
+    2
+  )
   await fs.writeFile(path.join(configDir, PROJECT_CONFIG_FILE), `${payload}\n`)
 }
 
@@ -795,10 +809,40 @@ function resolveRemotePath(projectPath, remoteHome) {
   return `${sanitizedHome}/${projectPath}`
 }
 
+async function isLocalLaravelProject(rootDir) {
+  try {
+    const artisanPath = path.join(rootDir, 'artisan')
+    const composerPath = path.join(rootDir, 'composer.json')
+
+    await fs.access(artisanPath)
+    const composerContent = await fs.readFile(composerPath, 'utf8')
+    const composerJson = JSON.parse(composerContent)
+
+    return (
+      composerJson.require &&
+      typeof composerJson.require === 'object' &&
+      'laravel/framework' in composerJson.require
+    )
+  } catch {
+    return false
+  }
+}
+
 async function runRemoteTasks(config, options = {}) {
   const { snapshot = null, rootDir = process.cwd() } = options
 
   await ensureLocalRepositoryState(config.branch, rootDir)
+
+  const isLaravel = await isLocalLaravelProject(rootDir)
+  if (isLaravel) {
+    logProcessing('Running Laravel tests locally...')
+    try {
+      await runCommand('php', ['artisan', 'test', '--compact'], { cwd: rootDir })
+      logSuccess('Local tests passed.')
+    } catch (error) {
+      throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
+    }
+  }
 
   const ssh = createSshClient()
   const sshUser = config.sshUser || os.userInfo().username
@@ -806,6 +850,8 @@ async function runRemoteTasks(config, options = {}) {
   const privateKey = await fs.readFile(privateKeyPath, 'utf8')
 
   logProcessing(`\nConnecting to ${config.serverIp} as ${sshUser}...`)
+
+  let lockAcquired = false
 
   try {
     await ssh.connect({
@@ -818,7 +864,10 @@ async function runRemoteTasks(config, options = {}) {
     const remoteHome = remoteHomeResult.stdout.trim() || `/home/${sshUser}`
     const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
 
-    logProcessing(`Connection established. Running deployment commands in ${remoteCwd}...`)
+    logProcessing(`Connection established. Acquiring deployment lock on server...`)
+    await acquireRemoteLock(ssh, remoteCwd)
+    lockAcquired = true
+    logProcessing(`Lock acquired. Running deployment commands in ${remoteCwd}...`)
 
     // Robust environment bootstrap that works even when profile files don't export PATH
     // for non-interactive shells. This handles:
@@ -1112,8 +1161,20 @@ async function runRemoteTasks(config, options = {}) {
     }
     throw new Error(`Deployment failed: ${error.message}`)
   } finally {
+    if (lockAcquired && ssh) {
+      try {
+        const remoteHomeResult = await ssh.execCommand('printf "%s" "$HOME"')
+        const remoteHome = remoteHomeResult.stdout.trim() || `/home/${sshUser}`
+        const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
+        await releaseRemoteLock(ssh, remoteCwd)
+      } catch (error) {
+        logWarning(`Failed to release lock: ${error.message}`)
+      }
+    }
     await closeLogFile()
-    ssh.dispose()
+    if (ssh) {
+      ssh.dispose()
+    }
   }
 }
 
@@ -1244,6 +1305,12 @@ async function selectApp(projectConfig, server, currentDir) {
     .filter(({ app }) => app.serverName === server.serverName)
 
   if (matches.length === 0) {
+    if (apps.length > 0) {
+      const availableServers = [...new Set(apps.map((app) => app.serverName))]
+      logWarning(
+        `No applications configured for server "${server.serverName}". Available servers: ${availableServers.join(', ')}`
+      )
+    }
     logProcessing(`No applications configured for ${server.serverName}. Let's create one.`)
     const appDetails = await promptAppDetails(currentDir)
     const appConfig = {
@@ -1256,9 +1323,9 @@ async function selectApp(projectConfig, server, currentDir) {
     return appConfig
   }
 
-  const choices = matches.map(({ app, index }) => ({
+  const choices = matches.map(({ app, index }, matchIndex) => ({
     name: `${app.projectPath} (${app.branch})`,
-    value: index
+    value: matchIndex
   }))
 
   choices.push(new inquirer.Separator(), {
@@ -1288,8 +1355,55 @@ async function selectApp(projectConfig, server, currentDir) {
     return appConfig
   }
 
-  const chosen = projectConfig.apps[selection]
+  const chosen = matches[selection].app
   return chosen
+}
+
+async function promptPresetName() {
+  const { presetName } = await runPrompt([
+    {
+      type: 'input',
+      name: 'presetName',
+      message: 'Enter a name for this preset',
+      validate: (value) => (value && value.trim().length > 0 ? true : 'Preset name cannot be empty.')
+    }
+  ])
+
+  return presetName.trim()
+}
+
+async function selectPreset(projectConfig) {
+  const presets = projectConfig.presets ?? []
+
+  if (presets.length === 0) {
+    return null
+  }
+
+  const choices = presets.map((preset, index) => ({
+    name: `${preset.name} (${preset.serverName} → ${preset.projectPath} [${preset.branch}])`,
+    value: index
+  }))
+
+  choices.push(new inquirer.Separator(), {
+    name: '➕ Create new preset',
+    value: 'create'
+  })
+
+  const { selection } = await runPrompt([
+    {
+      type: 'list',
+      name: 'selection',
+      message: 'Select preset or create new',
+      choices,
+      default: 0
+    }
+  ])
+
+  if (selection === 'create') {
+    return 'create' // Return a special marker instead of null
+  }
+
+  return presets[selection]
 }
 
 async function main() {
@@ -1298,10 +1412,44 @@ async function main() {
   await ensureGitignoreEntry(rootDir)
   await ensureProjectReleaseScript(rootDir)
 
-  const servers = await loadServers()
-  const server = await selectServer(servers)
   const projectConfig = await loadProjectConfig(rootDir)
-  const appConfig = await selectApp(projectConfig, server, rootDir)
+  let server = null
+  let appConfig = null
+  let isCreatingNewPreset = false
+
+  const preset = await selectPreset(projectConfig)
+
+  if (preset === 'create') {
+    // User explicitly chose to create a new preset
+    isCreatingNewPreset = true
+    const servers = await loadServers()
+    server = await selectServer(servers)
+    appConfig = await selectApp(projectConfig, server, rootDir)
+  } else if (preset) {
+    // User selected an existing preset
+    const servers = await loadServers()
+    server = servers.find((s) => s.serverName === preset.serverName)
+
+    if (!server) {
+      logWarning(`Preset references server "${preset.serverName}" which no longer exists. Creating new configuration.`)
+      const servers = await loadServers()
+      server = await selectServer(servers)
+      appConfig = await selectApp(projectConfig, server, rootDir)
+    } else {
+      appConfig = {
+        serverName: preset.serverName,
+        projectPath: preset.projectPath,
+        branch: preset.branch,
+        sshUser: preset.sshUser,
+        sshKey: preset.sshKey
+      }
+    }
+  } else {
+    // No presets exist, go through normal flow
+    const servers = await loadServers()
+    server = await selectServer(servers)
+    appConfig = await selectApp(projectConfig, server, rootDir)
+  }
 
   const updated = await ensureSshDetails(appConfig, rootDir)
 
@@ -1321,6 +1469,33 @@ async function main() {
 
   logProcessing('\nSelected deployment target:')
   console.log(JSON.stringify(deploymentConfig, null, 2))
+
+  if (isCreatingNewPreset || !preset) {
+    const { saveAsPreset } = await runPrompt([
+      {
+        type: 'confirm',
+        name: 'saveAsPreset',
+        message: 'Save this configuration as a preset?',
+        default: isCreatingNewPreset // Default to true if user explicitly chose to create preset
+      }
+    ])
+
+    if (saveAsPreset) {
+      const presetName = await promptPresetName()
+      const presets = projectConfig.presets ?? []
+      presets.push({
+        name: presetName,
+        serverName: deploymentConfig.serverName,
+        projectPath: deploymentConfig.projectPath,
+        branch: deploymentConfig.branch,
+        sshUser: deploymentConfig.sshUser,
+        sshKey: deploymentConfig.sshKey
+      })
+      projectConfig.presets = presets
+      await saveProjectConfig(rootDir, projectConfig)
+      logSuccess(`Saved preset "${presetName}" to .zephyr/config.json`)
+    }
+  }
 
   const existingSnapshot = await loadPendingTasksSnapshot(rootDir)
   let snapshotToUse = null
@@ -1358,17 +1533,7 @@ async function main() {
     }
   }
 
-  let lockAcquired = false
-
-  try {
-    await acquireProjectLock(rootDir)
-    lockAcquired = true
-    await runRemoteTasks(deploymentConfig, { rootDir, snapshot: snapshotToUse })
-  } finally {
-    if (lockAcquired) {
-      await releaseProjectLock(rootDir)
-    }
-  }
+  await runRemoteTasks(deploymentConfig, { rootDir, snapshot: snapshotToUse })
 }
 
 export {
@@ -1387,5 +1552,6 @@ export {
   ensureLocalRepositoryState,
   loadServers,
   loadProjectConfig,
+  saveProjectConfig,
   main
 }
