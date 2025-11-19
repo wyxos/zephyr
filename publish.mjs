@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { readFile } from 'node:fs/promises'
+import process from 'node:process'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const PACKAGE_PATH = join(ROOT, 'package.json')
@@ -10,6 +11,8 @@ const PACKAGE_PATH = join(ROOT, 'package.json')
 const STEP_PREFIX = '→'
 const OK_PREFIX = '✔'
 const WARN_PREFIX = '⚠'
+
+const IS_WINDOWS = process.platform === 'win32'
 
 function logStep(message) {
   console.log(`${STEP_PREFIX} ${message}`)
@@ -23,11 +26,17 @@ function logWarning(message) {
   console.warn(`${WARN_PREFIX} ${message}`)
 }
 
-function runCommand(command, args, { cwd = ROOT, capture = false } = {}) {
+function runCommand(command, args, { cwd = ROOT, capture = false, useShell = false } = {}) {
   return new Promise((resolve, reject) => {
+    // On Windows, npm-related commands need shell: true to resolve npx.cmd
+    // Git commands work fine without shell, so we only use it when explicitly requested
     const spawnOptions = {
       cwd,
       stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
+    }
+    
+    if (useShell || (IS_WINDOWS && (command === 'npm' || command === 'npx'))) {
+      spawnOptions.shell = true
     }
 
     const child = spawn(command, args, spawnOptions)
@@ -189,8 +198,15 @@ async function ensureNpmAuth() {
 
 async function bumpVersion(releaseType) {
   logStep(`Bumping package version with "npm version ${releaseType}"...`)
-  await runCommand('npm', ['version', releaseType, '--message', 'chore: release %s'])
+  // npm version will update package.json and create a commit with default message
+  await runCommand('npm', ['version', releaseType])
+  
   const pkg = await readPackage()
+  const commitMessage = `chore: release ${pkg.version}`
+  
+  // Amend the commit message to use our custom format
+  await runCommand('git', ['commit', '--amend', '-m', commitMessage])
+  
   logSuccess(`Version updated to ${pkg.version}.`)
   return pkg
 }
