@@ -123,10 +123,12 @@ vi.mock('node-ssh', () => ({
 vi.mock('node:os', () => ({
   default: {
     homedir: () => '/home/local',
-    userInfo: () => ({ username: 'localuser' })
+    userInfo: () => ({ username: 'localuser' }),
+    hostname: () => 'test-host'
   },
   homedir: () => '/home/local',
-  userInfo: () => ({ username: 'localuser' })
+  userInfo: () => ({ username: 'localuser' }),
+  hostname: () => 'test-host'
 }))
 
 describe('zephyr deployment helpers', () => {
@@ -276,6 +278,58 @@ describe('zephyr deployment helpers', () => {
       expect(writePath.replace(/\\/g, '/')).toContain('.zephyr/config.json')
       expect(payload).toContain('~/webapps/demo')
     })
+
+    it('shows existing applications when apps exist for a server', async () => {
+      mockPrompt.mockResolvedValueOnce({ selection: 0 })
+
+      const { selectApp } = await import('../src/index.mjs')
+
+      const projectConfig = {
+        apps: [
+          {
+            serverName: 'production',
+            projectPath: '~/webapps/app1',
+            branch: 'main',
+            sshUser: 'deploy',
+            sshKey: '~/.ssh/id_rsa'
+          },
+          {
+            serverName: 'production',
+            projectPath: '~/webapps/app2',
+            branch: 'develop',
+            sshUser: 'deploy',
+            sshKey: '~/.ssh/id_rsa'
+          },
+          {
+            serverName: 'staging',
+            projectPath: '~/webapps/app3',
+            branch: 'main',
+            sshUser: 'deploy',
+            sshKey: '~/.ssh/id_rsa'
+          }
+        ]
+      }
+      const server = { serverName: 'production', serverIp: '203.0.113.10' }
+
+      const app = await selectApp(projectConfig, server, process.cwd())
+
+      expect(app).toMatchObject({
+        serverName: 'production',
+        projectPath: '~/webapps/app1',
+        branch: 'main'
+      })
+      expect(mockPrompt).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message: 'Select application for production',
+            choices: expect.arrayContaining([
+              expect.objectContaining({ name: '~/webapps/app1 (main)' }),
+              expect.objectContaining({ name: '~/webapps/app2 (develop)' })
+            ])
+          })
+        ])
+      )
+    })
   })
 
   it('adds release script to package.json when user agrees', async () => {
@@ -303,8 +357,15 @@ describe('zephyr deployment helpers', () => {
   })
 
   it('schedules Laravel tasks based on diff', async () => {
+    // Mock reads: composer.json for Laravel detection first, then SSH key later
+    mockReadFile
+      .mockResolvedValueOnce('{"require":{"laravel/framework":"^10.0"}}') // composer.json for Laravel detection
+      .mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----') // SSH key
+    // Mock fs.access for artisan file check
+    mockAccess.mockResolvedValueOnce(undefined) // artisan file exists
     queueSpawnResponse({ stdout: 'main\n' })
     queueSpawnResponse({ stdout: '' })
+    queueSpawnResponse({}) // php artisan test --compact
 
     mockConnect.mockResolvedValue()
     mockDispose.mockResolvedValue()
@@ -314,6 +375,13 @@ describe('zephyr deployment helpers', () => {
 
       if (command.includes('printf "%s" "$HOME"')) {
         return { ...response, stdout: '/home/runcloud' }
+      }
+
+      if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
+        if (command.includes('cat')) {
+          return { ...response, stdout: 'LOCK_NOT_FOUND' }
+        }
+        return response
       }
 
       if (command.includes('grep -q "laravel/framework"')) {
@@ -356,9 +424,17 @@ describe('zephyr deployment helpers', () => {
     expect(executedCommands.some((cmd) => cmd.includes('npm run build'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('cache:clear'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('horizon:terminate'))).toBe(true)
+
+    // Verify local test command was executed (not remote)
+    // Check that php artisan test --compact was called locally via spawn
+    const phpTestCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && args.includes('--compact')
+    )
+    expect(phpTestCalls.length).toBeGreaterThan(0)
   })
 
   it('skips Laravel tasks when framework not detected', async () => {
+    mockReadFile.mockResolvedValue('-----BEGIN RSA PRIVATE KEY-----')
     queueSpawnResponse({ stdout: 'main\n' })
     queueSpawnResponse({ stdout: '' })
 
@@ -367,6 +443,7 @@ describe('zephyr deployment helpers', () => {
 
     mockExecCommand
       .mockResolvedValueOnce({ stdout: '/home/runcloud', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: 'LOCK_NOT_FOUND', stderr: '', code: 0 })
       .mockResolvedValueOnce({ stdout: 'no', stderr: '', code: 0 })
       .mockResolvedValue({ stdout: '', stderr: '', code: 0 })
 
@@ -443,6 +520,62 @@ describe('zephyr deployment helpers', () => {
           ([command, args]) => command === 'git' && args[0] === 'push' && args.includes('main')
         )
       ).toBe(true)
+    })
+  })
+
+  describe('preset management', () => {
+    it('loads presets from project config', async () => {
+      mockReadFile.mockResolvedValueOnce(
+        JSON.stringify({
+          apps: [],
+          presets: [
+            {
+              name: 'production',
+              serverName: 'prod-server',
+              projectPath: '~/webapps/app',
+              branch: 'main',
+              sshUser: 'deploy',
+              sshKey: '~/.ssh/id_rsa'
+            }
+          ]
+        })
+      )
+
+      const { loadProjectConfig } = await import('../src/index.mjs')
+
+      const config = await loadProjectConfig(process.cwd())
+
+      expect(config.presets).toHaveLength(1)
+      expect(config.presets[0].name).toBe('production')
+    })
+
+    it('saves presets to project config', async () => {
+      mockReadFile.mockResolvedValueOnce(
+        JSON.stringify({
+          apps: [],
+          presets: []
+        })
+      )
+
+      const { loadProjectConfig, saveProjectConfig } = await import('../src/index.mjs')
+
+      const config = await loadProjectConfig(process.cwd())
+      config.presets.push({
+        name: 'staging',
+        serverName: 'staging-server',
+        projectPath: '~/webapps/staging',
+        branch: 'develop',
+        sshUser: 'deploy',
+        sshKey: '~/.ssh/id_rsa'
+      })
+
+      await saveProjectConfig(process.cwd(), config)
+
+      const [writePath, payload] = mockWriteFile.mock.calls.at(-1)
+      expect(writePath.replace(/\\/g, '/')).toContain('.zephyr/config.json')
+      const saved = JSON.parse(payload)
+      expect(saved.presets).toHaveLength(1)
+      expect(saved.presets[0].name).toBe('staging')
     })
   })
 })
