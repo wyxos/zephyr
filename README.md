@@ -28,7 +28,7 @@ Follow the interactive prompts to configure your deployment target:
 - Git branch to deploy
 - SSH user and private key
 
-Configuration is saved to `release.json` for future deployments.
+Configuration is saved automatically for future deployments.
 
 ## Features
 
@@ -40,34 +40,63 @@ Configuration is saved to `release.json` for future deployments.
 - Frontend asset compilation
 - Cache clearing and queue worker management
 - SSH key validation and management
+- Deployment locking to prevent concurrent runs
+- Task snapshots for resuming failed deployments
+- Comprehensive logging of all remote operations
 
 ## Smart Task Execution
 
 Zephyr analyzes changed files and runs appropriate tasks:
 
 - **Always**: `git pull origin <branch>`
-- **Composer files changed**: `composer update`
-- **Migration files added**: `php artisan migrate`
+- **Composer files changed**: `composer update --no-dev --no-interaction --prefer-dist`
+- **Migration files added**: `php artisan migrate --force`
 - **package.json changed**: `npm install`
 - **Frontend files changed**: `npm run build`
 - **PHP files changed**: Clear Laravel caches, restart queues
 
 ## Configuration
 
-Deployment targets are stored in `release.json`:
+### Global Server Configuration
+
+Servers are stored globally at `~/.config/zephyr/servers.json`:
 
 ```json
 [
   {
     "serverName": "production",
-    "serverIp": "192.168.1.100",
-    "projectPath": "~/webapps/myapp",
-    "branch": "main",
-    "sshUser": "forge",
-    "sshKey": "~/.ssh/id_rsa"
+    "serverIp": "192.168.1.100"
   }
 ]
 ```
+
+### Project Configuration
+
+Deployment targets are stored per-project at `.zephyr/config.json`:
+
+```json
+{
+  "apps": [
+    {
+      "serverName": "production",
+      "projectPath": "~/webapps/myapp",
+      "branch": "main",
+      "sshUser": "forge",
+      "sshKey": "~/.ssh/id_rsa"
+    }
+  ]
+}
+```
+
+### Project Directory Structure
+
+Zephyr creates a `.zephyr/` directory in your project with:
+- `config.json` - Project deployment configuration
+- `deploy.lock` - Lock file to prevent concurrent deployments
+- `pending-tasks.json` - Task snapshot for resuming failed deployments
+- `{timestamp}.log` - Log files for each deployment run
+
+The `.zephyr/` directory is automatically added to `.gitignore`.
 
 ## Requirements
 
