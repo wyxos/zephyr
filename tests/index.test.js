@@ -365,7 +365,7 @@ describe('zephyr deployment helpers', () => {
     mockAccess.mockResolvedValueOnce(undefined) // artisan file exists
     queueSpawnResponse({ stdout: 'main\n' })
     queueSpawnResponse({ stdout: '' })
-    queueSpawnResponse({}) // php artisan test --compact
+    queueSpawnResponse({}) // php artisan test
 
     mockConnect.mockResolvedValue()
     mockDispose.mockResolvedValue()
@@ -426,9 +426,9 @@ describe('zephyr deployment helpers', () => {
     expect(executedCommands.some((cmd) => cmd.includes('horizon:terminate'))).toBe(true)
 
     // Verify local test command was executed (not remote)
-    // Check that php artisan test --compact was called locally via spawn
+    // Check that php artisan test was called locally via spawn
     const phpTestCalls = mockSpawn.mock.calls.filter(
-      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && args.includes('--compact')
+      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && !args.includes('--compact')
     )
     expect(phpTestCalls.length).toBeGreaterThan(0)
   })
