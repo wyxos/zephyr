@@ -837,7 +837,7 @@ async function runRemoteTasks(config, options = {}) {
   if (isLaravel) {
     logProcessing('Running Laravel tests locally...')
     try {
-      await runCommand('php', ['artisan', 'test', '--compact'], { cwd: rootDir })
+      await runCommand('php', ['artisan', 'test'], { cwd: rootDir })
       logSuccess('Local tests passed.')
     } catch (error) {
       throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
