@@ -47,6 +47,53 @@ async function closeLogFile() {
   logFilePath = null
 }
 
+async function cleanupOldLogs(rootDir) {
+  const configDir = getProjectConfigDir(rootDir)
+  
+  try {
+    const files = await fs.readdir(configDir)
+    const logFiles = files
+      .filter((file) => file.endsWith('.log'))
+      .map((file) => ({
+        name: file,
+        path: path.join(configDir, file)
+      }))
+
+    if (logFiles.length <= 3) {
+      return
+    }
+
+    // Get file stats and sort by modification time (newest first)
+    const filesWithStats = await Promise.all(
+      logFiles.map(async (file) => {
+        const stats = await fs.stat(file.path)
+        return {
+          ...file,
+          mtime: stats.mtime
+        }
+      })
+    )
+
+    filesWithStats.sort((a, b) => b.mtime - a.mtime)
+
+    // Keep the 3 newest, delete the rest
+    const filesToDelete = filesWithStats.slice(3)
+
+    for (const file of filesToDelete) {
+      try {
+        await fs.unlink(file.path)
+      } catch (error) {
+        // Ignore errors when deleting old logs
+      }
+    }
+  } catch (error) {
+    // Ignore errors during log cleanup
+    if (error.code !== 'ENOENT') {
+      // Only log if it's not a "directory doesn't exist" error
+    }
+  }
+}
+
 const createSshClient = () => {
   if (typeof globalThis !== 'undefined' && globalThis.__zephyrSSHFactory) {
     return globalThis.__zephyrSSHFactory()
@@ -416,7 +463,52 @@ function getLockFilePath(rootDir) {
   return path.join(getProjectConfigDir(rootDir), PROJECT_LOCK_FILE)
 }
 
-async function acquireRemoteLock(ssh, remoteCwd) {
+function createLockPayload() {
+  return {
+    user: os.userInfo().username,
+    pid: process.pid,
+    hostname: os.hostname(),
+    startedAt: new Date().toISOString()
+  }
+}
+
+async function acquireLocalLock(rootDir) {
+  const lockPath = getLockFilePath(rootDir)
+  const configDir = getProjectConfigDir(rootDir)
+  await ensureDirectory(configDir)
+
+  const payload = createLockPayload()
+  const payloadJson = JSON.stringify(payload, null, 2)
+  await fs.writeFile(lockPath, payloadJson, 'utf8')
+
+  return payload
+}
+
+async function releaseLocalLock(rootDir) {
+  const lockPath = getLockFilePath(rootDir)
+  try {
+    await fs.unlink(lockPath)
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      logWarning(`Failed to remove local lock file: ${error.message}`)
+    }
+  }
+}
+
+async function readLocalLock(rootDir) {
+  const lockPath = getLockFilePath(rootDir)
+  try {
+    const content = await fs.readFile(lockPath, 'utf8')
+    return JSON.parse(content)
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null
+    }
+    throw error
+  }
+}
+
+async function readRemoteLock(ssh, remoteCwd) {
   const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
   const escapedLockPath = lockPath.replace(/'/g, "'\\''")
   const checkCommand = `mkdir -p .zephyr && if [ -f '${escapedLockPath}' ]; then cat '${escapedLockPath}'; else echo "LOCK_NOT_FOUND"; fi`
@@ -424,27 +516,100 @@ async function acquireRemoteLock(ssh, remoteCwd) {
   const checkResult = await ssh.execCommand(checkCommand, { cwd: remoteCwd })
 
   if (checkResult.stdout && checkResult.stdout.trim() !== 'LOCK_NOT_FOUND' && checkResult.stdout.trim() !== '') {
-    let details = {}
     try {
-      details = JSON.parse(checkResult.stdout.trim())
+      return JSON.parse(checkResult.stdout.trim())
     } catch (error) {
-      details = { raw: checkResult.stdout.trim() }
+      return { raw: checkResult.stdout.trim() }
     }
-
-    const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
-    const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
-    throw new Error(
-      `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
-    )
   }
 
-  const payload = {
-    user: os.userInfo().username,
-    pid: process.pid,
-    hostname: os.hostname(),
-    startedAt: new Date().toISOString()
+  return null
+}
+
+async function compareLocksAndPrompt(rootDir, ssh, remoteCwd) {
+  const localLock = await readLocalLock(rootDir)
+  const remoteLock = await readRemoteLock(ssh, remoteCwd)
+
+  if (!localLock || !remoteLock) {
+    return false
   }
 
+  // Compare lock contents - if they match, it's likely stale
+  const localKey = `${localLock.user}@${localLock.hostname}:${localLock.pid}:${localLock.startedAt}`
+  const remoteKey = `${remoteLock.user}@${remoteLock.hostname}:${remoteLock.pid}:${remoteLock.startedAt}`
+
+  if (localKey === remoteKey) {
+    const startedBy = remoteLock.user ? `${remoteLock.user}@${remoteLock.hostname ?? 'unknown'}` : 'unknown user'
+    const startedAt = remoteLock.startedAt ? ` at ${remoteLock.startedAt}` : ''
+    const { shouldRemove } = await runPrompt([
+      {
+        type: 'confirm',
+        name: 'shouldRemove',
+        message: `Stale lock detected on server (started by ${startedBy}${startedAt}). This appears to be from a failed deployment. Remove it?`,
+        default: true
+      }
+    ])
+
+    if (shouldRemove) {
+      const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
+      const escapedLockPath = lockPath.replace(/'/g, "'\\''")
+      const removeCommand = `rm -f '${escapedLockPath}'`
+      await ssh.execCommand(removeCommand, { cwd: remoteCwd })
+      await releaseLocalLock(rootDir)
+      return true
+    }
+  }
+
+  return false
+}
+
+async function acquireRemoteLock(ssh, remoteCwd, rootDir) {
+  const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
+  const escapedLockPath = lockPath.replace(/'/g, "'\\''")
+  const checkCommand = `mkdir -p .zephyr && if [ -f '${escapedLockPath}' ]; then cat '${escapedLockPath}'; else echo "LOCK_NOT_FOUND"; fi`
+
+  const checkResult = await ssh.execCommand(checkCommand, { cwd: remoteCwd })
+
+  if (checkResult.stdout && checkResult.stdout.trim() !== 'LOCK_NOT_FOUND' && checkResult.stdout.trim() !== '') {
+    // Check if we have a local lock and compare
+    const localLock = await readLocalLock(rootDir)
+    if (localLock) {
+      const removed = await compareLocksAndPrompt(rootDir, ssh, remoteCwd)
+      if (removed) {
+        // Lock was removed, continue to create new one
+      } else {
+        // User chose not to remove, throw error
+        let details = {}
+        try {
+          details = JSON.parse(checkResult.stdout.trim())
+        } catch (error) {
+          details = { raw: checkResult.stdout.trim() }
+        }
+
+        const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
+        const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
+        throw new Error(
+          `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
+        )
+      }
+    } else {
+      // No local lock, but remote lock exists
+      let details = {}
+      try {
+        details = JSON.parse(checkResult.stdout.trim())
+      } catch (error) {
+        details = { raw: checkResult.stdout.trim() }
+      }
+
+      const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
+      const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
+      throw new Error(
+        `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
+      )
+    }
+  }
+
+  const payload = createLockPayload()
   const payloadJson = JSON.stringify(payload, null, 2)
   const payloadBase64 = Buffer.from(payloadJson).toString('base64')
   const createCommand = `mkdir -p .zephyr && echo '${payloadBase64}' | base64 --decode > '${escapedLockPath}'`
@@ -454,6 +619,9 @@ async function acquireRemoteLock(ssh, remoteCwd) {
   if (createResult.code !== 0) {
     throw new Error(`Failed to create lock file on server: ${createResult.stderr}`)
   }
+
+  // Create local lock as well
+  await acquireLocalLock(rootDir)
 
   return lockPath
 }
@@ -831,6 +999,7 @@ async function isLocalLaravelProject(rootDir) {
 async function runRemoteTasks(config, options = {}) {
   const { snapshot = null, rootDir = process.cwd() } = options
 
+  await cleanupOldLogs(rootDir)
   await ensureLocalRepositoryState(config.branch, rootDir)
 
   const isLaravel = await isLocalLaravelProject(rootDir)
@@ -865,7 +1034,7 @@ async function runRemoteTasks(config, options = {}) {
     const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
 
     logProcessing(`Connection established. Acquiring deployment lock on server...`)
-    await acquireRemoteLock(ssh, remoteCwd)
+    await acquireRemoteLock(ssh, remoteCwd, rootDir)
     lockAcquired = true
     logProcessing(`Lock acquired. Running deployment commands in ${remoteCwd}...`)
 
@@ -1159,6 +1328,19 @@ async function runRemoteTasks(config, options = {}) {
     if (logPath) {
       logError(`\nTask output has been logged to: ${logPath}`)
     }
+
+    // If lock was acquired but deployment failed, check for stale locks
+    if (lockAcquired && ssh) {
+      try {
+        const remoteHomeResult = await ssh.execCommand('printf "%s" "$HOME"')
+        const remoteHome = remoteHomeResult.stdout.trim() || `/home/${sshUser}`
+        const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
+        await compareLocksAndPrompt(rootDir, ssh, remoteCwd)
+      } catch (lockError) {
+        // Ignore lock comparison errors during error handling
+      }
+    }
+
     throw new Error(`Deployment failed: ${error.message}`)
   } finally {
     if (lockAcquired && ssh) {
@@ -1167,6 +1349,7 @@ async function runRemoteTasks(config, options = {}) {
         const remoteHome = remoteHomeResult.stdout.trim() || `/home/${sshUser}`
         const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
         await releaseRemoteLock(ssh, remoteCwd)
+        await releaseLocalLock(rootDir)
       } catch (error) {
         logWarning(`Failed to release lock: ${error.message}`)
       }
@@ -1413,40 +1596,40 @@ async function main() {
   await ensureProjectReleaseScript(rootDir)
 
   const projectConfig = await loadProjectConfig(rootDir)
+  const servers = await loadServers()
   let server = null
   let appConfig = null
   let isCreatingNewPreset = false
 
-  const preset = await selectPreset(projectConfig)
+  const preset = await selectPreset(projectConfig, servers)
 
   if (preset === 'create') {
     // User explicitly chose to create a new preset
     isCreatingNewPreset = true
-    const servers = await loadServers()
     server = await selectServer(servers)
     appConfig = await selectApp(projectConfig, server, rootDir)
   } else if (preset) {
-    // User selected an existing preset
-    const servers = await loadServers()
-    server = servers.find((s) => s.serverName === preset.serverName)
+    // User selected an existing preset - look up details from key
+    const [serverName, projectPath, branch] = preset.key.split(':')
+    server = servers.find((s) => s.serverName === serverName)
 
     if (!server) {
-      logWarning(`Preset references server "${preset.serverName}" which no longer exists. Creating new configuration.`)
-      const servers = await loadServers()
+      logWarning(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
       server = await selectServer(servers)
       appConfig = await selectApp(projectConfig, server, rootDir)
     } else {
-      appConfig = {
-        serverName: preset.serverName,
-        projectPath: preset.projectPath,
-        branch: preset.branch,
-        sshUser: preset.sshUser,
-        sshKey: preset.sshKey
+      // Find matching app config
+      appConfig = projectConfig.apps?.find(
+        (a) => a.serverName === serverName && a.projectPath === projectPath && a.branch === branch
+      )
+
+      if (!appConfig) {
+        logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+        appConfig = await selectApp(projectConfig, server, rootDir)
       }
     }
   } else {
     // No presets exist, go through normal flow
-    const servers = await loadServers()
     server = await selectServer(servers)
     appConfig = await selectApp(projectConfig, server, rootDir)
   }
@@ -1483,14 +1666,23 @@ async function main() {
     if (saveAsPreset) {
       const presetName = await promptPresetName()
       const presets = projectConfig.presets ?? []
-      presets.push({
-        name: presetName,
-        serverName: deploymentConfig.serverName,
-        projectPath: deploymentConfig.projectPath,
-        branch: deploymentConfig.branch,
-        sshUser: deploymentConfig.sshUser,
-        sshKey: deploymentConfig.sshKey
-      })
+      const presetKey = generatePresetKey(
+        deploymentConfig.serverName,
+        deploymentConfig.projectPath,
+        deploymentConfig.branch
+      )
+      
+      // Check if preset with this key already exists
+      const existingIndex = presets.findIndex((p) => p.key === presetKey)
+      if (existingIndex >= 0) {
+        presets[existingIndex].name = presetName
+      } else {
+        presets.push({
+          name: presetName,
+          key: presetKey
+        })
+      }
+      
       projectConfig.presets = presets
       await saveProjectConfig(rootDir, projectConfig)
       logSuccess(`Saved preset "${presetName}" to .zephyr/config.json`)
