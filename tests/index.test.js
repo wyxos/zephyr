@@ -7,6 +7,7 @@ const mockWriteFile = vi.fn()
 const mockAppendFile = vi.fn()
 const mockMkdir = vi.fn()
 const mockUnlink = vi.fn()
+const mockStat = vi.fn()
 const mockExecCommand = vi.fn()
 const mockConnect = vi.fn()
 const mockDispose = vi.fn()
@@ -20,7 +21,8 @@ vi.mock('node:fs/promises', () => ({
     writeFile: mockWriteFile,
     appendFile: mockAppendFile,
     mkdir: mockMkdir,
-    unlink: mockUnlink
+    unlink: mockUnlink,
+    stat: mockStat
   },
   readFile: mockReadFile,
   readdir: mockReaddir,
@@ -28,7 +30,8 @@ vi.mock('node:fs/promises', () => ({
   writeFile: mockWriteFile,
   appendFile: mockAppendFile,
   mkdir: mockMkdir,
-  unlink: mockUnlink
+  unlink: mockUnlink,
+  stat: mockStat
 }))
 
 const spawnQueue = []
@@ -153,12 +156,20 @@ describe('zephyr deployment helpers', () => {
     mockAccess.mockReset()
     mockWriteFile.mockReset()
     mockAppendFile.mockReset()
-  mockUnlink.mockReset()
-  mockMkdir.mockReset()
+    mockUnlink.mockReset()
+    mockMkdir.mockReset()
+    mockStat.mockReset()
     mockExecCommand.mockReset()
     mockConnect.mockReset()
     mockDispose.mockReset()
     mockPrompt.mockReset()
+    
+    // Default mock implementations
+    mockMkdir.mockResolvedValue(undefined)
+    mockReaddir.mockResolvedValue([]) // Empty directory for log cleanup
+    mockStat.mockImplementation(async (path) => {
+      return { mtime: new Date() }
+    })
     globalThis.__zephyrSSHFactory = () => ({
       connect: mockConnect,
       execCommand: mockExecCommand,
@@ -363,6 +374,8 @@ describe('zephyr deployment helpers', () => {
       .mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----') // SSH key
     // Mock fs.access for artisan file check
     mockAccess.mockResolvedValueOnce(undefined) // artisan file exists
+    // Mock log cleanup (readdir returns empty, no old logs to clean)
+    mockReaddir.mockResolvedValueOnce([])
     queueSpawnResponse({ stdout: 'main\n' })
     queueSpawnResponse({ stdout: '' })
     queueSpawnResponse({}) // php artisan test
@@ -425,6 +438,12 @@ describe('zephyr deployment helpers', () => {
     expect(executedCommands.some((cmd) => cmd.includes('cache:clear'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('horizon:terminate'))).toBe(true)
 
+    // Verify local lock was created
+    const lockFileWrites = mockWriteFile.mock.calls.filter(([filePath]) =>
+      filePath.includes('deploy.lock')
+    )
+    expect(lockFileWrites.length).toBeGreaterThan(0)
+
     // Verify local test command was executed (not remote)
     // Check that php artisan test was called locally via spawn
     const phpTestCalls = mockSpawn.mock.calls.filter(
@@ -435,6 +454,8 @@ describe('zephyr deployment helpers', () => {
 
   it('skips Laravel tasks when framework not detected', async () => {
     mockReadFile.mockResolvedValue('-----BEGIN RSA PRIVATE KEY-----')
+    // Mock log cleanup (readdir returns empty, no old logs to clean)
+    mockReaddir.mockResolvedValueOnce([])
     queueSpawnResponse({ stdout: 'main\n' })
     queueSpawnResponse({ stdout: '' })
 
@@ -531,11 +552,7 @@ describe('zephyr deployment helpers', () => {
           presets: [
             {
               name: 'production',
-              serverName: 'prod-server',
-              projectPath: '~/webapps/app',
-              branch: 'main',
-              sshUser: 'deploy',
-              sshKey: '~/.ssh/id_rsa'
+              key: 'prod-server:~/webapps/app:main'
             }
           ]
         })
@@ -547,9 +564,10 @@ describe('zephyr deployment helpers', () => {
 
       expect(config.presets).toHaveLength(1)
       expect(config.presets[0].name).toBe('production')
+      expect(config.presets[0].key).toBe('prod-server:~/webapps/app:main')
     })
 
-    it('saves presets to project config', async () => {
+    it('saves presets to project config with unique key', async () => {
       mockReadFile.mockResolvedValueOnce(
         JSON.stringify({
           apps: [],
@@ -562,11 +580,7 @@ describe('zephyr deployment helpers', () => {
       const config = await loadProjectConfig(process.cwd())
       config.presets.push({
         name: 'staging',
-        serverName: 'staging-server',
-        projectPath: '~/webapps/staging',
-        branch: 'develop',
-        sshUser: 'deploy',
-        sshKey: '~/.ssh/id_rsa'
+        key: 'staging-server:~/webapps/staging:develop'
       })
 
       await saveProjectConfig(process.cwd(), config)
@@ -576,6 +590,11 @@ describe('zephyr deployment helpers', () => {
       const saved = JSON.parse(payload)
       expect(saved.presets).toHaveLength(1)
       expect(saved.presets[0].name).toBe('staging')
+      expect(saved.presets[0].key).toBe('staging-server:~/webapps/staging:develop')
+      // Verify preset doesn't duplicate server/app details
+      expect(saved.presets[0].serverName).toBeUndefined()
+      expect(saved.presets[0].projectPath).toBeUndefined()
+      expect(saved.presets[0].branch).toBeUndefined()
     })
   })
 })
