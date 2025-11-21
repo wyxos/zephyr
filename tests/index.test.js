@@ -254,7 +254,9 @@ describe('zephyr deployment helpers', () => {
       const servers = []
       const server = await selectServer(servers)
 
-      expect(server).toEqual({ serverName: 'production', serverIp: '203.0.113.10' })
+      expect(server).toMatchObject({ serverName: 'production', serverIp: '203.0.113.10' })
+      expect(server.id).toBeDefined()
+      expect(typeof server.id).toBe('string')
       expect(servers).toHaveLength(1)
       expect(mockMkdir).toHaveBeenCalledWith(expect.stringMatching(/[\\/]\.config[\\/]zephyr/), { recursive: true })
       const [writePath, payload] = mockWriteFile.mock.calls.at(-1)
@@ -728,7 +730,8 @@ describe('zephyr deployment helpers', () => {
           presets: [
             {
               name: 'production',
-              key: 'prod-server:~/webapps/app:main'
+              key: 'prod-server:~/webapps/app',
+              branch: 'main'
             }
           ]
         })
@@ -740,7 +743,8 @@ describe('zephyr deployment helpers', () => {
 
       expect(config.presets).toHaveLength(1)
       expect(config.presets[0].name).toBe('production')
-      expect(config.presets[0].key).toBe('prod-server:~/webapps/app:main')
+      expect(config.presets[0].key).toBe('prod-server:~/webapps/app')
+      expect(config.presets[0].branch).toBe('main')
     })
 
     it('saves presets to project config with unique key', async () => {
@@ -756,7 +760,8 @@ describe('zephyr deployment helpers', () => {
       const config = await loadProjectConfig(process.cwd())
       config.presets.push({
         name: 'staging',
-        key: 'staging-server:~/webapps/staging:develop'
+        key: 'staging-server:~/webapps/staging',
+        branch: 'develop'
       })
 
       await saveProjectConfig(process.cwd(), config)
@@ -766,11 +771,11 @@ describe('zephyr deployment helpers', () => {
       const saved = JSON.parse(payload)
       expect(saved.presets).toHaveLength(1)
       expect(saved.presets[0].name).toBe('staging')
-      expect(saved.presets[0].key).toBe('staging-server:~/webapps/staging:develop')
+      expect(saved.presets[0].key).toBe('staging-server:~/webapps/staging')
+      expect(saved.presets[0].branch).toBe('develop')
       // Verify preset doesn't duplicate server/app details
       expect(saved.presets[0].serverName).toBeUndefined()
       expect(saved.presets[0].projectPath).toBeUndefined()
-      expect(saved.presets[0].branch).toBeUndefined()
     })
   })
 })

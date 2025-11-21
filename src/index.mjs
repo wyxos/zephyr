@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
+import crypto from 'node:crypto'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { NodeSSH } from 'node-ssh'
@@ -728,11 +729,115 @@ async function ensureDirectory(dirPath) {
   await fs.mkdir(dirPath, { recursive: true })
 }
 
+function generateId() {
+  return crypto.randomBytes(8).toString('hex')
+}
+
+function migrateServers(servers) {
+  if (!Array.isArray(servers)) {
+    return []
+  }
+
+  let needsMigration = false
+  const migrated = servers.map((server) => {
+    if (!server.id) {
+      needsMigration = true
+      return {
+        ...server,
+        id: generateId()
+      }
+    }
+    return server
+  })
+
+  return { servers: migrated, needsMigration }
+}
+
+function migrateApps(apps, servers) {
+  if (!Array.isArray(apps)) {
+    return { apps: [], needsMigration: false }
+  }
+
+  // Create a map of serverName -> serverId for migration
+  const serverNameToId = new Map()
+  servers.forEach((server) => {
+    if (server.id && server.serverName) {
+      serverNameToId.set(server.serverName, server.id)
+    }
+  })
+
+  let needsMigration = false
+  const migrated = apps.map((app) => {
+    const updated = { ...app }
+    
+    if (!app.id) {
+      needsMigration = true
+      updated.id = generateId()
+    }
+
+    // Migrate serverName to serverId if needed
+    if (app.serverName && !app.serverId) {
+      const serverId = serverNameToId.get(app.serverName)
+      if (serverId) {
+        needsMigration = true
+        updated.serverId = serverId
+      }
+    }
+
+    return updated
+  })
+
+  return { apps: migrated, needsMigration }
+}
+
+function migratePresets(presets, apps) {
+  if (!Array.isArray(presets)) {
+    return { presets: [], needsMigration: false }
+  }
+
+  // Create a map of serverName:projectPath -> appId for migration
+  const keyToAppId = new Map()
+  apps.forEach((app) => {
+    if (app.id && app.serverName && app.projectPath) {
+      const key = `${app.serverName}:${app.projectPath}`
+      keyToAppId.set(key, app.id)
+    }
+  })
+
+  let needsMigration = false
+  const migrated = presets.map((preset) => {
+    const updated = { ...preset }
+
+    // Migrate from key-based to appId-based if needed
+    if (preset.key && !preset.appId) {
+      const appId = keyToAppId.get(preset.key)
+      if (appId) {
+        needsMigration = true
+        updated.appId = appId
+        // Keep key for backward compatibility during transition, but it's deprecated
+      }
+    }
+
+    return updated
+  })
+
+  return { presets: migrated, needsMigration }
+}
+
 async function loadServers() {
   try {
     const raw = await fs.readFile(SERVERS_FILE, 'utf8')
     const data = JSON.parse(raw)
-    return Array.isArray(data) ? data : []
+    const servers = Array.isArray(data) ? data : []
+    
+    const { servers: migrated, needsMigration } = migrateServers(servers)
+    
+    if (needsMigration) {
+      await saveServers(migrated)
+      logSuccess('Migrated servers configuration to use unique IDs.')
+    }
+    
+    return migrated
   } catch (error) {
     if (error.code === 'ENOENT') {
       return []
@@ -753,15 +858,32 @@ function getProjectConfigPath(rootDir) {
   return path.join(rootDir, PROJECT_CONFIG_DIR, PROJECT_CONFIG_FILE)
 }
 
-async function loadProjectConfig(rootDir) {
+async function loadProjectConfig(rootDir, servers = []) {
   const configPath = getProjectConfigPath(rootDir)
 
   try {
     const raw = await fs.readFile(configPath, 'utf8')
     const data = JSON.parse(raw)
+    const apps = Array.isArray(data?.apps) ? data.apps : []
+    const presets = Array.isArray(data?.presets) ? data.presets : []
+    
+    // Migrate apps first (needs servers for serverName -> serverId mapping)
+    const { apps: migratedApps, needsMigration: appsNeedMigration } = migrateApps(apps, servers)
+    
+    // Migrate presets (needs migrated apps for key -> appId mapping)
+    const { presets: migratedPresets, needsMigration: presetsNeedMigration } = migratePresets(presets, migratedApps)
+    
+    if (appsNeedMigration || presetsNeedMigration) {
+      await saveProjectConfig(rootDir, {
+        apps: migratedApps,
+        presets: migratedPresets
+      })
+      logSuccess('Migrated project configuration to use unique IDs.')
+    }
+    
     return {
-      apps: Array.isArray(data?.apps) ? data.apps : [],
-      presets: Array.isArray(data?.presets) ? data.presets : []
+      apps: migratedApps,
+      presets: migratedPresets
     }
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -1486,6 +1608,7 @@ async function promptServerDetails(existingServers = []) {
   ])
 
   return {
+    id: generateId(),
     serverName: answers.serverName.trim() || defaults.serverName,
     serverIp: answers.serverIp.trim() || defaults.serverIp
   }
@@ -1588,18 +1711,22 @@ async function selectApp(projectConfig, server, currentDir) {
   const apps = projectConfig.apps ?? []
   const matches = apps
     .map((app, index) => ({ app, index }))
-    .filter(({ app }) => app.serverName === server.serverName)
+    .filter(({ app }) => app.serverId === server.id || app.serverName === server.serverName)
 
   if (matches.length === 0) {
     if (apps.length > 0) {
-      const availableServers = [...new Set(apps.map((app) => app.serverName))]
-      logWarning(
-        `No applications configured for server "${server.serverName}". Available servers: ${availableServers.join(', ')}`
-      )
+      const availableServers = [...new Set(apps.map((app) => app.serverName).filter(Boolean))]
+      if (availableServers.length > 0) {
+        logWarning(
+          `No applications configured for server "${server.serverName}". Available servers: ${availableServers.join(', ')}`
+        )
+      }
     }
     logProcessing(`No applications configured for ${server.serverName}. Let's create one.`)
     const appDetails = await promptAppDetails(currentDir)
     const appConfig = {
+      id: generateId(),
+      serverId: server.id,
       serverName: server.serverName,
       ...appDetails
     }
@@ -1632,6 +1759,8 @@ async function selectApp(projectConfig, server, currentDir) {
   if (selection === 'create') {
     const appDetails = await promptAppDetails(currentDir)
     const appConfig = {
+      id: generateId(),
+      serverId: server.id,
       serverName: server.serverName,
       ...appDetails
     }
@@ -1658,17 +1787,44 @@ async function promptPresetName() {
   return presetName.trim()
 }
 
-async function selectPreset(projectConfig) {
+function generatePresetKey(serverName, projectPath) {
+  return `${serverName}:${projectPath}`
+}
+
+async function selectPreset(projectConfig, servers) {
   const presets = projectConfig.presets ?? []
+  const apps = projectConfig.apps ?? []
 
   if (presets.length === 0) {
     return null
   }
 
-  const choices = presets.map((preset, index) => ({
-    name: `${preset.name} (${preset.serverName} → ${preset.projectPath} [${preset.branch}])`,
-    value: index
-  }))
+  const choices = presets.map((preset, index) => {
+    let displayName = preset.name
+    
+    if (preset.appId) {
+      // New format: look up app by ID
+      const app = apps.find((a) => a.id === preset.appId)
+      if (app) {
+        const server = servers.find((s) => s.id === app.serverId || s.serverName === app.serverName)
+        const serverName = server?.serverName || 'unknown'
+        const branch = preset.branch || app.branch || 'unknown'
+        displayName = `${preset.name} (${serverName} → ${app.projectPath} [${branch}])`
+      }
+    } else if (preset.key) {
+      // Legacy format: parse from key
+      const keyParts = preset.key.split(':')
+      const serverName = keyParts[0]
+      const projectPath = keyParts[1]
+      const branch = preset.branch || (keyParts.length === 3 ? keyParts[2] : 'unknown')
+      displayName = `${preset.name} (${serverName} → ${projectPath} [${branch}])`
+    }
+    
+    return {
+      name: displayName,
+      value: index
+    }
+  })
 
   choices.push(new inquirer.Separator(), {
     name: '➕ Create new preset',
@@ -1698,8 +1854,11 @@ async function main() {
   await ensureGitignoreEntry(rootDir)
   await ensureProjectReleaseScript(rootDir)
 
-  const projectConfig = await loadProjectConfig(rootDir)
+  // Load servers first (they may be migrated)
   const servers = await loadServers()
+  // Load project config with servers for migration
+  const projectConfig = await loadProjectConfig(rootDir, servers)
+  
   let server = null
   let appConfig = null
   let isCreatingNewPreset = false
@@ -1712,24 +1871,63 @@ async function main() {
     server = await selectServer(servers)
     appConfig = await selectApp(projectConfig, server, rootDir)
   } else if (preset) {
-    // User selected an existing preset - look up details from key
-    const [serverName, projectPath, branch] = preset.key.split(':')
-    server = servers.find((s) => s.serverName === serverName)
-
-    if (!server) {
-      logWarning(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
-      server = await selectServer(servers)
-      appConfig = await selectApp(projectConfig, server, rootDir)
-    } else {
-      // Find matching app config
-      appConfig = projectConfig.apps?.find(
-        (a) => a.serverName === serverName && a.projectPath === projectPath && a.branch === branch
-      )
-
+    // User selected an existing preset - look up by appId
+    if (preset.appId) {
+      appConfig = projectConfig.apps?.find((a) => a.id === preset.appId)
+      
       if (!appConfig) {
         logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+        server = await selectServer(servers)
         appConfig = await selectApp(projectConfig, server, rootDir)
+      } else {
+        server = servers.find((s) => s.id === appConfig.serverId || s.serverName === appConfig.serverName)
+        
+        if (!server) {
+          logWarning(`Preset references server that no longer exists. Creating new configuration.`)
+          server = await selectServer(servers)
+          appConfig = await selectApp(projectConfig, server, rootDir)
+        } else if (preset.branch && appConfig.branch !== preset.branch) {
+          // Update branch if preset has a different branch
+          appConfig.branch = preset.branch
+          await saveProjectConfig(rootDir, projectConfig)
+          logSuccess(`Updated branch to ${preset.branch} from preset.`)
+        }
       }
+    } else if (preset.key) {
+      // Legacy preset format - migrate it
+      const keyParts = preset.key.split(':')
+      const serverName = keyParts[0]
+      const projectPath = keyParts[1]
+      const presetBranch = preset.branch || (keyParts.length === 3 ? keyParts[2] : null)
+      
+      server = servers.find((s) => s.serverName === serverName)
+      
+      if (!server) {
+        logWarning(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
+        server = await selectServer(servers)
+        appConfig = await selectApp(projectConfig, server, rootDir)
+      } else {
+        appConfig = projectConfig.apps?.find(
+          (a) => (a.serverId === server.id || a.serverName === serverName) && a.projectPath === projectPath
+        )
+        
+        if (!appConfig) {
+          logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+          appConfig = await selectApp(projectConfig, server, rootDir)
+        } else {
+          // Migrate preset to use appId
+          preset.appId = appConfig.id
+          if (presetBranch && appConfig.branch !== presetBranch) {
+            appConfig.branch = presetBranch
+          }
+          preset.branch = appConfig.branch
+          await saveProjectConfig(rootDir, projectConfig)
+        }
+      }
+    } else {
+      logWarning(`Preset format is invalid. Creating new configuration.`)
+      server = await selectServer(servers)
+      appConfig = await selectApp(projectConfig, server, rootDir)
     }
   } else {
     // No presets exist, go through normal flow
@@ -1757,38 +1955,43 @@ async function main() {
   console.log(JSON.stringify(deploymentConfig, null, 2))
 
   if (isCreatingNewPreset || !preset) {
-    const { saveAsPreset } = await runPrompt([
+    const { presetName } = await runPrompt([
       {
-        type: 'confirm',
-        name: 'saveAsPreset',
-        message: 'Save this configuration as a preset?',
-        default: isCreatingNewPreset // Default to true if user explicitly chose to create preset
+        type: 'input',
+        name: 'presetName',
+        message: 'Enter a name for this preset (leave blank to skip)',
+        default: isCreatingNewPreset ? '' : undefined
       }
     ])
 
-    if (saveAsPreset) {
-      const presetName = await promptPresetName()
+    const trimmedName = presetName?.trim()
+    
+    if (trimmedName && trimmedName.length > 0) {
       const presets = projectConfig.presets ?? []
-      const presetKey = generatePresetKey(
-        deploymentConfig.serverName,
-        deploymentConfig.projectPath,
-        deploymentConfig.branch
-      )
       
-      // Check if preset with this key already exists
-      const existingIndex = presets.findIndex((p) => p.key === presetKey)
-      if (existingIndex >= 0) {
-        presets[existingIndex].name = presetName
+      // Find app config to get its ID
+      const appId = appConfig.id
+      
+      if (!appId) {
+        logWarning('Cannot save preset: app configuration missing ID.')
       } else {
-        presets.push({
-          name: presetName,
-          key: presetKey
-        })
+        // Check if preset with this appId already exists
+        const existingIndex = presets.findIndex((p) => p.appId === appId)
+        if (existingIndex >= 0) {
+          presets[existingIndex].name = trimmedName
+          presets[existingIndex].branch = deploymentConfig.branch
+        } else {
+          presets.push({
+            name: trimmedName,
+            appId: appId,
+            branch: deploymentConfig.branch
+          })
+        }
+        
+        projectConfig.presets = presets
+        await saveProjectConfig(rootDir, projectConfig)
+        logSuccess(`Saved preset "${trimmedName}" to .zephyr/config.json`)
       }
-      
-      projectConfig.presets = presets
-      await saveProjectConfig(rootDir, projectConfig)
-      logSuccess(`Saved preset "${presetName}" to .zephyr/config.json`)
     }
   }
 
