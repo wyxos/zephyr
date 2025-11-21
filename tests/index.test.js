@@ -368,16 +368,30 @@ describe('zephyr deployment helpers', () => {
   })
 
   it('schedules Laravel tasks based on diff', async () => {
-    // Mock reads: composer.json for Laravel detection first, then SSH key later
+    // Mock reads: composer.json for Laravel detection, package.json for lint check, then SSH key
     mockReadFile
       .mockResolvedValueOnce('{"require":{"laravel/framework":"^10.0"}}') // composer.json for Laravel detection
+      .mockResolvedValueOnce('{"scripts":{}}') // package.json - no lint script
       .mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----') // SSH key
-    // Mock fs.access for artisan file check
-    mockAccess.mockResolvedValueOnce(undefined) // artisan file exists
+    // Mock fs.access for artisan file check, hook detection, and pint check
+    mockAccess.mockImplementation(async (filePath) => {
+      if (filePath.includes('artisan')) {
+        return undefined // artisan file exists
+      }
+      // Reject for all hook paths (hook doesn't exist)
+      if (filePath.includes('pre-push')) {
+        throw new Error('ENOENT')
+      }
+      // Reject for pint (doesn't exist)
+      if (filePath.includes('vendor/bin/pint')) {
+        throw new Error('ENOENT')
+      }
+      return undefined
+    })
     // Mock log cleanup (readdir returns empty, no old logs to clean)
     mockReaddir.mockResolvedValueOnce([])
     queueSpawnResponse({ stdout: 'main\n' })
-    queueSpawnResponse({ stdout: '' })
+    queueSpawnResponse({ stdout: '' }) // git status - no changes
     queueSpawnResponse({}) // php artisan test
 
     mockConnect.mockResolvedValue()
@@ -448,6 +462,168 @@ describe('zephyr deployment helpers', () => {
     // Check that php artisan test was called locally via spawn
     const phpTestCalls = mockSpawn.mock.calls.filter(
       ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && !args.includes('--compact')
+    )
+    expect(phpTestCalls.length).toBeGreaterThan(0)
+  })
+
+  it('skips Laravel tests when pre-push hook exists', async () => {
+    // Mock reads: SSH key (linting and tests skipped, so no package.json/composer.json reads needed)
+    mockReadFile.mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----') // SSH key
+    // Mock fs.access for hook detection and SSH key access
+    mockAccess.mockImplementation(async (filePath) => {
+      // Resolve for pre-push hook path (hook exists)
+      if (filePath.includes('pre-push')) {
+        return undefined
+      }
+      // Resolve for SSH key path
+      if (filePath.includes('.ssh') || filePath.includes('id_rsa')) {
+        return undefined
+      }
+      throw new Error('ENOENT')
+    })
+    // Mock fs.stat for hook file check
+    mockStat.mockResolvedValueOnce({ isFile: () => true })
+    // Mock log cleanup (readdir returns empty, no old logs to clean)
+    mockReaddir.mockResolvedValueOnce([])
+    queueSpawnResponse({ stdout: 'main\n' })
+    queueSpawnResponse({ stdout: '' })
+
+    mockConnect.mockResolvedValue()
+    mockDispose.mockResolvedValue()
+
+    mockExecCommand.mockImplementation(async (command) => {
+      const response = { stdout: '', stderr: '', code: 0 }
+
+      if (command.includes('printf "%s" "$HOME"')) {
+        return { ...response, stdout: '/home/runcloud' }
+      }
+
+      if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
+        if (command.includes('cat')) {
+          return { ...response, stdout: 'LOCK_NOT_FOUND' }
+        }
+        return response
+      }
+
+      if (command.includes('grep -q "laravel/framework"')) {
+        return { ...response, stdout: 'yes' }
+      }
+
+      if (command.includes('git diff')) {
+        return {
+          ...response,
+          stdout: 'composer.json\n'
+        }
+      }
+
+      return response
+    })
+
+    const { runRemoteTasks } = await import('../src/index.mjs')
+
+    await runRemoteTasks({
+      serverIp: '127.0.0.1',
+      projectPath: '~/app',
+      branch: 'main',
+      sshUser: 'forge',
+      sshKey: '~/.ssh/id_rsa'
+    })
+
+    // Verify local test command was NOT executed
+    const phpTestCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test')
+    )
+    expect(phpTestCalls.length).toBe(0)
+  })
+
+  it.skip('runs linting and commits changes before tests', async () => {
+    // Mock reads: composer.json for Laravel detection, package.json with lint script, then SSH key
+    mockReadFile
+      .mockResolvedValueOnce('{"require":{"laravel/framework":"^10.0"}}') // composer.json for Laravel detection
+      .mockResolvedValueOnce('{"scripts":{"lint":"eslint ."}}') // package.json - has lint script
+      .mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----') // SSH key
+    // Mock fs.access for artisan file check and hook detection
+    mockAccess.mockImplementation(async (filePath) => {
+      if (filePath.includes('artisan')) {
+        return undefined // artisan file exists
+      }
+      // Reject for all hook paths (hook doesn't exist)
+      if (filePath.includes('pre-push')) {
+        throw new Error('ENOENT')
+      }
+      return undefined
+    })
+    // Mock log cleanup (readdir returns empty, no old logs to clean)
+    mockReaddir.mockResolvedValueOnce([])
+    queueSpawnResponse({ stdout: 'main\n' }) // git rev-parse --abbrev-ref HEAD
+    queueSpawnResponse({ stdout: '' }) // git status --porcelain (ensureLocalRepositoryState - initial)
+    queueSpawnResponse({ stdout: '## main...origin/main\n' }) // git status --short --branch
+    queueSpawnResponse({}) // npm run lint
+    queueSpawnResponse({ stdout: ' M src/file.js\n' }) // git status --porcelain (hasUncommittedChanges)
+    queueSpawnResponse({}) // git add -A
+    queueSpawnResponse({ stdout: 'M  src/file.js\n' }) // git status --porcelain (commitLintingChanges after staging)
+    queueSpawnResponse({}) // git commit
+    queueSpawnResponse({}) // php artisan test
+
+    mockConnect.mockResolvedValue()
+    mockDispose.mockResolvedValue()
+
+    mockExecCommand.mockImplementation(async (command) => {
+      const response = { stdout: '', stderr: '', code: 0 }
+
+      if (command.includes('printf "%s" "$HOME"')) {
+        return { ...response, stdout: '/home/runcloud' }
+      }
+
+      if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
+        if (command.includes('cat')) {
+          return { ...response, stdout: 'LOCK_NOT_FOUND' }
+        }
+        return response
+      }
+
+      if (command.includes('grep -q "laravel/framework"')) {
+        return { ...response, stdout: 'yes' }
+      }
+
+      if (command.includes('git diff')) {
+        return { ...response, stdout: '' }
+      }
+
+      return response
+    })
+
+    const { runRemoteTasks } = await import('../src/index.mjs')
+
+    await runRemoteTasks({
+      serverIp: '127.0.0.1',
+      projectPath: '~/app',
+      branch: 'main',
+      sshUser: 'forge',
+      sshKey: '~/.ssh/id_rsa'
+    })
+
+    // Verify lint command was executed
+    const lintCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'npm' && Array.isArray(args) && args.includes('run') && args.includes('lint')
+    )
+    expect(lintCalls.length).toBeGreaterThan(0)
+
+    // Verify git add and commit were called
+    // Note: git add uses 'add' and '-A' as separate args
+    const gitAddCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args.includes('add') && args.includes('-A')
+    )
+    expect(gitAddCalls.length).toBeGreaterThan(0)
+
+    const gitCommitCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args.includes('commit') && args.some(arg => typeof arg === 'string' && arg.includes('style: apply linting fixes'))
+    )
+    expect(gitCommitCalls.length).toBeGreaterThan(0)
+
+    // Verify test command was executed
+    const phpTestCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test')
     )
     expect(phpTestCalls.length).toBeGreaterThan(0)
   })

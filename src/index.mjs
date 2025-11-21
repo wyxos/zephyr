@@ -977,6 +977,92 @@ function resolveRemotePath(projectPath, remoteHome) {
   return `${sanitizedHome}/${projectPath}`
 }
 
+async function hasPrePushHook(rootDir) {
+  const hookPaths = [
+    path.join(rootDir, '.git', 'hooks', 'pre-push'),
+    path.join(rootDir, '.husky', 'pre-push'),
+    path.join(rootDir, '.githooks', 'pre-push')
+  ]
+
+  for (const hookPath of hookPaths) {
+    try {
+      await fs.access(hookPath)
+      const stats = await fs.stat(hookPath)
+      if (stats.isFile()) {
+        return true
+      }
+    } catch {
+      // Hook doesn't exist at this path, continue checking
+    }
+  }
+
+  return false
+}
+
+async function hasLintScript(rootDir) {
+  try {
+    const packageJsonPath = path.join(rootDir, 'package.json')
+    const raw = await fs.readFile(packageJsonPath, 'utf8')
+    const packageJson = JSON.parse(raw)
+    return packageJson.scripts && typeof packageJson.scripts.lint === 'string'
+  } catch {
+    return false
+  }
+}
+
+async function hasLaravelPint(rootDir) {
+  try {
+    const pintPath = path.join(rootDir, 'vendor', 'bin', 'pint')
+    await fs.access(pintPath)
+    const stats = await fs.stat(pintPath)
+    return stats.isFile()
+  } catch {
+    return false
+  }
+}
+
+async function runLinting(rootDir) {
+  const hasNpmLint = await hasLintScript(rootDir)
+  const hasPint = await hasLaravelPint(rootDir)
+
+  if (hasNpmLint) {
+    logProcessing('Running npm lint...')
+    await runCommand('npm', ['run', 'lint'], { cwd: rootDir })
+    logSuccess('Linting completed.')
+    return true
+  } else if (hasPint) {
+    logProcessing('Running Laravel Pint...')
+    await runCommand('php', ['vendor/bin/pint'], { cwd: rootDir })
+    logSuccess('Linting completed.')
+    return true
+  }
+
+  return false
+}
+
+async function hasUncommittedChanges(rootDir) {
+  const status = await getGitStatus(rootDir)
+  return status.length > 0
+}
+
+async function commitLintingChanges(rootDir) {
+  const status = await getGitStatus(rootDir)
+  
+  if (!hasStagedChanges(status)) {
+    // Stage only modified tracked files (not untracked files)
+    await runCommand('git', ['add', '-u'], { cwd: rootDir })
+    const newStatus = await getGitStatus(rootDir)
+    if (!hasStagedChanges(newStatus)) {
+      return false
+    }
+  }
+
+  logProcessing('Committing linting changes...')
+  await runCommand('git', ['commit', '-m', 'style: apply linting fixes'], { cwd: rootDir })
+  logSuccess('Linting changes committed.')
+  return true
+}
+
 async function isLocalLaravelProject(rootDir) {
   try {
     const artisanPath = path.join(rootDir, 'artisan')
@@ -1003,14 +1089,31 @@ async function runRemoteTasks(config, options = {}) {
   await ensureLocalRepositoryState(config.branch, rootDir)
 
   const isLaravel = await isLocalLaravelProject(rootDir)
-  if (isLaravel) {
-    logProcessing('Running Laravel tests locally...')
-    try {
-      await runCommand('php', ['artisan', 'test'], { cwd: rootDir })
-      logSuccess('Local tests passed.')
-    } catch (error) {
-      throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
+  const hasHook = await hasPrePushHook(rootDir)
+  
+  if (!hasHook) {
+    // Run linting before tests
+    const lintRan = await runLinting(rootDir)
+    if (lintRan) {
+      // Check if linting made changes and commit them
+      const hasChanges = await hasUncommittedChanges(rootDir)
+      if (hasChanges) {
+        await commitLintingChanges(rootDir)
+      }
     }
+
+    // Run tests for Laravel projects
+    if (isLaravel) {
+      logProcessing('Running Laravel tests locally...')
+      try {
+        await runCommand('php', ['artisan', 'test'], { cwd: rootDir })
+        logSuccess('Local tests passed.')
+      } catch (error) {
+        throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
+      }
+    }
+  } else {
+    logProcessing('Pre-push git hook detected. Skipping local linting and test execution.')
   }
 
   const ssh = createSshClient()
