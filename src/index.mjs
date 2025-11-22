@@ -2,9 +2,12 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
+import process from 'node:process'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { NodeSSH } from 'node-ssh'
+
+const IS_WINDOWS = process.platform === 'win32'
 
 const PROJECT_CONFIG_DIR = '.zephyr'
 const PROJECT_CONFIG_FILE = 'config.json'
@@ -65,10 +68,18 @@ const runPrompt = async (questions) => {
 
 async function runCommand(command, args, { silent = false, cwd } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const spawnOptions = {
       stdio: silent ? 'ignore' : 'inherit',
       cwd
-    })
+    }
+    
+    // On Windows, use shell for commands that might need PATH resolution (php, composer, etc.)
+    // Git commands work fine without shell
+    if (IS_WINDOWS && command !== 'git') {
+      spawnOptions.shell = true
+    }
+
+    const child = spawn(command, args, spawnOptions)
 
     child.on('error', reject)
     child.on('close', (code) => {
@@ -88,10 +99,18 @@ async function runCommandCapture(command, args, { cwd } = {}) {
     let stdout = ''
     let stderr = ''
 
-    const child = spawn(command, args, {
+    const spawnOptions = {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd
-    })
+    }
+    
+    // On Windows, use shell for commands that might need PATH resolution (php, composer, etc.)
+    // Git commands work fine without shell
+    if (IS_WINDOWS && command !== 'git') {
+      spawnOptions.shell = true
+    }
+
+    const child = spawn(command, args, spawnOptions)
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk
