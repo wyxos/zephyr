@@ -4,43 +4,40 @@ import { dirname, join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import fs from 'node:fs'
 import path from 'node:path'
-import chalk from 'chalk'
 import process from 'node:process'
+
+const STEP_PREFIX = '→'
+const OK_PREFIX = '✔'
+const WARN_PREFIX = '⚠'
 
 const IS_WINDOWS = process.platform === 'win32'
 
 function logStep(message) {
-  console.log(chalk.yellow(`→ ${message}`))
+  console.log(`${STEP_PREFIX} ${message}`)
 }
 
 function logSuccess(message) {
-  console.log(chalk.green(`✔ ${message}`))
+  console.log(`${OK_PREFIX} ${message}`)
 }
 
 function logWarning(message) {
-  console.warn(chalk.yellow(`⚠ ${message}`))
+  console.warn(`${WARN_PREFIX} ${message}`)
 }
 
-function logError(message) {
-  console.error(chalk.red(`✗ ${message}`))
-}
-
-function runCommand(command, args, { cwd = process.cwd(), capture = false, silent = false } = {}) {
+function runCommand(command, args, { cwd = process.cwd(), capture = false, useShell = false } = {}) {
   return new Promise((resolve, reject) => {
+    // On Windows, npm-related commands need shell: true to resolve npx.cmd
+    // Git commands work fine without shell, so we only use it when explicitly requested
     const spawnOptions = {
       cwd,
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : (silent ? ['ignore', 'ignore', 'pipe'] : 'inherit'),
-      shell: IS_WINDOWS
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
     }
 
-    const escapedArgs = IS_WINDOWS ? args.map(arg => {
-      if (arg.includes(' ') || arg.includes('\n') || arg.includes('"')) {
-        return `"${arg.replace(/"/g, '\\"')}"`
-      }
-      return arg
-    }) : args
+    if (useShell || (IS_WINDOWS && (command === 'npm' || command === 'npx'))) {
+      spawnOptions.shell = true
+    }
 
-    const child = spawn(command, escapedArgs, spawnOptions)
+    const child = spawn(command, args, spawnOptions)
     let stdout = ''
     let stderr = ''
 
@@ -55,21 +52,10 @@ function runCommand(command, args, { cwd = process.cwd(), capture = false, silen
     }
 
     child.on('error', reject)
-
-    let errorOutput = ''
-    if (silent && !capture) {
-      child.stderr.on('data', (chunk) => {
-        errorOutput += chunk.toString()
-      })
-    }
-
     child.on('close', (code) => {
       if (code === 0) {
         resolve(capture ? { stdout: stdout.trim(), stderr: stderr.trim() } : undefined)
       } else {
-        if (silent && errorOutput) {
-          console.error(chalk.red(errorOutput))
-        }
         const error = new Error(`Command failed (${code}): ${command} ${args.join(' ')}`)
         if (capture) {
           error.stdout = stdout
@@ -217,7 +203,7 @@ async function runLint(skipLint, pkg, rootDir = process.cwd()) {
   }
 
   logStep('Running lint...')
-  await runCommand('npm', ['run', 'lint'], { silent: true, cwd: rootDir })
+  await runCommand('npm', ['run', 'lint'], { cwd: rootDir })
   logSuccess('Lint passed.')
 }
 
@@ -234,15 +220,15 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
   }
 
   logStep('Running test suite...')
-  
+
   // Prefer test:run if available, otherwise use test with --run flag
   if (hasScript(pkg, 'test:run')) {
-    await runCommand('npm', ['run', 'test:run'], { silent: true, cwd: rootDir })
+    await runCommand('npm', ['run', 'test:run'], { cwd: rootDir })
   } else {
     // For test script, try to pass --run flag (works with vitest)
-    await runCommand('npm', ['test', '--', '--run'], { silent: true, cwd: rootDir })
+    await runCommand('npm', ['test', '--', '--run'], { cwd: rootDir })
   }
-  
+
   logSuccess('Tests passed.')
 }
 
@@ -258,7 +244,7 @@ async function runBuild(skipBuild, pkg, rootDir = process.cwd()) {
   }
 
   logStep('Building project...')
-  await runCommand('npm', ['run', 'build'], { silent: true, cwd: rootDir })
+  await runCommand('npm', ['run', 'build'], { cwd: rootDir })
   logSuccess('Build completed.')
 }
 
@@ -274,7 +260,7 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
   }
 
   logStep('Building library...')
-  await runCommand('npm', ['run', 'build:lib'], { silent: true, cwd: rootDir })
+  await runCommand('npm', ['run', 'build:lib'], { cwd: rootDir })
   logSuccess('Library built.')
 
   // Check for lib changes and commit them if any
@@ -286,8 +272,8 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
 
   if (hasLibChanges) {
     logStep('Committing lib build artifacts...')
-    await runCommand('git', ['add', 'lib/'], { silent: true, cwd: rootDir })
-    await runCommand('git', ['commit', '-m', 'chore: build lib artifacts'], { silent: true, cwd: rootDir })
+    await runCommand('git', ['add', 'lib/'], { cwd: rootDir })
+    await runCommand('git', ['commit', '-m', 'chore: build lib artifacts'], { cwd: rootDir })
     logSuccess('Lib build artifacts committed.')
   }
 
@@ -296,7 +282,7 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
 
 async function ensureNpmAuth(rootDir = process.cwd()) {
   logStep('Confirming npm authentication...')
-  await runCommand('npm', ['whoami'], { silent: true, cwd: rootDir })
+  await runCommand('npm', ['whoami'], { cwd: rootDir })
   logSuccess('npm authenticated.')
 }
 
@@ -312,20 +298,20 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
 
   if (hasLibChanges) {
     logStep('Stashing lib build artifacts...')
-    await runCommand('git', ['stash', 'push', '-u', '-m', 'temp: lib build artifacts', 'lib/'], { silent: true, cwd: rootDir })
+    await runCommand('git', ['stash', 'push', '-u', '-m', 'temp: lib build artifacts', 'lib/'], { cwd: rootDir })
   }
 
   try {
-    await runCommand('npm', ['version', releaseType, '--message', 'chore: release %s'], { silent: true, cwd: rootDir })
+    await runCommand('npm', ['version', releaseType, '--message', 'chore: release %s'], { cwd: rootDir })
   } finally {
     // Restore lib changes and ensure they're in the commit
     if (hasLibChanges) {
       logStep('Restoring lib build artifacts...')
-      await runCommand('git', ['stash', 'pop'], { silent: true, cwd: rootDir })
-      await runCommand('git', ['add', 'lib/'], { silent: true, cwd: rootDir })
+      await runCommand('git', ['stash', 'pop'], { cwd: rootDir })
+      await runCommand('git', ['add', 'lib/'], { cwd: rootDir })
       const { stdout: statusAfter } = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
       if (statusAfter.includes('lib/')) {
-        await runCommand('git', ['commit', '--amend', '--no-edit'], { silent: true, cwd: rootDir })
+        await runCommand('git', ['commit', '--amend', '--no-edit'], { cwd: rootDir })
       }
     }
   }
@@ -337,7 +323,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
 
 async function pushChanges(rootDir = process.cwd()) {
   logStep('Pushing commits and tags to origin...')
-  await runCommand('git', ['push', '--follow-tags'], { silent: true, cwd: rootDir })
+  await runCommand('git', ['push', '--follow-tags'], { cwd: rootDir })
   logSuccess('Git push completed.')
 }
 
@@ -349,7 +335,7 @@ async function publishPackage(pkg, rootDir = process.cwd()) {
   }
 
   logStep(`Publishing ${pkg.name}@${pkg.version} to npm...`)
-  await runCommand('npm', publishArgs, { silent: true, cwd: rootDir })
+  await runCommand('npm', publishArgs, { cwd: rootDir })
   logSuccess('npm publish completed.')
 }
 
@@ -390,7 +376,7 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
 
   // Write CNAME file to dist if homepage is set
   const cnamePath = path.join(distPath, 'CNAME')
-  
+
   if (pkg.homepage) {
     const domain = extractDomainFromHomepage(pkg.homepage)
     if (domain) {
@@ -406,17 +392,17 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
   const worktreeDir = path.resolve(rootDir, '.gh-pages')
 
   try {
-    await runCommand('git', ['worktree', 'remove', worktreeDir, '-f'], { silent: true, cwd: rootDir })
+    await runCommand('git', ['worktree', 'remove', worktreeDir, '-f'], { cwd: rootDir })
   } catch { }
 
   try {
-    await runCommand('git', ['worktree', 'add', worktreeDir, 'gh-pages'], { silent: true, cwd: rootDir })
+    await runCommand('git', ['worktree', 'add', worktreeDir, 'gh-pages'], { cwd: rootDir })
   } catch {
-    await runCommand('git', ['worktree', 'add', worktreeDir, '-b', 'gh-pages'], { silent: true, cwd: rootDir })
+    await runCommand('git', ['worktree', 'add', worktreeDir, '-b', 'gh-pages'], { cwd: rootDir })
   }
 
-  await runCommand('git', ['-C', worktreeDir, 'config', 'user.name', 'wyxos'], { silent: true })
-  await runCommand('git', ['-C', worktreeDir, 'config', 'user.email', 'github@wyxos.com'], { silent: true })
+  await runCommand('git', ['-C', worktreeDir, 'config', 'user.name', 'wyxos'])
+  await runCommand('git', ['-C', worktreeDir, 'config', 'user.email', 'github@wyxos.com'])
 
   // Clear worktree directory
   for (const entry of fs.readdirSync(worktreeDir)) {
@@ -428,9 +414,9 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
   // Copy dist to worktree
   fs.cpSync(distPath, worktreeDir, { recursive: true })
 
-  await runCommand('git', ['-C', worktreeDir, 'add', '-A'], { silent: true })
-  await runCommand('git', ['-C', worktreeDir, 'commit', '-m', `deploy: demo ${new Date().toISOString()}`, '--allow-empty'], { silent: true })
-  await runCommand('git', ['-C', worktreeDir, 'push', '-f', 'origin', 'gh-pages'], { silent: true })
+  await runCommand('git', ['-C', worktreeDir, 'add', '-A'])
+  await runCommand('git', ['-C', worktreeDir, 'commit', '-m', `deploy: demo ${new Date().toISOString()}`, '--allow-empty'])
+  await runCommand('git', ['-C', worktreeDir, 'push', '-f', 'origin', 'gh-pages'])
 
   logSuccess('GitHub Pages deployment completed.')
 }
