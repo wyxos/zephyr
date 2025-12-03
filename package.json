@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "vitest",
-    "release": "node publish.mjs"
+    "release": "node bin/zephyr.mjs --type=node"
   },
   "keywords": [
     "deployment",
