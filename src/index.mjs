@@ -3,6 +3,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
 import process from 'node:process'
+import crypto from 'node:crypto'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { NodeSSH } from 'node-ssh'
@@ -51,6 +52,53 @@ async function closeLogFile() {
   logFilePath = null
 }
 
+async function cleanupOldLogs(rootDir) {
+  const configDir = getProjectConfigDir(rootDir)
+
+  try {
+    const files = await fs.readdir(configDir)
+    const logFiles = files
+      .filter((file) => file.endsWith('.log'))
+      .map((file) => ({
+        name: file,
+        path: path.join(configDir, file)
+      }))
+
+    if (logFiles.length <= 3) {
+      return
+    }
+
+    // Get file stats and sort by modification time (newest first)
+    const filesWithStats = await Promise.all(
+      logFiles.map(async (file) => {
+        const stats = await fs.stat(file.path)
+        return {
+          ...file,
+          mtime: stats.mtime
+        }
+      })
+    )
+
+    filesWithStats.sort((a, b) => b.mtime - a.mtime)
+
+    // Keep the 3 newest, delete the rest
+    const filesToDelete = filesWithStats.slice(3)
+
+    for (const file of filesToDelete) {
+      try {
+        await fs.unlink(file.path)
+      } catch (error) {
+        // Ignore errors when deleting old logs
+      }
+    }
+  } catch (error) {
+    // Ignore errors during log cleanup
+    if (error.code !== 'ENOENT') {
+      // Only log if it's not a "directory doesn't exist" error
+    }
+  }
+}
+
 const createSshClient = () => {
   if (typeof globalThis !== 'undefined' && globalThis.__zephyrSSHFactory) {
     return globalThis.__zephyrSSHFactory()
@@ -73,7 +121,7 @@ async function runCommand(command, args, { silent = false, cwd } = {}) {
       stdio: silent ? 'ignore' : 'inherit',
       cwd
     }
-    
+
     // On Windows, use shell for commands that might need PATH resolution (php, composer, etc.)
     // Git commands work fine without shell
     if (IS_WINDOWS && command !== 'git') {
@@ -104,7 +152,7 @@ async function runCommandCapture(command, args, { cwd } = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd
     }
-    
+
     // On Windows, use shell for commands that might need PATH resolution (php, composer, etc.)
     // Git commands work fine without shell
     if (IS_WINDOWS && command !== 'git') {
@@ -436,7 +484,52 @@ function getLockFilePath(rootDir) {
   return path.join(getProjectConfigDir(rootDir), PROJECT_LOCK_FILE)
 }
 
-async function acquireRemoteLock(ssh, remoteCwd) {
+function createLockPayload() {
+  return {
+    user: os.userInfo().username,
+    pid: process.pid,
+    hostname: os.hostname(),
+    startedAt: new Date().toISOString()
+  }
+}
+
+async function acquireLocalLock(rootDir) {
+  const lockPath = getLockFilePath(rootDir)
+  const configDir = getProjectConfigDir(rootDir)
+  await ensureDirectory(configDir)
+
+  const payload = createLockPayload()
+  const payloadJson = JSON.stringify(payload, null, 2)
+  await fs.writeFile(lockPath, payloadJson, 'utf8')
+
+  return payload
+}
+
+async function releaseLocalLock(rootDir) {
+  const lockPath = getLockFilePath(rootDir)
+  try {
+    await fs.unlink(lockPath)
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      logWarning(`Failed to remove local lock file: ${error.message}`)
+    }
+  }
+}
+
+async function readLocalLock(rootDir) {
+  const lockPath = getLockFilePath(rootDir)
+  try {
+    const content = await fs.readFile(lockPath, 'utf8')
+    return JSON.parse(content)
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null
+    }
+    throw error
+  }
+}
+
+async function readRemoteLock(ssh, remoteCwd) {
   const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
   const escapedLockPath = lockPath.replace(/'/g, "'\\''")
   const checkCommand = `mkdir -p .zephyr && if [ -f '${escapedLockPath}' ]; then cat '${escapedLockPath}'; else echo "LOCK_NOT_FOUND"; fi`
@@ -444,27 +537,100 @@ async function acquireRemoteLock(ssh, remoteCwd) {
   const checkResult = await ssh.execCommand(checkCommand, { cwd: remoteCwd })
 
   if (checkResult.stdout && checkResult.stdout.trim() !== 'LOCK_NOT_FOUND' && checkResult.stdout.trim() !== '') {
-    let details = {}
     try {
-      details = JSON.parse(checkResult.stdout.trim())
+      return JSON.parse(checkResult.stdout.trim())
     } catch (error) {
-      details = { raw: checkResult.stdout.trim() }
+      return { raw: checkResult.stdout.trim() }
     }
-
-    const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
-    const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
-    throw new Error(
-      `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
-    )
   }
 
-  const payload = {
-    user: os.userInfo().username,
-    pid: process.pid,
-    hostname: os.hostname(),
-    startedAt: new Date().toISOString()
+  return null
+}
+
+async function compareLocksAndPrompt(rootDir, ssh, remoteCwd) {
+  const localLock = await readLocalLock(rootDir)
+  const remoteLock = await readRemoteLock(ssh, remoteCwd)
+
+  if (!localLock || !remoteLock) {
+    return false
   }
 
+  // Compare lock contents - if they match, it's likely stale
+  const localKey = `${localLock.user}@${localLock.hostname}:${localLock.pid}:${localLock.startedAt}`
+  const remoteKey = `${remoteLock.user}@${remoteLock.hostname}:${remoteLock.pid}:${remoteLock.startedAt}`
+
+  if (localKey === remoteKey) {
+    const startedBy = remoteLock.user ? `${remoteLock.user}@${remoteLock.hostname ?? 'unknown'}` : 'unknown user'
+    const startedAt = remoteLock.startedAt ? ` at ${remoteLock.startedAt}` : ''
+    const { shouldRemove } = await runPrompt([
+      {
+        type: 'confirm',
+        name: 'shouldRemove',
+        message: `Stale lock detected on server (started by ${startedBy}${startedAt}). This appears to be from a failed deployment. Remove it?`,
+        default: true
+      }
+    ])
+
+    if (shouldRemove) {
+      const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
+      const escapedLockPath = lockPath.replace(/'/g, "'\\''")
+      const removeCommand = `rm -f '${escapedLockPath}'`
+      await ssh.execCommand(removeCommand, { cwd: remoteCwd })
+      await releaseLocalLock(rootDir)
+      return true
+    }
+  }
+
+  return false
+}
+
+async function acquireRemoteLock(ssh, remoteCwd, rootDir) {
+  const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
+  const escapedLockPath = lockPath.replace(/'/g, "'\\''")
+  const checkCommand = `mkdir -p .zephyr && if [ -f '${escapedLockPath}' ]; then cat '${escapedLockPath}'; else echo "LOCK_NOT_FOUND"; fi`
+
+  const checkResult = await ssh.execCommand(checkCommand, { cwd: remoteCwd })
+
+  if (checkResult.stdout && checkResult.stdout.trim() !== 'LOCK_NOT_FOUND' && checkResult.stdout.trim() !== '') {
+    // Check if we have a local lock and compare
+    const localLock = await readLocalLock(rootDir)
+    if (localLock) {
+      const removed = await compareLocksAndPrompt(rootDir, ssh, remoteCwd)
+      if (removed) {
+        // Lock was removed, continue to create new one
+      } else {
+        // User chose not to remove, throw error
+        let details = {}
+        try {
+          details = JSON.parse(checkResult.stdout.trim())
+        } catch (error) {
+          details = { raw: checkResult.stdout.trim() }
+        }
+
+        const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
+        const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
+        throw new Error(
+          `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
+        )
+      }
+    } else {
+      // No local lock, but remote lock exists
+      let details = {}
+      try {
+        details = JSON.parse(checkResult.stdout.trim())
+      } catch (error) {
+        details = { raw: checkResult.stdout.trim() }
+      }
+
+      const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
+      const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
+      throw new Error(
+        `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
+      )
+    }
+  }
+
+  const payload = createLockPayload()
   const payloadJson = JSON.stringify(payload, null, 2)
   const payloadBase64 = Buffer.from(payloadJson).toString('base64')
   const createCommand = `mkdir -p .zephyr && echo '${payloadBase64}' | base64 --decode > '${escapedLockPath}'`
@@ -474,6 +640,9 @@ async function acquireRemoteLock(ssh, remoteCwd) {
   if (createResult.code !== 0) {
     throw new Error(`Failed to create lock file on server: ${createResult.stderr}`)
   }
+
+  // Create local lock as well
+  await acquireLocalLock(rootDir)
 
   return lockPath
 }
@@ -580,11 +749,115 @@ async function ensureDirectory(dirPath) {
   await fs.mkdir(dirPath, { recursive: true })
 }
 
+function generateId() {
+  return crypto.randomBytes(8).toString('hex')
+}
+
+function migrateServers(servers) {
+  if (!Array.isArray(servers)) {
+    return []
+  }
+
+  let needsMigration = false
+  const migrated = servers.map((server) => {
+    if (!server.id) {
+      needsMigration = true
+      return {
+        ...server,
+        id: generateId()
+      }
+    }
+    return server
+  })
+
+  return { servers: migrated, needsMigration }
+}
+
+function migrateApps(apps, servers) {
+  if (!Array.isArray(apps)) {
+    return { apps: [], needsMigration: false }
+  }
+
+  // Create a map of serverName -> serverId for migration
+  const serverNameToId = new Map()
+  servers.forEach((server) => {
+    if (server.id && server.serverName) {
+      serverNameToId.set(server.serverName, server.id)
+    }
+  })
+
+  let needsMigration = false
+  const migrated = apps.map((app) => {
+    const updated = { ...app }
+
+    if (!app.id) {
+      needsMigration = true
+      updated.id = generateId()
+    }
+
+    // Migrate serverName to serverId if needed
+    if (app.serverName && !app.serverId) {
+      const serverId = serverNameToId.get(app.serverName)
+      if (serverId) {
+        needsMigration = true
+        updated.serverId = serverId
+      }
+    }
+
+    return updated
+  })
+
+  return { apps: migrated, needsMigration }
+}
+
+function migratePresets(presets, apps) {
+  if (!Array.isArray(presets)) {
+    return { presets: [], needsMigration: false }
+  }
+
+  // Create a map of serverName:projectPath -> appId for migration
+  const keyToAppId = new Map()
+  apps.forEach((app) => {
+    if (app.id && app.serverName && app.projectPath) {
+      const key = `${app.serverName}:${app.projectPath}`
+      keyToAppId.set(key, app.id)
+    }
+  })
+
+  let needsMigration = false
+  const migrated = presets.map((preset) => {
+    const updated = { ...preset }
+
+    // Migrate from key-based to appId-based if needed
+    if (preset.key && !preset.appId) {
+      const appId = keyToAppId.get(preset.key)
+      if (appId) {
+        needsMigration = true
+        updated.appId = appId
+        // Keep key for backward compatibility during transition, but it's deprecated
+      }
+    }
+
+    return updated
+  })
+
+  return { presets: migrated, needsMigration }
+}
+
 async function loadServers() {
   try {
     const raw = await fs.readFile(SERVERS_FILE, 'utf8')
     const data = JSON.parse(raw)
-    return Array.isArray(data) ? data : []
+    const servers = Array.isArray(data) ? data : []
+
+    const { servers: migrated, needsMigration } = migrateServers(servers)
+
+    if (needsMigration) {
+      await saveServers(migrated)
+      logSuccess('Migrated servers configuration to use unique IDs.')
+    }
+
+    return migrated
   } catch (error) {
     if (error.code === 'ENOENT') {
       return []
@@ -605,15 +878,32 @@ function getProjectConfigPath(rootDir) {
   return path.join(rootDir, PROJECT_CONFIG_DIR, PROJECT_CONFIG_FILE)
 }
 
-async function loadProjectConfig(rootDir) {
+async function loadProjectConfig(rootDir, servers = []) {
   const configPath = getProjectConfigPath(rootDir)
 
   try {
     const raw = await fs.readFile(configPath, 'utf8')
     const data = JSON.parse(raw)
+    const apps = Array.isArray(data?.apps) ? data.apps : []
+    const presets = Array.isArray(data?.presets) ? data.presets : []
+
+    // Migrate apps first (needs servers for serverName -> serverId mapping)
+    const { apps: migratedApps, needsMigration: appsNeedMigration } = migrateApps(apps, servers)
+
+    // Migrate presets (needs migrated apps for key -> appId mapping)
+    const { presets: migratedPresets, needsMigration: presetsNeedMigration } = migratePresets(presets, migratedApps)
+
+    if (appsNeedMigration || presetsNeedMigration) {
+      await saveProjectConfig(rootDir, {
+        apps: migratedApps,
+        presets: migratedPresets
+      })
+      logSuccess('Migrated project configuration to use unique IDs.')
+    }
+
     return {
-      apps: Array.isArray(data?.apps) ? data.apps : [],
-      presets: Array.isArray(data?.presets) ? data.presets : []
+      apps: migratedApps,
+      presets: migratedPresets
     }
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -829,6 +1119,92 @@ function resolveRemotePath(projectPath, remoteHome) {
   return `${sanitizedHome}/${projectPath}`
 }
 
+async function hasPrePushHook(rootDir) {
+  const hookPaths = [
+    path.join(rootDir, '.git', 'hooks', 'pre-push'),
+    path.join(rootDir, '.husky', 'pre-push'),
+    path.join(rootDir, '.githooks', 'pre-push')
+  ]
+
+  for (const hookPath of hookPaths) {
+    try {
+      await fs.access(hookPath)
+      const stats = await fs.stat(hookPath)
+      if (stats.isFile()) {
+        return true
+      }
+    } catch {
+      // Hook doesn't exist at this path, continue checking
+    }
+  }
+
+  return false
+}
+
+async function hasLintScript(rootDir) {
+  try {
+    const packageJsonPath = path.join(rootDir, 'package.json')
+    const raw = await fs.readFile(packageJsonPath, 'utf8')
+    const packageJson = JSON.parse(raw)
+    return packageJson.scripts && typeof packageJson.scripts.lint === 'string'
+  } catch {
+    return false
+  }
+}
+
+async function hasLaravelPint(rootDir) {
+  try {
+    const pintPath = path.join(rootDir, 'vendor', 'bin', 'pint')
+    await fs.access(pintPath)
+    const stats = await fs.stat(pintPath)
+    return stats.isFile()
+  } catch {
+    return false
+  }
+}
+
+async function runLinting(rootDir) {
+  const hasNpmLint = await hasLintScript(rootDir)
+  const hasPint = await hasLaravelPint(rootDir)
+
+  if (hasNpmLint) {
+    logProcessing('Running npm lint...')
+    await runCommand('npm', ['run', 'lint'], { cwd: rootDir })
+    logSuccess('Linting completed.')
+    return true
+  } else if (hasPint) {
+    logProcessing('Running Laravel Pint...')
+    await runCommand('php', ['vendor/bin/pint'], { cwd: rootDir })
+    logSuccess('Linting completed.')
+    return true
+  }
+
+  return false
+}
+
+async function hasUncommittedChanges(rootDir) {
+  const status = await getGitStatus(rootDir)
+  return status.length > 0
+}
+
+async function commitLintingChanges(rootDir) {
+  const status = await getGitStatus(rootDir)
+
+  if (!hasStagedChanges(status)) {
+    // Stage only modified tracked files (not untracked files)
+    await runCommand('git', ['add', '-u'], { cwd: rootDir })
+    const newStatus = await getGitStatus(rootDir)
+    if (!hasStagedChanges(newStatus)) {
+      return false
+    }
+  }
+
+  logProcessing('Committing linting changes...')
+  await runCommand('git', ['commit', '-m', 'style: apply linting fixes'], { cwd: rootDir })
+  logSuccess('Linting changes committed.')
+  return true
+}
+
 async function isLocalLaravelProject(rootDir) {
   try {
     const artisanPath = path.join(rootDir, 'artisan')
@@ -851,17 +1227,35 @@ async function isLocalLaravelProject(rootDir) {
 async function runRemoteTasks(config, options = {}) {
   const { snapshot = null, rootDir = process.cwd() } = options
 
+  await cleanupOldLogs(rootDir)
   await ensureLocalRepositoryState(config.branch, rootDir)
 
   const isLaravel = await isLocalLaravelProject(rootDir)
-  if (isLaravel) {
-    logProcessing('Running Laravel tests locally...')
-    try {
-      await runCommand('php', ['artisan', 'test', '--compact'], { cwd: rootDir })
-      logSuccess('Local tests passed.')
-    } catch (error) {
-      throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
+  const hasHook = await hasPrePushHook(rootDir)
+
+  if (!hasHook) {
+    // Run linting before tests
+    const lintRan = await runLinting(rootDir)
+    if (lintRan) {
+      // Check if linting made changes and commit them
+      const hasChanges = await hasUncommittedChanges(rootDir)
+      if (hasChanges) {
+        await commitLintingChanges(rootDir)
+      }
     }
+
+    // Run tests for Laravel projects
+    if (isLaravel) {
+      logProcessing('Running Laravel tests locally...')
+      try {
+        await runCommand('php', ['artisan', 'test'], { cwd: rootDir })
+        logSuccess('Local tests passed.')
+      } catch (error) {
+        throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
+      }
+    }
+  } else {
+    logProcessing('Pre-push git hook detected. Skipping local linting and test execution.')
   }
 
   const ssh = createSshClient()
@@ -885,7 +1279,7 @@ async function runRemoteTasks(config, options = {}) {
     const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
 
     logProcessing(`Connection established. Acquiring deployment lock on server...`)
-    await acquireRemoteLock(ssh, remoteCwd)
+    await acquireRemoteLock(ssh, remoteCwd, rootDir)
     lockAcquired = true
     logProcessing(`Lock acquired. Running deployment commands in ${remoteCwd}...`)
 
@@ -1179,6 +1573,19 @@ async function runRemoteTasks(config, options = {}) {
     if (logPath) {
       logError(`\nTask output has been logged to: ${logPath}`)
     }
+
+    // If lock was acquired but deployment failed, check for stale locks
+    if (lockAcquired && ssh) {
+      try {
+        const remoteHomeResult = await ssh.execCommand('printf "%s" "$HOME"')
+        const remoteHome = remoteHomeResult.stdout.trim() || `/home/${sshUser}`
+        const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
+        await compareLocksAndPrompt(rootDir, ssh, remoteCwd)
+      } catch (lockError) {
+        // Ignore lock comparison errors during error handling
+      }
+    }
+
     throw new Error(`Deployment failed: ${error.message}`)
   } finally {
     if (lockAcquired && ssh) {
@@ -1187,6 +1594,7 @@ async function runRemoteTasks(config, options = {}) {
         const remoteHome = remoteHomeResult.stdout.trim() || `/home/${sshUser}`
         const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
         await releaseRemoteLock(ssh, remoteCwd)
+        await releaseLocalLock(rootDir)
       } catch (error) {
         logWarning(`Failed to release lock: ${error.message}`)
       }
@@ -1220,6 +1628,7 @@ async function promptServerDetails(existingServers = []) {
   ])
 
   return {
+    id: generateId(),
     serverName: answers.serverName.trim() || defaults.serverName,
     serverIp: answers.serverIp.trim() || defaults.serverIp
   }
@@ -1322,18 +1731,22 @@ async function selectApp(projectConfig, server, currentDir) {
   const apps = projectConfig.apps ?? []
   const matches = apps
     .map((app, index) => ({ app, index }))
-    .filter(({ app }) => app.serverName === server.serverName)
+    .filter(({ app }) => app.serverId === server.id || app.serverName === server.serverName)
 
   if (matches.length === 0) {
     if (apps.length > 0) {
-      const availableServers = [...new Set(apps.map((app) => app.serverName))]
-      logWarning(
-        `No applications configured for server "${server.serverName}". Available servers: ${availableServers.join(', ')}`
-      )
+      const availableServers = [...new Set(apps.map((app) => app.serverName).filter(Boolean))]
+      if (availableServers.length > 0) {
+        logWarning(
+          `No applications configured for server "${server.serverName}". Available servers: ${availableServers.join(', ')}`
+        )
+      }
     }
     logProcessing(`No applications configured for ${server.serverName}. Let's create one.`)
     const appDetails = await promptAppDetails(currentDir)
     const appConfig = {
+      id: generateId(),
+      serverId: server.id,
       serverName: server.serverName,
       ...appDetails
     }
@@ -1366,6 +1779,8 @@ async function selectApp(projectConfig, server, currentDir) {
   if (selection === 'create') {
     const appDetails = await promptAppDetails(currentDir)
     const appConfig = {
+      id: generateId(),
+      serverId: server.id,
       serverName: server.serverName,
       ...appDetails
     }
@@ -1392,17 +1807,44 @@ async function promptPresetName() {
   return presetName.trim()
 }
 
-async function selectPreset(projectConfig) {
+function generatePresetKey(serverName, projectPath) {
+  return `${serverName}:${projectPath}`
+}
+
+async function selectPreset(projectConfig, servers) {
   const presets = projectConfig.presets ?? []
+  const apps = projectConfig.apps ?? []
 
   if (presets.length === 0) {
     return null
   }
 
-  const choices = presets.map((preset, index) => ({
-    name: `${preset.name} (${preset.serverName} → ${preset.projectPath} [${preset.branch}])`,
-    value: index
-  }))
+  const choices = presets.map((preset, index) => {
+    let displayName = preset.name
+
+    if (preset.appId) {
+      // New format: look up app by ID
+      const app = apps.find((a) => a.id === preset.appId)
+      if (app) {
+        const server = servers.find((s) => s.id === app.serverId || s.serverName === app.serverName)
+        const serverName = server?.serverName || 'unknown'
+        const branch = preset.branch || app.branch || 'unknown'
+        displayName = `${preset.name} (${serverName} → ${app.projectPath} [${branch}])`
+      }
+    } else if (preset.key) {
+      // Legacy format: parse from key
+      const keyParts = preset.key.split(':')
+      const serverName = keyParts[0]
+      const projectPath = keyParts[1]
+      const branch = preset.branch || (keyParts.length === 3 ? keyParts[2] : 'unknown')
+      displayName = `${preset.name} (${serverName} → ${projectPath} [${branch}])`
+    }
+
+    return {
+      name: displayName,
+      value: index
+    }
+  })
 
   choices.push(new inquirer.Separator(), {
     name: '➕ Create new preset',
@@ -1448,41 +1890,83 @@ async function main(releaseType = null) {
   await ensureGitignoreEntry(rootDir)
   await ensureProjectReleaseScript(rootDir)
 
-  const projectConfig = await loadProjectConfig(rootDir)
+  // Load servers first (they may be migrated)
+  const servers = await loadServers()
+  // Load project config with servers for migration
+  const projectConfig = await loadProjectConfig(rootDir, servers)
+
   let server = null
   let appConfig = null
   let isCreatingNewPreset = false
 
-  const preset = await selectPreset(projectConfig)
+  const preset = await selectPreset(projectConfig, servers)
 
   if (preset === 'create') {
     // User explicitly chose to create a new preset
     isCreatingNewPreset = true
-    const servers = await loadServers()
     server = await selectServer(servers)
     appConfig = await selectApp(projectConfig, server, rootDir)
   } else if (preset) {
-    // User selected an existing preset
-    const servers = await loadServers()
-    server = servers.find((s) => s.serverName === preset.serverName)
+    // User selected an existing preset - look up by appId
+    if (preset.appId) {
+      appConfig = projectConfig.apps?.find((a) => a.id === preset.appId)
 
-    if (!server) {
-      logWarning(`Preset references server "${preset.serverName}" which no longer exists. Creating new configuration.`)
-      const servers = await loadServers()
+      if (!appConfig) {
+        logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+        server = await selectServer(servers)
+        appConfig = await selectApp(projectConfig, server, rootDir)
+      } else {
+        server = servers.find((s) => s.id === appConfig.serverId || s.serverName === appConfig.serverName)
+
+        if (!server) {
+          logWarning(`Preset references server that no longer exists. Creating new configuration.`)
+          server = await selectServer(servers)
+          appConfig = await selectApp(projectConfig, server, rootDir)
+        } else if (preset.branch && appConfig.branch !== preset.branch) {
+          // Update branch if preset has a different branch
+          appConfig.branch = preset.branch
+          await saveProjectConfig(rootDir, projectConfig)
+          logSuccess(`Updated branch to ${preset.branch} from preset.`)
+        }
+      }
+    } else if (preset.key) {
+      // Legacy preset format - migrate it
+      const keyParts = preset.key.split(':')
+      const serverName = keyParts[0]
+      const projectPath = keyParts[1]
+      const presetBranch = preset.branch || (keyParts.length === 3 ? keyParts[2] : null)
+
+      server = servers.find((s) => s.serverName === serverName)
+
+      if (!server) {
+        logWarning(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
+        server = await selectServer(servers)
+        appConfig = await selectApp(projectConfig, server, rootDir)
+      } else {
+        appConfig = projectConfig.apps?.find(
+          (a) => (a.serverId === server.id || a.serverName === serverName) && a.projectPath === projectPath
+        )
+
+        if (!appConfig) {
+          logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+          appConfig = await selectApp(projectConfig, server, rootDir)
+        } else {
+          // Migrate preset to use appId
+          preset.appId = appConfig.id
+          if (presetBranch && appConfig.branch !== presetBranch) {
+            appConfig.branch = presetBranch
+          }
+          preset.branch = appConfig.branch
+          await saveProjectConfig(rootDir, projectConfig)
+        }
+      }
+    } else {
+      logWarning(`Preset format is invalid. Creating new configuration.`)
       server = await selectServer(servers)
       appConfig = await selectApp(projectConfig, server, rootDir)
-    } else {
-      appConfig = {
-        serverName: preset.serverName,
-        projectPath: preset.projectPath,
-        branch: preset.branch,
-        sshUser: preset.sshUser,
-        sshKey: preset.sshKey
-      }
     }
   } else {
     // No presets exist, go through normal flow
-    const servers = await loadServers()
     server = await selectServer(servers)
     appConfig = await selectApp(projectConfig, server, rootDir)
   }
@@ -1507,29 +1991,43 @@ async function main(releaseType = null) {
   console.log(JSON.stringify(deploymentConfig, null, 2))
 
   if (isCreatingNewPreset || !preset) {
-    const { saveAsPreset } = await runPrompt([
+    const { presetName } = await runPrompt([
       {
-        type: 'confirm',
-        name: 'saveAsPreset',
-        message: 'Save this configuration as a preset?',
-        default: isCreatingNewPreset // Default to true if user explicitly chose to create preset
+        type: 'input',
+        name: 'presetName',
+        message: 'Enter a name for this preset (leave blank to skip)',
+        default: isCreatingNewPreset ? '' : undefined
       }
     ])
 
-    if (saveAsPreset) {
-      const presetName = await promptPresetName()
+    const trimmedName = presetName?.trim()
+
+    if (trimmedName && trimmedName.length > 0) {
       const presets = projectConfig.presets ?? []
-      presets.push({
-        name: presetName,
-        serverName: deploymentConfig.serverName,
-        projectPath: deploymentConfig.projectPath,
-        branch: deploymentConfig.branch,
-        sshUser: deploymentConfig.sshUser,
-        sshKey: deploymentConfig.sshKey
-      })
-      projectConfig.presets = presets
-      await saveProjectConfig(rootDir, projectConfig)
-      logSuccess(`Saved preset "${presetName}" to .zephyr/config.json`)
+
+      // Find app config to get its ID
+      const appId = appConfig.id
+
+      if (!appId) {
+        logWarning('Cannot save preset: app configuration missing ID.')
+      } else {
+        // Check if preset with this appId already exists
+        const existingIndex = presets.findIndex((p) => p.appId === appId)
+        if (existingIndex >= 0) {
+          presets[existingIndex].name = trimmedName
+          presets[existingIndex].branch = deploymentConfig.branch
+        } else {
+          presets.push({
+            name: trimmedName,
+            appId: appId,
+            branch: deploymentConfig.branch
+          })
+        }
+
+        projectConfig.presets = presets
+        await saveProjectConfig(rootDir, projectConfig)
+        logSuccess(`Saved preset "${trimmedName}" to .zephyr/config.json`)
+      }
     }
   }
 

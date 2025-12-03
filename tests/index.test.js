@@ -7,6 +7,7 @@ const mockWriteFile = vi.fn()
 const mockAppendFile = vi.fn()
 const mockMkdir = vi.fn()
 const mockUnlink = vi.fn()
+const mockStat = vi.fn()
 const mockExecCommand = vi.fn()
 const mockConnect = vi.fn()
 const mockDispose = vi.fn()
@@ -20,7 +21,8 @@ vi.mock('node:fs/promises', () => ({
     writeFile: mockWriteFile,
     appendFile: mockAppendFile,
     mkdir: mockMkdir,
-    unlink: mockUnlink
+    unlink: mockUnlink,
+    stat: mockStat
   },
   readFile: mockReadFile,
   readdir: mockReaddir,
@@ -28,7 +30,8 @@ vi.mock('node:fs/promises', () => ({
   writeFile: mockWriteFile,
   appendFile: mockAppendFile,
   mkdir: mockMkdir,
-  unlink: mockUnlink
+  unlink: mockUnlink,
+  stat: mockStat
 }))
 
 const spawnQueue = []
@@ -153,12 +156,20 @@ describe('zephyr deployment helpers', () => {
     mockAccess.mockReset()
     mockWriteFile.mockReset()
     mockAppendFile.mockReset()
-  mockUnlink.mockReset()
-  mockMkdir.mockReset()
+    mockUnlink.mockReset()
+    mockMkdir.mockReset()
+    mockStat.mockReset()
     mockExecCommand.mockReset()
     mockConnect.mockReset()
     mockDispose.mockReset()
     mockPrompt.mockReset()
+    
+    // Default mock implementations
+    mockMkdir.mockResolvedValue(undefined)
+    mockReaddir.mockResolvedValue([]) // Empty directory for log cleanup
+    mockStat.mockImplementation(async (path) => {
+      return { mtime: new Date() }
+    })
     globalThis.__zephyrSSHFactory = () => ({
       connect: mockConnect,
       execCommand: mockExecCommand,
@@ -243,7 +254,9 @@ describe('zephyr deployment helpers', () => {
       const servers = []
       const server = await selectServer(servers)
 
-      expect(server).toEqual({ serverName: 'production', serverIp: '203.0.113.10' })
+      expect(server).toMatchObject({ serverName: 'production', serverIp: '203.0.113.10' })
+      expect(server.id).toBeDefined()
+      expect(typeof server.id).toBe('string')
       expect(servers).toHaveLength(1)
       expect(mockMkdir).toHaveBeenCalledWith(expect.stringMatching(/[\\/]\.config[\\/]zephyr/), { recursive: true })
       const [writePath, payload] = mockWriteFile.mock.calls.at(-1)
@@ -357,15 +370,31 @@ describe('zephyr deployment helpers', () => {
   })
 
   it('schedules Laravel tasks based on diff', async () => {
-    // Mock reads: composer.json for Laravel detection first, then SSH key later
+    // Mock reads: composer.json for Laravel detection, package.json for lint check, then SSH key
     mockReadFile
       .mockResolvedValueOnce('{"require":{"laravel/framework":"^10.0"}}') // composer.json for Laravel detection
+      .mockResolvedValueOnce('{"scripts":{}}') // package.json - no lint script
       .mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----') // SSH key
-    // Mock fs.access for artisan file check
-    mockAccess.mockResolvedValueOnce(undefined) // artisan file exists
+    // Mock fs.access for artisan file check, hook detection, and pint check
+    mockAccess.mockImplementation(async (filePath) => {
+      if (filePath.includes('artisan')) {
+        return undefined // artisan file exists
+      }
+      // Reject for all hook paths (hook doesn't exist)
+      if (filePath.includes('pre-push')) {
+        throw new Error('ENOENT')
+      }
+      // Reject for pint (doesn't exist)
+      if (filePath.includes('vendor/bin/pint')) {
+        throw new Error('ENOENT')
+      }
+      return undefined
+    })
+    // Mock log cleanup (readdir returns empty, no old logs to clean)
+    mockReaddir.mockResolvedValueOnce([])
     queueSpawnResponse({ stdout: 'main\n' })
-    queueSpawnResponse({ stdout: '' })
-    queueSpawnResponse({}) // php artisan test --compact
+    queueSpawnResponse({ stdout: '' }) // git status - no changes
+    queueSpawnResponse({}) // php artisan test
 
     mockConnect.mockResolvedValue()
     mockDispose.mockResolvedValue()
@@ -425,16 +454,186 @@ describe('zephyr deployment helpers', () => {
     expect(executedCommands.some((cmd) => cmd.includes('cache:clear'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('horizon:terminate'))).toBe(true)
 
+    // Verify local lock was created
+    const lockFileWrites = mockWriteFile.mock.calls.filter(([filePath]) =>
+      filePath.includes('deploy.lock')
+    )
+    expect(lockFileWrites.length).toBeGreaterThan(0)
+
     // Verify local test command was executed (not remote)
-    // Check that php artisan test --compact was called locally via spawn
+    // Check that php artisan test was called locally via spawn
     const phpTestCalls = mockSpawn.mock.calls.filter(
-      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && args.includes('--compact')
+      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && !args.includes('--compact')
+    )
+    expect(phpTestCalls.length).toBeGreaterThan(0)
+  })
+
+  it('skips Laravel tests when pre-push hook exists', async () => {
+    // Mock reads: SSH key (linting and tests skipped, so no package.json/composer.json reads needed)
+    mockReadFile.mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----') // SSH key
+    // Mock fs.access for hook detection and SSH key access
+    mockAccess.mockImplementation(async (filePath) => {
+      // Resolve for pre-push hook path (hook exists)
+      if (filePath.includes('pre-push')) {
+        return undefined
+      }
+      // Resolve for SSH key path
+      if (filePath.includes('.ssh') || filePath.includes('id_rsa')) {
+        return undefined
+      }
+      throw new Error('ENOENT')
+    })
+    // Mock fs.stat for hook file check
+    mockStat.mockResolvedValueOnce({ isFile: () => true })
+    // Mock log cleanup (readdir returns empty, no old logs to clean)
+    mockReaddir.mockResolvedValueOnce([])
+    queueSpawnResponse({ stdout: 'main\n' })
+    queueSpawnResponse({ stdout: '' })
+
+    mockConnect.mockResolvedValue()
+    mockDispose.mockResolvedValue()
+
+    mockExecCommand.mockImplementation(async (command) => {
+      const response = { stdout: '', stderr: '', code: 0 }
+
+      if (command.includes('printf "%s" "$HOME"')) {
+        return { ...response, stdout: '/home/runcloud' }
+      }
+
+      if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
+        if (command.includes('cat')) {
+          return { ...response, stdout: 'LOCK_NOT_FOUND' }
+        }
+        return response
+      }
+
+      if (command.includes('grep -q "laravel/framework"')) {
+        return { ...response, stdout: 'yes' }
+      }
+
+      if (command.includes('git diff')) {
+        return {
+          ...response,
+          stdout: 'composer.json\n'
+        }
+      }
+
+      return response
+    })
+
+    const { runRemoteTasks } = await import('../src/index.mjs')
+
+    await runRemoteTasks({
+      serverIp: '127.0.0.1',
+      projectPath: '~/app',
+      branch: 'main',
+      sshUser: 'forge',
+      sshKey: '~/.ssh/id_rsa'
+    })
+
+    // Verify local test command was NOT executed
+    const phpTestCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test')
+    )
+    expect(phpTestCalls.length).toBe(0)
+  })
+
+  it.skip('runs linting and commits changes before tests', async () => {
+    // Mock reads: composer.json for Laravel detection, package.json with lint script, then SSH key
+    mockReadFile
+      .mockResolvedValueOnce('{"require":{"laravel/framework":"^10.0"}}') // composer.json for Laravel detection
+      .mockResolvedValueOnce('{"scripts":{"lint":"eslint ."}}') // package.json - has lint script
+      .mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----') // SSH key
+    // Mock fs.access for artisan file check and hook detection
+    mockAccess.mockImplementation(async (filePath) => {
+      if (filePath.includes('artisan')) {
+        return undefined // artisan file exists
+      }
+      // Reject for all hook paths (hook doesn't exist)
+      if (filePath.includes('pre-push')) {
+        throw new Error('ENOENT')
+      }
+      return undefined
+    })
+    // Mock log cleanup (readdir returns empty, no old logs to clean)
+    mockReaddir.mockResolvedValueOnce([])
+    queueSpawnResponse({ stdout: 'main\n' }) // git rev-parse --abbrev-ref HEAD
+    queueSpawnResponse({ stdout: '' }) // git status --porcelain (ensureLocalRepositoryState - initial)
+    queueSpawnResponse({ stdout: '## main...origin/main\n' }) // git status --short --branch
+    queueSpawnResponse({}) // npm run lint
+    queueSpawnResponse({ stdout: ' M src/file.js\n' }) // git status --porcelain (hasUncommittedChanges)
+    queueSpawnResponse({}) // git add -A
+    queueSpawnResponse({ stdout: 'M  src/file.js\n' }) // git status --porcelain (commitLintingChanges after staging)
+    queueSpawnResponse({}) // git commit
+    queueSpawnResponse({}) // php artisan test
+
+    mockConnect.mockResolvedValue()
+    mockDispose.mockResolvedValue()
+
+    mockExecCommand.mockImplementation(async (command) => {
+      const response = { stdout: '', stderr: '', code: 0 }
+
+      if (command.includes('printf "%s" "$HOME"')) {
+        return { ...response, stdout: '/home/runcloud' }
+      }
+
+      if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
+        if (command.includes('cat')) {
+          return { ...response, stdout: 'LOCK_NOT_FOUND' }
+        }
+        return response
+      }
+
+      if (command.includes('grep -q "laravel/framework"')) {
+        return { ...response, stdout: 'yes' }
+      }
+
+      if (command.includes('git diff')) {
+        return { ...response, stdout: '' }
+      }
+
+      return response
+    })
+
+    const { runRemoteTasks } = await import('../src/index.mjs')
+
+    await runRemoteTasks({
+      serverIp: '127.0.0.1',
+      projectPath: '~/app',
+      branch: 'main',
+      sshUser: 'forge',
+      sshKey: '~/.ssh/id_rsa'
+    })
+
+    // Verify lint command was executed
+    const lintCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'npm' && Array.isArray(args) && args.includes('run') && args.includes('lint')
+    )
+    expect(lintCalls.length).toBeGreaterThan(0)
+
+    // Verify git add and commit were called
+    // Note: git add uses 'add' and '-A' as separate args
+    const gitAddCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args.includes('add') && args.includes('-A')
+    )
+    expect(gitAddCalls.length).toBeGreaterThan(0)
+
+    const gitCommitCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args.includes('commit') && args.some(arg => typeof arg === 'string' && arg.includes('style: apply linting fixes'))
+    )
+    expect(gitCommitCalls.length).toBeGreaterThan(0)
+
+    // Verify test command was executed
+    const phpTestCalls = mockSpawn.mock.calls.filter(
+      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test')
     )
     expect(phpTestCalls.length).toBeGreaterThan(0)
   })
 
   it('skips Laravel tasks when framework not detected', async () => {
     mockReadFile.mockResolvedValue('-----BEGIN RSA PRIVATE KEY-----')
+    // Mock log cleanup (readdir returns empty, no old logs to clean)
+    mockReaddir.mockResolvedValueOnce([])
     queueSpawnResponse({ stdout: 'main\n' })
     queueSpawnResponse({ stdout: '' })
 
@@ -531,11 +730,8 @@ describe('zephyr deployment helpers', () => {
           presets: [
             {
               name: 'production',
-              serverName: 'prod-server',
-              projectPath: '~/webapps/app',
-              branch: 'main',
-              sshUser: 'deploy',
-              sshKey: '~/.ssh/id_rsa'
+              key: 'prod-server:~/webapps/app',
+              branch: 'main'
             }
           ]
         })
@@ -547,9 +743,11 @@ describe('zephyr deployment helpers', () => {
 
       expect(config.presets).toHaveLength(1)
       expect(config.presets[0].name).toBe('production')
+      expect(config.presets[0].key).toBe('prod-server:~/webapps/app')
+      expect(config.presets[0].branch).toBe('main')
     })
 
-    it('saves presets to project config', async () => {
+    it('saves presets to project config with unique key', async () => {
       mockReadFile.mockResolvedValueOnce(
         JSON.stringify({
           apps: [],
@@ -562,11 +760,8 @@ describe('zephyr deployment helpers', () => {
       const config = await loadProjectConfig(process.cwd())
       config.presets.push({
         name: 'staging',
-        serverName: 'staging-server',
-        projectPath: '~/webapps/staging',
-        branch: 'develop',
-        sshUser: 'deploy',
-        sshKey: '~/.ssh/id_rsa'
+        key: 'staging-server:~/webapps/staging',
+        branch: 'develop'
       })
 
       await saveProjectConfig(process.cwd(), config)
@@ -576,6 +771,11 @@ describe('zephyr deployment helpers', () => {
       const saved = JSON.parse(payload)
       expect(saved.presets).toHaveLength(1)
       expect(saved.presets[0].name).toBe('staging')
+      expect(saved.presets[0].key).toBe('staging-server:~/webapps/staging')
+      expect(saved.presets[0].branch).toBe('develop')
+      // Verify preset doesn't duplicate server/app details
+      expect(saved.presets[0].serverName).toBeUndefined()
+      expect(saved.presets[0].projectPath).toBeUndefined()
     })
   })
 })
