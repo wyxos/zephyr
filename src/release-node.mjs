@@ -389,7 +389,6 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
   logStep('Deploying to GitHub Pages...')
 
   // Write CNAME file to dist if homepage is set
-  const distPath = path.join(rootDir, 'dist')
   const cnamePath = path.join(distPath, 'CNAME')
   
   if (pkg.homepage) {
