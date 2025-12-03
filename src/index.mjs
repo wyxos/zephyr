@@ -6,6 +6,7 @@ import process from 'node:process'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { NodeSSH } from 'node-ssh'
+import { releaseNode } from './release-node.mjs'
 
 const IS_WINDOWS = process.platform === 'win32'
 
@@ -1425,7 +1426,23 @@ async function selectPreset(projectConfig) {
   return presets[selection]
 }
 
-async function main() {
+async function main(releaseType = null) {
+  // Handle node/vue package release
+  if (releaseType === 'node' || releaseType === 'vue') {
+    try {
+      await releaseNode()
+      return
+    } catch (error) {
+      logError('\nRelease failed:')
+      logError(error.message)
+      if (error.stack) {
+        console.error(error.stack)
+      }
+      process.exit(1)
+    }
+  }
+
+  // Default: Laravel deployment workflow
   const rootDir = process.cwd()
 
   await ensureGitignoreEntry(rootDir)
@@ -1572,5 +1589,6 @@ export {
   loadServers,
   loadProjectConfig,
   saveProjectConfig,
-  main
+  main,
+  releaseNode
 }
