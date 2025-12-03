@@ -302,7 +302,8 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
   }
 
   try {
-    await runCommand('npm', ['version', releaseType, '--message', 'chore: release %s'], { cwd: rootDir })
+    // npm version will update package.json and create a commit with default message
+    await runCommand('npm', ['version', releaseType], { cwd: rootDir })
   } finally {
     // Restore lib changes and ensure they're in the commit
     if (hasLibChanges) {
@@ -317,6 +318,11 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
   }
 
   const pkg = await readPackage(rootDir)
+  const commitMessage = `chore: release ${pkg.version}`
+
+  // Amend the commit message to use our custom format
+  await runCommand('git', ['commit', '--amend', '-m', commitMessage], { cwd: rootDir })
+
   logSuccess(`Version updated to ${pkg.version}.`)
   return pkg
 }
