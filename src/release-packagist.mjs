@@ -292,8 +292,12 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
 }
 
 async function pushChanges(rootDir = process.cwd()) {
-  logStep('Pushing commits and tags to origin...')
-  await runCommand('git', ['push', '--follow-tags'], { cwd: rootDir })
+  logStep('Pushing commits to origin...')
+  await runCommand('git', ['push'], { cwd: rootDir })
+
+  logStep('Pushing tags to origin...')
+  await runCommand('git', ['push', 'origin', '--tags'], { cwd: rootDir })
+
   logSuccess('Git push completed.')
 }
 
