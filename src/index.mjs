@@ -8,6 +8,7 @@ import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { NodeSSH } from 'node-ssh'
 import { releaseNode } from './release-node.mjs'
+import { releasePackagist } from './release-packagist.mjs'
 
 const IS_WINDOWS = process.platform === 'win32'
 
@@ -1884,6 +1885,21 @@ async function main(releaseType = null) {
     }
   }
 
+  // Handle packagist/composer package release
+  if (releaseType === 'packagist') {
+    try {
+      await releasePackagist()
+      return
+    } catch (error) {
+      logError('\nRelease failed:')
+      logError(error.message)
+      if (error.stack) {
+        console.error(error.stack)
+      }
+      process.exit(1)
+    }
+  }
+
   // Default: Laravel deployment workflow
   const rootDir = process.cwd()
 
@@ -2088,5 +2104,6 @@ export {
   loadProjectConfig,
   saveProjectConfig,
   main,
-  releaseNode
+  releaseNode,
+  releasePackagist
 }
