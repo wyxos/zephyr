@@ -1225,14 +1225,14 @@ async function runRemoteTasks(config, options = {}) {
     }
 
     // Run tests for Laravel projects
-    if (isLaravel) {
-      logProcessing('Running Laravel tests locally...')
-      try {
-        await runCommand('php', ['artisan', 'test'], { cwd: rootDir })
-        logSuccess('Local tests passed.')
-      } catch (error) {
-        throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
-      }
+  if (isLaravel) {
+    logProcessing('Running Laravel tests locally...')
+    try {
+      await runCommand('php', ['artisan', 'test'], { cwd: rootDir })
+      logSuccess('Local tests passed.')
+    } catch (error) {
+      throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
+    }
     }
   } else {
     logProcessing('Pre-push git hook detected. Skipping local linting and test execution.')
@@ -1717,9 +1717,9 @@ async function selectApp(projectConfig, server, currentDir) {
     if (apps.length > 0) {
       const availableServers = [...new Set(apps.map((app) => app.serverName).filter(Boolean))]
       if (availableServers.length > 0) {
-        logWarning(
-          `No applications configured for server "${server.serverName}". Available servers: ${availableServers.join(', ')}`
-        )
+      logWarning(
+        `No applications configured for server "${server.serverName}". Available servers: ${availableServers.join(', ')}`
+      )
       }
     }
     logProcessing(`No applications configured for ${server.serverName}. Let's create one.`)
@@ -1822,7 +1822,7 @@ async function selectPreset(projectConfig, servers) {
     
     return {
       name: displayName,
-      value: index
+    value: index
     }
   })
 
@@ -1900,20 +1900,20 @@ async function main() {
       const projectPath = keyParts[1]
       const presetBranch = preset.branch || (keyParts.length === 3 ? keyParts[2] : null)
       
-      server = servers.find((s) => s.serverName === serverName)
-      
-      if (!server) {
-        logWarning(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
-        server = await selectServer(servers)
-        appConfig = await selectApp(projectConfig, server, rootDir)
-      } else {
-        appConfig = projectConfig.apps?.find(
+    server = servers.find((s) => s.serverName === serverName)
+
+    if (!server) {
+      logWarning(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
+      server = await selectServer(servers)
+      appConfig = await selectApp(projectConfig, server, rootDir)
+    } else {
+      appConfig = projectConfig.apps?.find(
           (a) => (a.serverId === server.id || a.serverName === serverName) && a.projectPath === projectPath
-        )
-        
-        if (!appConfig) {
-          logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
-          appConfig = await selectApp(projectConfig, server, rootDir)
+      )
+
+      if (!appConfig) {
+        logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+        appConfig = await selectApp(projectConfig, server, rootDir)
         } else {
           // Migrate preset to use appId
           preset.appId = appConfig.id
@@ -1965,7 +1965,7 @@ async function main() {
     ])
 
     const trimmedName = presetName?.trim()
-    
+
     if (trimmedName && trimmedName.length > 0) {
       const presets = projectConfig.presets ?? []
       
@@ -1977,19 +1977,19 @@ async function main() {
       } else {
         // Check if preset with this appId already exists
         const existingIndex = presets.findIndex((p) => p.appId === appId)
-        if (existingIndex >= 0) {
+      if (existingIndex >= 0) {
           presets[existingIndex].name = trimmedName
           presets[existingIndex].branch = deploymentConfig.branch
-        } else {
-          presets.push({
+      } else {
+        presets.push({
             name: trimmedName,
             appId: appId,
             branch: deploymentConfig.branch
-          })
-        }
-        
-        projectConfig.presets = presets
-        await saveProjectConfig(rootDir, projectConfig)
+        })
+      }
+      
+      projectConfig.presets = presets
+      await saveProjectConfig(rootDir, projectConfig)
         logSuccess(`Saved preset "${trimmedName}" to .zephyr/config.json`)
       }
     }
