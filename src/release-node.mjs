@@ -5,24 +5,14 @@ import { readFile } from 'node:fs/promises'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-
-const STEP_PREFIX = '→'
-const OK_PREFIX = '✔'
-const WARN_PREFIX = '⚠'
+import chalk from 'chalk'
 
 const IS_WINDOWS = process.platform === 'win32'
 
-function logStep(message) {
-  console.log(`${STEP_PREFIX} ${message}`)
-}
-
-function logSuccess(message) {
-  console.log(`${OK_PREFIX} ${message}`)
-}
-
-function logWarning(message) {
-  console.warn(`${WARN_PREFIX} ${message}`)
-}
+const logProcessing = (message = '') => console.log(chalk.yellow(message))
+const logSuccess = (message = '') => console.log(chalk.green(message))
+const logWarning = (message = '') => console.warn(chalk.yellow(message))
+const logError = (message = '') => console.error(chalk.red(message))
 
 function runCommand(command, args, { cwd = process.cwd(), capture = false, useShell = false } = {}) {
   return new Promise((resolve, reject) => {
@@ -114,7 +104,7 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef, rootDir = process
   const remoteBranch = branchParts.join('/')
 
   if (remoteName && remoteBranch) {
-    logStep(`Fetching latest updates from ${remoteName}/${remoteBranch}...`)
+    logProcessing(`Fetching latest updates from ${remoteName}/${remoteBranch}...`)
     try {
       await runCommand('git', ['fetch', remoteName, remoteBranch], { cwd: rootDir })
     } catch (error) {
@@ -136,7 +126,7 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef, rootDir = process
 
   if (Number.isFinite(behind) && behind > 0) {
     if (remoteName && remoteBranch) {
-      logStep(`Fast-forwarding ${branch} with ${upstreamRef}...`)
+      logProcessing(`Fast-forwarding ${branch} with ${upstreamRef}...`)
 
       try {
         await runCommand('git', ['pull', '--ff-only', remoteName, remoteBranch], { cwd: rootDir })
@@ -198,11 +188,11 @@ async function runLint(skipLint, pkg, rootDir = process.cwd()) {
   }
 
   if (!hasScript(pkg, 'lint')) {
-    logStep('Skipping lint (no lint script found in package.json).')
+    logProcessing('Skipping lint (no lint script found in package.json).')
     return
   }
 
-  logStep('Running lint...')
+  logProcessing('Running lint...')
   await runCommand('npm', ['run', 'lint'], { cwd: rootDir })
   logSuccess('Lint passed.')
 }
@@ -215,11 +205,11 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
 
   // Check for test:run or test script
   if (!hasScript(pkg, 'test:run') && !hasScript(pkg, 'test')) {
-    logStep('Skipping tests (no test or test:run script found in package.json).')
+    logProcessing('Skipping tests (no test or test:run script found in package.json).')
     return
   }
 
-  logStep('Running test suite...')
+  logProcessing('Running test suite...')
 
   let dotInterval = null
   try {
@@ -251,10 +241,10 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
     }
     process.stdout.write('\n')
     if (error.stdout) {
-      console.error(error.stdout)
+      logError(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      logError(error.stderr)
     }
     throw error
   }
@@ -267,11 +257,11 @@ async function runBuild(skipBuild, pkg, rootDir = process.cwd()) {
   }
 
   if (!hasScript(pkg, 'build')) {
-    logStep('Skipping build (no build script found in package.json).')
+    logProcessing('Skipping build (no build script found in package.json).')
     return
   }
 
-  logStep('Building project...')
+  logProcessing('Building project...')
   await runCommand('npm', ['run', 'build'], { cwd: rootDir })
   logSuccess('Build completed.')
 }
@@ -283,11 +273,11 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
   }
 
   if (!hasScript(pkg, 'build:lib')) {
-    logStep('Skipping library build (no build:lib script found in package.json).')
+    logProcessing('Skipping library build (no build:lib script found in package.json).')
     return false
   }
 
-  logStep('Building library...')
+  logProcessing('Building library...')
   await runCommand('npm', ['run', 'build:lib'], { cwd: rootDir })
   logSuccess('Library built.')
 
@@ -299,7 +289,7 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
   })
 
   if (hasLibChanges) {
-    logStep('Committing lib build artifacts...')
+    logProcessing('Committing lib build artifacts...')
     await runCommand('git', ['add', 'lib/'], { cwd: rootDir })
     await runCommand('git', ['commit', '-m', 'chore: build lib artifacts'], { cwd: rootDir })
     logSuccess('Lib build artifacts committed.')
@@ -309,13 +299,13 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
 }
 
 async function ensureNpmAuth(rootDir = process.cwd()) {
-  logStep('Confirming npm authentication...')
+  logProcessing('Confirming npm authentication...')
   await runCommand('npm', ['whoami'], { cwd: rootDir })
   logSuccess('npm authenticated.')
 }
 
 async function bumpVersion(releaseType, rootDir = process.cwd()) {
-  logStep(`Bumping package version...`)
+  logProcessing(`Bumping package version...`)
 
   // Lib changes should already be committed by runLibBuild, but check anyway
   const { stdout: statusBefore } = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
@@ -325,7 +315,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
   })
 
   if (hasLibChanges) {
-    logStep('Stashing lib build artifacts...')
+    logProcessing('Stashing lib build artifacts...')
     await runCommand('git', ['stash', 'push', '-u', '-m', 'temp: lib build artifacts', 'lib/'], { cwd: rootDir })
   }
 
@@ -335,7 +325,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
   } finally {
     // Restore lib changes and ensure they're in the commit
     if (hasLibChanges) {
-      logStep('Restoring lib build artifacts...')
+      logProcessing('Restoring lib build artifacts...')
       await runCommand('git', ['stash', 'pop'], { cwd: rootDir })
       await runCommand('git', ['add', 'lib/'], { cwd: rootDir })
       const { stdout: statusAfter } = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
@@ -356,7 +346,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
 }
 
 async function pushChanges(rootDir = process.cwd()) {
-  logStep('Pushing commits and tags to origin...')
+  logProcessing('Pushing commits and tags to origin...')
   await runCommand('git', ['push', '--follow-tags'], { cwd: rootDir })
   logSuccess('Git push completed.')
 }
@@ -371,7 +361,7 @@ async function publishPackage(pkg, rootDir = process.cwd()) {
     publishArgs.push('--access', access)
   }
 
-  logStep(`Publishing ${pkg.name}@${pkg.version} to npm...`)
+  logProcessing(`Publishing ${pkg.name}@${pkg.version} to npm...`)
   await runCommand('npm', publishArgs, { cwd: rootDir })
   logSuccess('npm publish completed.')
 }
@@ -405,11 +395,11 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
   }
 
   if (!distExists) {
-    logStep('Skipping GitHub Pages deployment (no dist directory found).')
+    logProcessing('Skipping GitHub Pages deployment (no dist directory found).')
     return
   }
 
-  logStep('Deploying to GitHub Pages...')
+  logProcessing('Deploying to GitHub Pages...')
 
   // Write CNAME file to dist if homepage is set
   const cnamePath = path.join(distPath, 'CNAME')
@@ -459,35 +449,41 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
 }
 
 export async function releaseNode() {
-  const { releaseType, skipTests, skipLint, skipBuild, skipDeploy } = parseArgs()
-  const rootDir = process.cwd()
+  try {
+    const { releaseType, skipTests, skipLint, skipBuild, skipDeploy } = parseArgs()
+    const rootDir = process.cwd()
 
-  logStep('Reading package metadata...')
-  const pkg = await readPackage(rootDir)
+    logProcessing('Reading package metadata...')
+    const pkg = await readPackage(rootDir)
 
-  logStep('Checking working tree status...')
-  await ensureCleanWorkingTree(rootDir)
+    logProcessing('Checking working tree status...')
+    await ensureCleanWorkingTree(rootDir)
 
-  const branch = await getCurrentBranch(rootDir)
-  if (!branch) {
-    throw new Error('Unable to determine current branch.')
+    const branch = await getCurrentBranch(rootDir)
+    if (!branch) {
+      throw new Error('Unable to determine current branch.')
+    }
+
+    logProcessing(`Current branch: ${branch}`)
+    const upstreamRef = await getUpstreamRef(rootDir)
+    await ensureUpToDateWithUpstream(branch, upstreamRef, rootDir)
+
+    await runLint(skipLint, pkg, rootDir)
+    await runTests(skipTests, pkg, rootDir)
+    await runBuild(skipBuild, pkg, rootDir)
+    await runLibBuild(skipBuild, pkg, rootDir)
+    await ensureNpmAuth(rootDir)
+
+    const updatedPkg = await bumpVersion(releaseType, rootDir)
+    await pushChanges(rootDir)
+    await publishPackage(updatedPkg, rootDir)
+    await deployGHPages(skipDeploy, updatedPkg, rootDir)
+
+    logSuccess(`Release workflow completed for ${updatedPkg.name}@${updatedPkg.version}.`)
+  } catch (error) {
+    logError('\nRelease failed:')
+    logError(error.message)
+    throw error
   }
-
-  logStep(`Current branch: ${branch}`)
-  const upstreamRef = await getUpstreamRef(rootDir)
-  await ensureUpToDateWithUpstream(branch, upstreamRef, rootDir)
-
-  await runLint(skipLint, pkg, rootDir)
-  await runTests(skipTests, pkg, rootDir)
-  await runBuild(skipBuild, pkg, rootDir)
-  await runLibBuild(skipBuild, pkg, rootDir)
-  await ensureNpmAuth(rootDir)
-
-  const updatedPkg = await bumpVersion(releaseType, rootDir)
-  await pushChanges(rootDir)
-  await publishPackage(updatedPkg, rootDir)
-  await deployGHPages(skipDeploy, updatedPkg, rootDir)
-
-  logSuccess(`Release workflow completed for ${updatedPkg.name}@${updatedPkg.version}.`)
 }
 
