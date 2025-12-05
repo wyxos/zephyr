@@ -106,8 +106,11 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef, rootDir = process
   if (remoteName && remoteBranch) {
     logProcessing(`Fetching latest updates from ${remoteName}/${remoteBranch}...`)
     try {
-      await runCommand('git', ['fetch', remoteName, remoteBranch], { cwd: rootDir })
+      await runCommand('git', ['fetch', remoteName, remoteBranch], { capture: true, cwd: rootDir })
     } catch (error) {
+      if (error.stderr) {
+        logError(error.stderr)
+      }
       throw new Error(`Failed to fetch ${upstreamRef}: ${error.message}`)
     }
   }
@@ -129,8 +132,11 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef, rootDir = process
       logProcessing(`Fast-forwarding ${branch} with ${upstreamRef}...`)
 
       try {
-        await runCommand('git', ['pull', '--ff-only', remoteName, remoteBranch], { cwd: rootDir })
+        await runCommand('git', ['pull', '--ff-only', remoteName, remoteBranch], { capture: true, cwd: rootDir })
       } catch (error) {
+        if (error.stderr) {
+          logError(error.stderr)
+        }
         throw new Error(
           `Unable to fast-forward ${branch} with ${upstreamRef}. Resolve conflicts manually, then rerun the release.\n${error.message}`
         )
@@ -290,8 +296,8 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
 
   if (hasLibChanges) {
     logProcessing('Committing lib build artifacts...')
-    await runCommand('git', ['add', 'lib/'], { cwd: rootDir })
-    await runCommand('git', ['commit', '-m', 'chore: build lib artifacts'], { cwd: rootDir })
+    await runCommand('git', ['add', 'lib/'], { capture: true, cwd: rootDir })
+    await runCommand('git', ['commit', '-m', 'chore: build lib artifacts'], { capture: true, cwd: rootDir })
     logSuccess('Lib build artifacts committed.')
   }
 
@@ -300,8 +306,19 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
 
 async function ensureNpmAuth(rootDir = process.cwd()) {
   logProcessing('Confirming npm authentication...')
-  await runCommand('npm', ['whoami'], { cwd: rootDir })
-  logSuccess('npm authenticated.')
+  try {
+    const result = await runCommand('npm', ['whoami'], { capture: true, cwd: rootDir })
+    // Only show username if we captured it, otherwise just show success
+    if (result?.stdout) {
+      // Silently authenticated - we don't need to show the username
+    }
+    logSuccess('npm authenticated.')
+  } catch (error) {
+    if (error.stderr) {
+      logError(error.stderr)
+    }
+    throw error
+  }
 }
 
 async function bumpVersion(releaseType, rootDir = process.cwd()) {
@@ -316,21 +333,28 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
 
   if (hasLibChanges) {
     logProcessing('Stashing lib build artifacts...')
-    await runCommand('git', ['stash', 'push', '-u', '-m', 'temp: lib build artifacts', 'lib/'], { cwd: rootDir })
+    await runCommand('git', ['stash', 'push', '-u', '-m', 'temp: lib build artifacts', 'lib/'], { capture: true, cwd: rootDir })
   }
 
   try {
     // npm version will update package.json and create a commit with default message
-    await runCommand('npm', ['version', releaseType], { cwd: rootDir })
+    const result = await runCommand('npm', ['version', releaseType], { capture: true, cwd: rootDir })
+    // Extract version from output (e.g., "v0.2.8" or "0.2.8")
+    if (result?.stdout) {
+      const versionMatch = result.stdout.match(/v?(\d+\.\d+\.\d+)/)
+      if (versionMatch) {
+        // Version is shown in the logSuccess message below, no need to show it here
+      }
+    }
   } finally {
     // Restore lib changes and ensure they're in the commit
     if (hasLibChanges) {
       logProcessing('Restoring lib build artifacts...')
-      await runCommand('git', ['stash', 'pop'], { cwd: rootDir })
-      await runCommand('git', ['add', 'lib/'], { cwd: rootDir })
+      await runCommand('git', ['stash', 'pop'], { capture: true, cwd: rootDir })
+      await runCommand('git', ['add', 'lib/'], { capture: true, cwd: rootDir })
       const { stdout: statusAfter } = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
       if (statusAfter.includes('lib/')) {
-        await runCommand('git', ['commit', '--amend', '--no-edit'], { cwd: rootDir })
+        await runCommand('git', ['commit', '--amend', '--no-edit'], { capture: true, cwd: rootDir })
       }
     }
   }
@@ -339,7 +363,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
   const commitMessage = `chore: release ${pkg.version}`
 
   // Amend the commit message to use our custom format
-  await runCommand('git', ['commit', '--amend', '-m', commitMessage], { cwd: rootDir })
+  await runCommand('git', ['commit', '--amend', '-m', commitMessage], { capture: true, cwd: rootDir })
 
   logSuccess(`Version updated to ${pkg.version}.`)
   return pkg
@@ -347,8 +371,18 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
 
 async function pushChanges(rootDir = process.cwd()) {
   logProcessing('Pushing commits and tags to origin...')
-  await runCommand('git', ['push', '--follow-tags'], { cwd: rootDir })
-  logSuccess('Git push completed.')
+  try {
+    await runCommand('git', ['push', '--follow-tags'], { capture: true, cwd: rootDir })
+    logSuccess('Git push completed.')
+  } catch (error) {
+    if (error.stdout) {
+      logError(error.stdout)
+    }
+    if (error.stderr) {
+      logError(error.stderr)
+    }
+    throw error
+  }
 }
 
 async function publishPackage(pkg, rootDir = process.cwd()) {
@@ -362,8 +396,18 @@ async function publishPackage(pkg, rootDir = process.cwd()) {
   }
 
   logProcessing(`Publishing ${pkg.name}@${pkg.version} to npm...`)
-  await runCommand('npm', publishArgs, { cwd: rootDir })
-  logSuccess('npm publish completed.')
+  try {
+    await runCommand('npm', publishArgs, { capture: true, cwd: rootDir })
+    logSuccess('npm publish completed.')
+  } catch (error) {
+    if (error.stdout) {
+      logError(error.stdout)
+    }
+    if (error.stderr) {
+      logError(error.stderr)
+    }
+    throw error
+  }
 }
 
 function extractDomainFromHomepage(homepage) {
