@@ -2,10 +2,15 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
+import process from 'node:process'
 import crypto from 'node:crypto'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { NodeSSH } from 'node-ssh'
+import { releaseNode } from './release-node.mjs'
+import { releasePackagist } from './release-packagist.mjs'
+
+const IS_WINDOWS = process.platform === 'win32'
 
 const PROJECT_CONFIG_DIR = '.zephyr'
 const PROJECT_CONFIG_FILE = 'config.json'
@@ -50,7 +55,7 @@ async function closeLogFile() {
 
 async function cleanupOldLogs(rootDir) {
   const configDir = getProjectConfigDir(rootDir)
-  
+
   try {
     const files = await fs.readdir(configDir)
     const logFiles = files
@@ -113,10 +118,18 @@ const runPrompt = async (questions) => {
 
 async function runCommand(command, args, { silent = false, cwd } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const spawnOptions = {
       stdio: silent ? 'ignore' : 'inherit',
       cwd
-    })
+    }
+
+    // On Windows, use shell for commands that might need PATH resolution (php, composer, etc.)
+    // Git commands work fine without shell
+    if (IS_WINDOWS && command !== 'git') {
+      spawnOptions.shell = true
+    }
+
+    const child = spawn(command, args, spawnOptions)
 
     child.on('error', reject)
     child.on('close', (code) => {
@@ -136,10 +149,18 @@ async function runCommandCapture(command, args, { cwd } = {}) {
     let stdout = ''
     let stderr = ''
 
-    const child = spawn(command, args, {
+    const spawnOptions = {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd
-    })
+    }
+
+    // On Windows, use shell for commands that might need PATH resolution (php, composer, etc.)
+    // Git commands work fine without shell
+    if (IS_WINDOWS && command !== 'git') {
+      spawnOptions.shell = true
+    }
+
+    const child = spawn(command, args, spawnOptions)
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk
@@ -769,7 +790,7 @@ function migrateApps(apps, servers) {
   let needsMigration = false
   const migrated = apps.map((app) => {
     const updated = { ...app }
-    
+
     if (!app.id) {
       needsMigration = true
       updated.id = generateId()
@@ -829,14 +850,14 @@ async function loadServers() {
     const raw = await fs.readFile(SERVERS_FILE, 'utf8')
     const data = JSON.parse(raw)
     const servers = Array.isArray(data) ? data : []
-    
+
     const { servers: migrated, needsMigration } = migrateServers(servers)
-    
+
     if (needsMigration) {
       await saveServers(migrated)
       logSuccess('Migrated servers configuration to use unique IDs.')
     }
-    
+
     return migrated
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -866,13 +887,13 @@ async function loadProjectConfig(rootDir, servers = []) {
     const data = JSON.parse(raw)
     const apps = Array.isArray(data?.apps) ? data.apps : []
     const presets = Array.isArray(data?.presets) ? data.presets : []
-    
+
     // Migrate apps first (needs servers for serverName -> serverId mapping)
     const { apps: migratedApps, needsMigration: appsNeedMigration } = migrateApps(apps, servers)
-    
+
     // Migrate presets (needs migrated apps for key -> appId mapping)
     const { presets: migratedPresets, needsMigration: presetsNeedMigration } = migratePresets(presets, migratedApps)
-    
+
     if (appsNeedMigration || presetsNeedMigration) {
       await saveProjectConfig(rootDir, {
         apps: migratedApps,
@@ -880,7 +901,7 @@ async function loadProjectConfig(rootDir, servers = []) {
       })
       logSuccess('Migrated project configuration to use unique IDs.')
     }
-    
+
     return {
       apps: migratedApps,
       presets: migratedPresets
@@ -1169,7 +1190,7 @@ async function hasUncommittedChanges(rootDir) {
 
 async function commitLintingChanges(rootDir) {
   const status = await getGitStatus(rootDir)
-  
+
   if (!hasStagedChanges(status)) {
     // Stage only modified tracked files (not untracked files)
     await runCommand('git', ['add', '-u'], { cwd: rootDir })
@@ -1212,7 +1233,7 @@ async function runRemoteTasks(config, options = {}) {
 
   const isLaravel = await isLocalLaravelProject(rootDir)
   const hasHook = await hasPrePushHook(rootDir)
-  
+
   if (!hasHook) {
     // Run linting before tests
     const lintRan = await runLinting(rootDir)
@@ -1801,7 +1822,7 @@ async function selectPreset(projectConfig, servers) {
 
   const choices = presets.map((preset, index) => {
     let displayName = preset.name
-    
+
     if (preset.appId) {
       // New format: look up app by ID
       const app = apps.find((a) => a.id === preset.appId)
@@ -1819,7 +1840,7 @@ async function selectPreset(projectConfig, servers) {
       const branch = preset.branch || (keyParts.length === 3 ? keyParts[2] : 'unknown')
       displayName = `${preset.name} (${serverName} → ${projectPath} [${branch}])`
     }
-    
+
     return {
       name: displayName,
     value: index
@@ -1848,7 +1869,38 @@ async function selectPreset(projectConfig, servers) {
   return presets[selection]
 }
 
-async function main() {
+async function main(releaseType = null) {
+  // Handle node/vue package release
+  if (releaseType === 'node' || releaseType === 'vue') {
+    try {
+      await releaseNode()
+      return
+    } catch (error) {
+      logError('\nRelease failed:')
+      logError(error.message)
+      if (error.stack) {
+        console.error(error.stack)
+      }
+      process.exit(1)
+    }
+  }
+
+  // Handle packagist/composer package release
+  if (releaseType === 'packagist') {
+    try {
+      await releasePackagist()
+      return
+    } catch (error) {
+      logError('\nRelease failed:')
+      logError(error.message)
+      if (error.stack) {
+        console.error(error.stack)
+      }
+      process.exit(1)
+    }
+  }
+
+  // Default: Laravel deployment workflow
   const rootDir = process.cwd()
 
   await ensureGitignoreEntry(rootDir)
@@ -1858,7 +1910,7 @@ async function main() {
   const servers = await loadServers()
   // Load project config with servers for migration
   const projectConfig = await loadProjectConfig(rootDir, servers)
-  
+
   let server = null
   let appConfig = null
   let isCreatingNewPreset = false
@@ -1874,14 +1926,14 @@ async function main() {
     // User selected an existing preset - look up by appId
     if (preset.appId) {
       appConfig = projectConfig.apps?.find((a) => a.id === preset.appId)
-      
+
       if (!appConfig) {
         logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
         server = await selectServer(servers)
         appConfig = await selectApp(projectConfig, server, rootDir)
       } else {
         server = servers.find((s) => s.id === appConfig.serverId || s.serverName === appConfig.serverName)
-        
+
         if (!server) {
           logWarning(`Preset references server that no longer exists. Creating new configuration.`)
           server = await selectServer(servers)
@@ -1899,21 +1951,21 @@ async function main() {
       const serverName = keyParts[0]
       const projectPath = keyParts[1]
       const presetBranch = preset.branch || (keyParts.length === 3 ? keyParts[2] : null)
-      
-    server = servers.find((s) => s.serverName === serverName)
 
-    if (!server) {
-      logWarning(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
-      server = await selectServer(servers)
-      appConfig = await selectApp(projectConfig, server, rootDir)
-    } else {
-      appConfig = projectConfig.apps?.find(
-          (a) => (a.serverId === server.id || a.serverName === serverName) && a.projectPath === projectPath
-      )
+      server = servers.find((s) => s.serverName === serverName)
 
-      if (!appConfig) {
-        logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+      if (!server) {
+        logWarning(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
+        server = await selectServer(servers)
         appConfig = await selectApp(projectConfig, server, rootDir)
+      } else {
+        appConfig = projectConfig.apps?.find(
+          (a) => (a.serverId === server.id || a.serverName === serverName) && a.projectPath === projectPath
+        )
+
+        if (!appConfig) {
+          logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+          appConfig = await selectApp(projectConfig, server, rootDir)
         } else {
           // Migrate preset to use appId
           preset.appId = appConfig.id
@@ -1968,10 +2020,10 @@ async function main() {
 
     if (trimmedName && trimmedName.length > 0) {
       const presets = projectConfig.presets ?? []
-      
+
       // Find app config to get its ID
       const appId = appConfig.id
-      
+
       if (!appId) {
         logWarning('Cannot save preset: app configuration missing ID.')
       } else {
@@ -1985,11 +2037,11 @@ async function main() {
             name: trimmedName,
             appId: appId,
             branch: deploymentConfig.branch
-        })
-      }
-      
-      projectConfig.presets = presets
-      await saveProjectConfig(rootDir, projectConfig)
+          })
+        }
+
+        projectConfig.presets = presets
+        await saveProjectConfig(rootDir, projectConfig)
         logSuccess(`Saved preset "${trimmedName}" to .zephyr/config.json`)
       }
     }
@@ -2051,5 +2103,7 @@ export {
   loadServers,
   loadProjectConfig,
   saveProjectConfig,
-  main
+  main,
+  releaseNode,
+  releasePackagist
 }
