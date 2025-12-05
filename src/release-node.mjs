@@ -221,15 +221,43 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
 
   logStep('Running test suite...')
 
-  // Prefer test:run if available, otherwise use test with --run flag
-  if (hasScript(pkg, 'test:run')) {
-    await runCommand('npm', ['run', 'test:run'], { cwd: rootDir })
-  } else {
-    // For test script, try to pass --run flag (works with vitest)
-    await runCommand('npm', ['test', '--', '--run'], { cwd: rootDir })
-  }
+  let dotInterval = null
+  try {
+    // Capture output and show dots as progress
+    process.stdout.write('  ')
+    dotInterval = setInterval(() => {
+      process.stdout.write('.')
+    }, 200)
 
-  logSuccess('Tests passed.')
+    // Prefer test:run if available, otherwise use test with --run flag
+    if (hasScript(pkg, 'test:run')) {
+      await runCommand('npm', ['run', 'test:run'], { capture: true, cwd: rootDir })
+    } else {
+      // For test script, try to pass --run flag (works with vitest)
+      await runCommand('npm', ['test', '--', '--run'], { capture: true, cwd: rootDir })
+    }
+
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    logSuccess('Tests passed.')
+  } catch (error) {
+    // Clear dots and show error output
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    if (error.stdout) {
+      console.error(error.stdout)
+    }
+    if (error.stderr) {
+      console.error(error.stderr)
+    }
+    throw error
+  }
 }
 
 async function runBuild(skipBuild, pkg, rootDir = process.cwd()) {
@@ -338,8 +366,8 @@ async function publishPackage(pkg, rootDir = process.cwd()) {
 
   if (pkg.name.startsWith('@')) {
     // For scoped packages, determine access level from publishConfig
-    // Default to 'restricted' (private) for scoped packages if not specified
-    const access = pkg.publishConfig?.access === 'public' ? 'public' : 'restricted'
+    // Default to 'public' for scoped packages if not specified (free npm accounts require public for scoped packages)
+    const access = pkg.publishConfig?.access || 'public'
     publishArgs.push('--access', access)
   }
 
