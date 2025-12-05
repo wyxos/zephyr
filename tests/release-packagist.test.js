@@ -1,9 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 const mockReadFile = vi.fn()
 const mockWriteFile = vi.fn()
 const mockAccess = vi.fn()
 const mockStat = vi.fn()
+
+let originalConsoleLog
+let originalConsoleWarn
+let originalConsoleError
 
 vi.mock('node:fs/promises', () => ({
   default: {
@@ -93,6 +97,14 @@ vi.mock('node:child_process', () => ({
 
 describe('release-packagist module', () => {
   beforeEach(() => {
+    // Suppress console output during tests
+    originalConsoleLog = console.log
+    originalConsoleWarn = console.warn
+    originalConsoleError = console.error
+    console.log = vi.fn()
+    console.warn = vi.fn()
+    console.error = vi.fn()
+
     vi.resetModules()
     spawnQueue.length = 0
     mockSpawn.mockClear()
@@ -100,6 +112,13 @@ describe('release-packagist module', () => {
     mockWriteFile.mockReset()
     mockAccess.mockReset()
     mockStat.mockReset()
+  })
+
+  afterEach(() => {
+    // Restore console output after tests
+    console.log = originalConsoleLog
+    console.warn = originalConsoleWarn
+    console.error = originalConsoleError
   })
 
   it('loads without syntax errors and exports releasePackagist', async () => {

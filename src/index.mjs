@@ -2105,5 +2105,17 @@ export {
   saveProjectConfig,
   main,
   releaseNode,
-  releasePackagist
+  releasePackagist,
+  createSshClient,
+  resolveSshKeyPath,
+  selectPreset,
+  logProcessing,
+  logSuccess,
+  logWarning,
+  logError,
+  writeToLogFile,
+  getLogFilePath,
+  ensureDirectory,
+  runCommand,
+  runCommandCapture
 }

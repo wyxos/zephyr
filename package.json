@@ -4,6 +4,10 @@
   "description": "A streamlined deployment tool for web applications with intelligent Laravel project detection",
   "type": "module",
   "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./ssh-utils": "./src/ssh-utils.mjs"
+  },
   "bin": {
     "zephyr": "bin/zephyr.mjs"
   },
