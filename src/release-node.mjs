@@ -337,7 +337,10 @@ async function publishPackage(pkg, rootDir = process.cwd()) {
   const publishArgs = ['publish', '--ignore-scripts'] // Skip prepublishOnly since we already built lib
 
   if (pkg.name.startsWith('@')) {
-    publishArgs.push('--access', 'public')
+    // For scoped packages, determine access level from publishConfig
+    // Default to 'restricted' (private) for scoped packages if not specified
+    const access = pkg.publishConfig?.access === 'public' ? 'public' : 'restricted'
+    publishArgs.push('--access', access)
   }
 
   logStep(`Publishing ${pkg.name}@${pkg.version} to npm...`)
