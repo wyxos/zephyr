@@ -230,8 +230,38 @@ async function runLint(skipLint, rootDir = process.cwd()) {
 
   logStep('Running Laravel Pint...')
   const pintPath = IS_WINDOWS ? 'vendor\\bin\\pint' : 'vendor/bin/pint'
-  await runCommand('php', [pintPath], { cwd: rootDir })
-  logSuccess('Lint passed.')
+  
+  let dotInterval = null
+  try {
+    // Capture output and show dots as progress
+    process.stdout.write('  ')
+    dotInterval = setInterval(() => {
+      process.stdout.write('.')
+    }, 200)
+
+    await runCommand('php', [pintPath], { capture: true, cwd: rootDir })
+
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    logSuccess('Lint passed.')
+  } catch (error) {
+    // Clear dots and show error output
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    if (error.stdout) {
+      console.error(error.stdout)
+    }
+    if (error.stderr) {
+      console.error(error.stderr)
+    }
+    throw error
+  }
 }
 
 async function runTests(skipTests, composer, rootDir = process.cwd()) {
@@ -250,13 +280,41 @@ async function runTests(skipTests, composer, rootDir = process.cwd()) {
 
   logStep('Running test suite...')
 
-  if (hasArtisanFile) {
-    await runCommand('php', ['artisan', 'test'], { cwd: rootDir })
-  } else if (hasTestScript) {
-    await runCommand('composer', ['test'], { cwd: rootDir })
-  }
+  let dotInterval = null
+  try {
+    // Capture output and show dots as progress
+    process.stdout.write('  ')
+    dotInterval = setInterval(() => {
+      process.stdout.write('.')
+    }, 200)
 
-  logSuccess('Tests passed.')
+    if (hasArtisanFile) {
+      await runCommand('php', ['artisan', 'test'], { capture: true, cwd: rootDir })
+    } else if (hasTestScript) {
+      await runCommand('composer', ['test'], { capture: true, cwd: rootDir })
+    }
+
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    logSuccess('Tests passed.')
+  } catch (error) {
+    // Clear dots and show error output
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    if (error.stdout) {
+      console.error(error.stdout)
+    }
+    if (error.stderr) {
+      console.error(error.stderr)
+    }
+    throw error
+  }
 }
 
 async function bumpVersion(releaseType, rootDir = process.cwd()) {
