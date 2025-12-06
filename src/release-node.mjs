@@ -28,16 +28,30 @@ function runCommand(command, args, { cwd = process.cwd(), capture = false, useSh
   return new Promise((resolve, reject) => {
     // On Windows, npm-related commands need shell: true to resolve npx.cmd
     // Git commands work fine without shell, so we only use it when explicitly requested
+    const needsShell = useShell || (IS_WINDOWS && (command === 'npm' || command === 'npx'))
+
     const spawnOptions = {
       cwd,
       stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
     }
 
-    if (useShell || (IS_WINDOWS && (command === 'npm' || command === 'npx'))) {
+    let child
+    if (needsShell) {
+      // When using shell, construct the command string to avoid deprecation warning
+      // Properly escape arguments for Windows cmd.exe
+      const escapedArgs = args.map(arg => {
+        // If arg contains spaces or special chars, wrap in quotes and escape internal quotes
+        if (arg.includes(' ') || arg.includes('"') || arg.includes('&') || arg.includes('|')) {
+          return `"${arg.replace(/"/g, '\\"')}"`
+        }
+        return arg
+      })
+      const commandString = `${command} ${escapedArgs.join(' ')}`
       spawnOptions.shell = true
+      child = spawn(commandString, [], spawnOptions)
+    } else {
+      child = spawn(command, args, spawnOptions)
     }
-
-    const child = spawn(command, args, spawnOptions)
     let stdout = ''
     let stderr = ''
 
