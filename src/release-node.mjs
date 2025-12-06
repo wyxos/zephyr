@@ -5,14 +5,24 @@ import { readFile } from 'node:fs/promises'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-import chalk from 'chalk'
+
+const STEP_PREFIX = '→'
+const OK_PREFIX = '✔'
+const WARN_PREFIX = '⚠'
 
 const IS_WINDOWS = process.platform === 'win32'
 
-const logProcessing = (message = '') => console.log(chalk.yellow(message))
-const logSuccess = (message = '') => console.log(chalk.green(message))
-const logWarning = (message = '') => console.warn(chalk.yellow(message))
-const logError = (message = '') => console.error(chalk.red(message))
+function logStep(message) {
+  console.log(`${STEP_PREFIX} ${message}`)
+}
+
+function logSuccess(message) {
+  console.log(`${OK_PREFIX} ${message}`)
+}
+
+function logWarning(message) {
+  console.warn(`${WARN_PREFIX} ${message}`)
+}
 
 function runCommand(command, args, { cwd = process.cwd(), capture = false, useShell = false } = {}) {
   return new Promise((resolve, reject) => {
@@ -104,12 +114,12 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef, rootDir = process
   const remoteBranch = branchParts.join('/')
 
   if (remoteName && remoteBranch) {
-    logProcessing(`Fetching latest updates from ${remoteName}/${remoteBranch}...`)
+    logStep(`Fetching latest updates from ${remoteName}/${remoteBranch}...`)
     try {
       await runCommand('git', ['fetch', remoteName, remoteBranch], { capture: true, cwd: rootDir })
     } catch (error) {
       if (error.stderr) {
-        logError(error.stderr)
+        console.error(error.stderr)
       }
       throw new Error(`Failed to fetch ${upstreamRef}: ${error.message}`)
     }
@@ -129,13 +139,13 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef, rootDir = process
 
   if (Number.isFinite(behind) && behind > 0) {
     if (remoteName && remoteBranch) {
-      logProcessing(`Fast-forwarding ${branch} with ${upstreamRef}...`)
+      logStep(`Fast-forwarding ${branch} with ${upstreamRef}...`)
 
       try {
         await runCommand('git', ['pull', '--ff-only', remoteName, remoteBranch], { capture: true, cwd: rootDir })
       } catch (error) {
         if (error.stderr) {
-          logError(error.stderr)
+          console.error(error.stderr)
         }
         throw new Error(
           `Unable to fast-forward ${branch} with ${upstreamRef}. Resolve conflicts manually, then rerun the release.\n${error.message}`
@@ -194,13 +204,43 @@ async function runLint(skipLint, pkg, rootDir = process.cwd()) {
   }
 
   if (!hasScript(pkg, 'lint')) {
-    logProcessing('Skipping lint (no lint script found in package.json).')
+    logStep('Skipping lint (no lint script found in package.json).')
     return
   }
 
-  logProcessing('Running lint...')
-  await runCommand('npm', ['run', 'lint'], { cwd: rootDir })
-  logSuccess('Lint passed.')
+  logStep('Running lint...')
+
+  let dotInterval = null
+  try {
+    // Capture output and show dots as progress
+    process.stdout.write('  ')
+    dotInterval = setInterval(() => {
+      process.stdout.write('.')
+    }, 200)
+
+    await runCommand('npm', ['run', 'lint'], { capture: true, cwd: rootDir })
+
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    logSuccess('Lint passed.')
+  } catch (error) {
+    // Clear dots and show error output
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    if (error.stdout) {
+      console.error(error.stdout)
+    }
+    if (error.stderr) {
+      console.error(error.stderr)
+    }
+    throw error
+  }
 }
 
 async function runTests(skipTests, pkg, rootDir = process.cwd()) {
@@ -211,11 +251,11 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
 
   // Check for test:run or test script
   if (!hasScript(pkg, 'test:run') && !hasScript(pkg, 'test')) {
-    logProcessing('Skipping tests (no test or test:run script found in package.json).')
+    logStep('Skipping tests (no test or test:run script found in package.json).')
     return
   }
 
-  logProcessing('Running test suite...')
+  logStep('Running test suite...')
 
   let dotInterval = null
   try {
@@ -247,10 +287,10 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
     }
     process.stdout.write('\n')
     if (error.stdout) {
-      logError(error.stdout)
+      console.error(error.stdout)
     }
     if (error.stderr) {
-      logError(error.stderr)
+      console.error(error.stderr)
     }
     throw error
   }
@@ -263,11 +303,11 @@ async function runBuild(skipBuild, pkg, rootDir = process.cwd()) {
   }
 
   if (!hasScript(pkg, 'build')) {
-    logProcessing('Skipping build (no build script found in package.json).')
+    logStep('Skipping build (no build script found in package.json).')
     return
   }
 
-  logProcessing('Building project...')
+  logStep('Building project...')
   await runCommand('npm', ['run', 'build'], { cwd: rootDir })
   logSuccess('Build completed.')
 }
@@ -279,11 +319,11 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
   }
 
   if (!hasScript(pkg, 'build:lib')) {
-    logProcessing('Skipping library build (no build:lib script found in package.json).')
+    logStep('Skipping library build (no build:lib script found in package.json).')
     return false
   }
 
-  logProcessing('Building library...')
+  logStep('Building library...')
   await runCommand('npm', ['run', 'build:lib'], { cwd: rootDir })
   logSuccess('Library built.')
 
@@ -295,7 +335,7 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
   })
 
   if (hasLibChanges) {
-    logProcessing('Committing lib build artifacts...')
+    logStep('Committing lib build artifacts...')
     await runCommand('git', ['add', 'lib/'], { capture: true, cwd: rootDir })
     await runCommand('git', ['commit', '-m', 'chore: build lib artifacts'], { capture: true, cwd: rootDir })
     logSuccess('Lib build artifacts committed.')
@@ -305,7 +345,7 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
 }
 
 async function ensureNpmAuth(rootDir = process.cwd()) {
-  logProcessing('Confirming npm authentication...')
+  logStep('Confirming npm authentication...')
   try {
     const result = await runCommand('npm', ['whoami'], { capture: true, cwd: rootDir })
     // Only show username if we captured it, otherwise just show success
@@ -315,14 +355,14 @@ async function ensureNpmAuth(rootDir = process.cwd()) {
     logSuccess('npm authenticated.')
   } catch (error) {
     if (error.stderr) {
-      logError(error.stderr)
+      console.error(error.stderr)
     }
     throw error
   }
 }
 
 async function bumpVersion(releaseType, rootDir = process.cwd()) {
-  logProcessing(`Bumping package version...`)
+  logStep(`Bumping package version...`)
 
   // Lib changes should already be committed by runLibBuild, but check anyway
   const { stdout: statusBefore } = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
@@ -332,7 +372,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
   })
 
   if (hasLibChanges) {
-    logProcessing('Stashing lib build artifacts...')
+    logStep('Stashing lib build artifacts...')
     await runCommand('git', ['stash', 'push', '-u', '-m', 'temp: lib build artifacts', 'lib/'], { capture: true, cwd: rootDir })
   }
 
@@ -349,7 +389,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
   } finally {
     // Restore lib changes and ensure they're in the commit
     if (hasLibChanges) {
-      logProcessing('Restoring lib build artifacts...')
+      logStep('Restoring lib build artifacts...')
       await runCommand('git', ['stash', 'pop'], { capture: true, cwd: rootDir })
       await runCommand('git', ['add', 'lib/'], { capture: true, cwd: rootDir })
       const { stdout: statusAfter } = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
@@ -370,16 +410,16 @@ async function bumpVersion(releaseType, rootDir = process.cwd()) {
 }
 
 async function pushChanges(rootDir = process.cwd()) {
-  logProcessing('Pushing commits and tags to origin...')
+  logStep('Pushing commits and tags to origin...')
   try {
     await runCommand('git', ['push', '--follow-tags'], { capture: true, cwd: rootDir })
     logSuccess('Git push completed.')
   } catch (error) {
     if (error.stdout) {
-      logError(error.stdout)
+      console.error(error.stdout)
     }
     if (error.stderr) {
-      logError(error.stderr)
+      console.error(error.stderr)
     }
     throw error
   }
@@ -395,16 +435,16 @@ async function publishPackage(pkg, rootDir = process.cwd()) {
     publishArgs.push('--access', access)
   }
 
-  logProcessing(`Publishing ${pkg.name}@${pkg.version} to npm...`)
+  logStep(`Publishing ${pkg.name}@${pkg.version} to npm...`)
   try {
     await runCommand('npm', publishArgs, { capture: true, cwd: rootDir })
     logSuccess('npm publish completed.')
   } catch (error) {
     if (error.stdout) {
-      logError(error.stdout)
+      console.error(error.stdout)
     }
     if (error.stderr) {
-      logError(error.stderr)
+      console.error(error.stderr)
     }
     throw error
   }
@@ -439,11 +479,11 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
   }
 
   if (!distExists) {
-    logProcessing('Skipping GitHub Pages deployment (no dist directory found).')
+    logStep('Skipping GitHub Pages deployment (no dist directory found).')
     return
   }
 
-  logProcessing('Deploying to GitHub Pages...')
+  logStep('Deploying to GitHub Pages...')
 
   // Write CNAME file to dist if homepage is set
   const cnamePath = path.join(distPath, 'CNAME')
@@ -497,10 +537,10 @@ export async function releaseNode() {
     const { releaseType, skipTests, skipLint, skipBuild, skipDeploy } = parseArgs()
     const rootDir = process.cwd()
 
-    logProcessing('Reading package metadata...')
+    logStep('Reading package metadata...')
     const pkg = await readPackage(rootDir)
 
-    logProcessing('Checking working tree status...')
+    logStep('Checking working tree status...')
     await ensureCleanWorkingTree(rootDir)
 
     const branch = await getCurrentBranch(rootDir)
@@ -508,7 +548,7 @@ export async function releaseNode() {
       throw new Error('Unable to determine current branch.')
     }
 
-    logProcessing(`Current branch: ${branch}`)
+    logStep(`Current branch: ${branch}`)
     const upstreamRef = await getUpstreamRef(rootDir)
     await ensureUpToDateWithUpstream(branch, upstreamRef, rootDir)
 
@@ -525,8 +565,8 @@ export async function releaseNode() {
 
     logSuccess(`Release workflow completed for ${updatedPkg.name}@${updatedPkg.version}.`)
   } catch (error) {
-    logError('\nRelease failed:')
-    logError(error.message)
+    console.error('\nRelease failed:')
+    console.error(error.message)
     throw error
   }
 }
