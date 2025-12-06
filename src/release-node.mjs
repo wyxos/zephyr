@@ -308,8 +308,38 @@ async function runBuild(skipBuild, pkg, rootDir = process.cwd()) {
   }
 
   logStep('Building project...')
-  await runCommand('npm', ['run', 'build'], { cwd: rootDir })
-  logSuccess('Build completed.')
+
+  let dotInterval = null
+  try {
+    // Capture output and show dots as progress
+    process.stdout.write('  ')
+    dotInterval = setInterval(() => {
+      process.stdout.write('.')
+    }, 200)
+
+    await runCommand('npm', ['run', 'build'], { capture: true, cwd: rootDir })
+
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    logSuccess('Build completed.')
+  } catch (error) {
+    // Clear dots and show error output
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    if (error.stdout) {
+      console.error(error.stdout)
+    }
+    if (error.stderr) {
+      console.error(error.stderr)
+    }
+    throw error
+  }
 }
 
 async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
@@ -324,8 +354,38 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
   }
 
   logStep('Building library...')
-  await runCommand('npm', ['run', 'build:lib'], { cwd: rootDir })
-  logSuccess('Library built.')
+
+  let dotInterval = null
+  try {
+    // Capture output and show dots as progress
+    process.stdout.write('  ')
+    dotInterval = setInterval(() => {
+      process.stdout.write('.')
+    }, 200)
+
+    await runCommand('npm', ['run', 'build:lib'], { capture: true, cwd: rootDir })
+
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    logSuccess('Library built.')
+  } catch (error) {
+    // Clear dots and show error output
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    if (error.stdout) {
+      console.error(error.stdout)
+    }
+    if (error.stderr) {
+      console.error(error.stderr)
+    }
+    throw error
+  }
 
   // Check for lib changes and commit them if any
   const { stdout: statusAfterBuild } = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
@@ -502,34 +562,62 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
 
   const worktreeDir = path.resolve(rootDir, '.gh-pages')
 
+  let dotInterval = null
   try {
-    await runCommand('git', ['worktree', 'remove', worktreeDir, '-f'], { cwd: rootDir })
-  } catch { }
+    // Capture output and show dots as progress
+    process.stdout.write('  ')
+    dotInterval = setInterval(() => {
+      process.stdout.write('.')
+    }, 200)
 
-  try {
-    await runCommand('git', ['worktree', 'add', worktreeDir, 'gh-pages'], { cwd: rootDir })
-  } catch {
-    await runCommand('git', ['worktree', 'add', worktreeDir, '-b', 'gh-pages'], { cwd: rootDir })
+    try {
+      await runCommand('git', ['worktree', 'remove', worktreeDir, '-f'], { capture: true, cwd: rootDir })
+    } catch { }
+
+    try {
+      await runCommand('git', ['worktree', 'add', worktreeDir, 'gh-pages'], { capture: true, cwd: rootDir })
+    } catch {
+      await runCommand('git', ['worktree', 'add', worktreeDir, '-b', 'gh-pages'], { capture: true, cwd: rootDir })
+    }
+
+    await runCommand('git', ['-C', worktreeDir, 'config', 'user.name', 'wyxos'], { capture: true })
+    await runCommand('git', ['-C', worktreeDir, 'config', 'user.email', 'github@wyxos.com'], { capture: true })
+
+    // Clear worktree directory
+    for (const entry of fs.readdirSync(worktreeDir)) {
+      if (entry === '.git') continue
+      const target = path.join(worktreeDir, entry)
+      fs.rmSync(target, { recursive: true, force: true })
+    }
+
+    // Copy dist to worktree
+    fs.cpSync(distPath, worktreeDir, { recursive: true })
+
+    await runCommand('git', ['-C', worktreeDir, 'add', '-A'], { capture: true })
+    await runCommand('git', ['-C', worktreeDir, 'commit', '-m', `deploy: demo ${new Date().toISOString()}`, '--allow-empty'], { capture: true })
+    await runCommand('git', ['-C', worktreeDir, 'push', '-f', 'origin', 'gh-pages'], { capture: true })
+
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    logSuccess('GitHub Pages deployment completed.')
+  } catch (error) {
+    // Clear dots and show error output
+    if (dotInterval) {
+      clearInterval(dotInterval)
+      dotInterval = null
+    }
+    process.stdout.write('\n')
+    if (error.stdout) {
+      console.error(error.stdout)
+    }
+    if (error.stderr) {
+      console.error(error.stderr)
+    }
+    throw error
   }
-
-  await runCommand('git', ['-C', worktreeDir, 'config', 'user.name', 'wyxos'])
-  await runCommand('git', ['-C', worktreeDir, 'config', 'user.email', 'github@wyxos.com'])
-
-  // Clear worktree directory
-  for (const entry of fs.readdirSync(worktreeDir)) {
-    if (entry === '.git') continue
-    const target = path.join(worktreeDir, entry)
-    fs.rmSync(target, { recursive: true, force: true })
-  }
-
-  // Copy dist to worktree
-  fs.cpSync(distPath, worktreeDir, { recursive: true })
-
-  await runCommand('git', ['-C', worktreeDir, 'add', '-A'])
-  await runCommand('git', ['-C', worktreeDir, 'commit', '-m', `deploy: demo ${new Date().toISOString()}`, '--allow-empty'])
-  await runCommand('git', ['-C', worktreeDir, 'push', '-f', 'origin', 'gh-pages'])
-
-  logSuccess('GitHub Pages deployment completed.')
 }
 
 export async function releaseNode() {
