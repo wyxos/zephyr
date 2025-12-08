@@ -1,43 +1,34 @@
-import { spawn } from 'node:child_process'
+import { spawn, exec } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-
-const STEP_PREFIX = '→'
-const OK_PREFIX = '✔'
-const WARN_PREFIX = '⚠'
+import chalk from 'chalk'
 
 const IS_WINDOWS = process.platform === 'win32'
 
 function logStep(message) {
-  console.log(`${STEP_PREFIX} ${message}`)
+  console.log(chalk.yellow(`→ ${message}`))
 }
 
 function logSuccess(message) {
-  console.log(`${OK_PREFIX} ${message}`)
+  console.log(chalk.green(`✔ ${message}`))
 }
 
 function logWarning(message) {
-  console.warn(`${WARN_PREFIX} ${message}`)
+  console.warn(chalk.yellow(`⚠ ${message}`))
 }
 
 function runCommand(command, args, { cwd = process.cwd(), capture = false, useShell = false } = {}) {
   return new Promise((resolve, reject) => {
-    // On Windows, npm-related commands need shell: true to resolve npx.cmd
+    // On Windows, npm-related commands need shell to resolve npx.cmd
     // Git commands work fine without shell, so we only use it when explicitly requested
     const needsShell = useShell || (IS_WINDOWS && (command === 'npm' || command === 'npx'))
 
-    const spawnOptions = {
-      cwd,
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
-    }
-
-    let child
     if (needsShell) {
-      // When using shell, construct the command string to avoid deprecation warning
+      // When using shell, use exec to avoid deprecation warning with spawn
       // Properly escape arguments for Windows cmd.exe
       const escapedArgs = args.map(arg => {
         // If arg contains spaces or special chars, wrap in quotes and escape internal quotes
@@ -47,38 +38,68 @@ function runCommand(command, args, { cwd = process.cwd(), capture = false, useSh
         return arg
       })
       const commandString = `${command} ${escapedArgs.join(' ')}`
-      spawnOptions.shell = true
-      child = spawn(commandString, [], spawnOptions)
-    } else {
-      child = spawn(command, args, spawnOptions)
-    }
-    let stdout = ''
-    let stderr = ''
-
-    if (capture) {
-      child.stdout.on('data', (chunk) => {
-        stdout += chunk
-      })
-
-      child.stderr.on('data', (chunk) => {
-        stderr += chunk
-      })
-    }
-
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(capture ? { stdout: stdout.trim(), stderr: stderr.trim() } : undefined)
-      } else {
-        const error = new Error(`Command failed (${code}): ${command} ${args.join(' ')}`)
-        if (capture) {
-          error.stdout = stdout
-          error.stderr = stderr
+      
+      exec(commandString, { cwd, encoding: 'utf8' }, (error, stdout, stderr) => {
+        if (error) {
+          const err = new Error(`Command failed (${error.code}): ${command} ${args.join(' ')}`)
+          if (capture) {
+            err.stdout = stdout || ''
+            err.stderr = stderr || ''
+          } else {
+            // When not capturing, exec still provides output, so show it
+            if (stdout) process.stdout.write(stdout)
+            if (stderr) process.stderr.write(stderr)
+          }
+          err.exitCode = error.code
+          reject(err)
+          return
         }
-        error.exitCode = code
-        reject(error)
+        
+        if (capture) {
+          resolve({ stdout: stdout.trim(), stderr: stderr.trim() })
+        } else {
+          // When not capturing, exec still provides output, so show it
+          if (stdout) process.stdout.write(stdout)
+          if (stderr) process.stderr.write(stderr)
+          resolve(undefined)
+        }
+      })
+    } else {
+      // Use spawn for commands that don't need shell
+      const spawnOptions = {
+        cwd,
+        stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
       }
-    })
+      
+      const child = spawn(command, args, spawnOptions)
+      let stdout = ''
+      let stderr = ''
+
+      if (capture) {
+        child.stdout.on('data', (chunk) => {
+          stdout += chunk
+        })
+
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk
+        })
+      }
+
+      child.on('error', reject)
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve(capture ? { stdout: stdout.trim(), stderr: stderr.trim() } : undefined)
+        } else {
+          const error = new Error(`Command failed (${code}): ${command} ${args.join(' ')}`)
+          if (capture) {
+            error.stdout = stdout
+            error.stderr = stderr
+          }
+          error.exitCode = code
+          reject(error)
+        }
+      })
+    }
   })
 }
 
@@ -224,29 +245,10 @@ async function runLint(skipLint, pkg, rootDir = process.cwd()) {
 
   logStep('Running lint...')
 
-  let dotInterval = null
   try {
-    // Capture output and show dots as progress
-    process.stdout.write('  ')
-    dotInterval = setInterval(() => {
-      process.stdout.write('.')
-    }, 200)
-
-    await runCommand('npm', ['run', 'lint'], { capture: true, cwd: rootDir })
-
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
+    await runCommand('npm', ['run', 'lint'], { cwd: rootDir })
     logSuccess('Lint passed.')
   } catch (error) {
-    // Clear dots and show error output
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
     if (error.stdout) {
       console.error(error.stdout)
     }
@@ -271,35 +273,18 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
 
   logStep('Running test suite...')
 
-  let dotInterval = null
   try {
-    // Capture output and show dots as progress
-    process.stdout.write('  ')
-    dotInterval = setInterval(() => {
-      process.stdout.write('.')
-    }, 200)
-
-    // Prefer test:run if available, otherwise use test with --run flag
+    // Prefer test:run if available, otherwise use test with --run and --reporter flags
     if (hasScript(pkg, 'test:run')) {
-      await runCommand('npm', ['run', 'test:run'], { capture: true, cwd: rootDir })
+      // Pass reporter flag to test:run script
+      await runCommand('npm', ['run', 'test:run', '--', '--reporter=verbose'], { cwd: rootDir })
     } else {
-      // For test script, try to pass --run flag (works with vitest)
-      await runCommand('npm', ['test', '--', '--run'], { capture: true, cwd: rootDir })
+      // For test script, pass --run and --reporter flags (works with vitest)
+      await runCommand('npm', ['test', '--', '--run', '--reporter=verbose'], { cwd: rootDir })
     }
 
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
     logSuccess('Tests passed.')
   } catch (error) {
-    // Clear dots and show error output
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
     if (error.stdout) {
       console.error(error.stdout)
     }
@@ -323,29 +308,10 @@ async function runBuild(skipBuild, pkg, rootDir = process.cwd()) {
 
   logStep('Building project...')
 
-  let dotInterval = null
   try {
-    // Capture output and show dots as progress
-    process.stdout.write('  ')
-    dotInterval = setInterval(() => {
-      process.stdout.write('.')
-    }, 200)
-
-    await runCommand('npm', ['run', 'build'], { capture: true, cwd: rootDir })
-
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
+    await runCommand('npm', ['run', 'build'], { cwd: rootDir })
     logSuccess('Build completed.')
   } catch (error) {
-    // Clear dots and show error output
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
     if (error.stdout) {
       console.error(error.stdout)
     }
@@ -369,29 +335,10 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
 
   logStep('Building library...')
 
-  let dotInterval = null
   try {
-    // Capture output and show dots as progress
-    process.stdout.write('  ')
-    dotInterval = setInterval(() => {
-      process.stdout.write('.')
-    }, 200)
-
-    await runCommand('npm', ['run', 'build:lib'], { capture: true, cwd: rootDir })
-
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
+    await runCommand('npm', ['run', 'build:lib'], { cwd: rootDir })
     logSuccess('Library built.')
   } catch (error) {
-    // Clear dots and show error output
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
     if (error.stdout) {
       console.error(error.stdout)
     }
@@ -576,14 +523,7 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
 
   const worktreeDir = path.resolve(rootDir, '.gh-pages')
 
-  let dotInterval = null
   try {
-    // Capture output and show dots as progress
-    process.stdout.write('  ')
-    dotInterval = setInterval(() => {
-      process.stdout.write('.')
-    }, 200)
-
     try {
       await runCommand('git', ['worktree', 'remove', worktreeDir, '-f'], { capture: true, cwd: rootDir })
     } catch { }
@@ -611,19 +551,8 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
     await runCommand('git', ['-C', worktreeDir, 'commit', '-m', `deploy: demo ${new Date().toISOString()}`, '--allow-empty'], { capture: true })
     await runCommand('git', ['-C', worktreeDir, 'push', '-f', 'origin', 'gh-pages'], { capture: true })
 
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
     logSuccess('GitHub Pages deployment completed.')
   } catch (error) {
-    // Clear dots and show error output
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
-    }
-    process.stdout.write('\n')
     if (error.stdout) {
       console.error(error.stdout)
     }
