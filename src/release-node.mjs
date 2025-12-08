@@ -447,6 +447,15 @@ async function pushChanges(rootDir = process.cwd()) {
 }
 
 async function publishPackage(pkg, rootDir = process.cwd()) {
+  // Check if package is configured as private/restricted
+  const isPrivate = pkg.publishConfig?.access === 'restricted'
+  
+  if (isPrivate) {
+    logWarning('Skipping npm publish (package is configured as private/restricted).')
+    logWarning('Private packages require npm paid plan. Publish manually or use GitHub Packages.')
+    return
+  }
+
   const publishArgs = ['publish', '--ignore-scripts'] // Skip prepublishOnly since we already built lib
 
   if (pkg.name.startsWith('@')) {
