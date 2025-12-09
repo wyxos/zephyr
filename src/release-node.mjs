@@ -38,7 +38,7 @@ function runCommand(command, args, { cwd = process.cwd(), capture = false, useSh
         return arg
       })
       const commandString = `${command} ${escapedArgs.join(' ')}`
-      
+
       exec(commandString, { cwd, encoding: 'utf8' }, (error, stdout, stderr) => {
         if (error) {
           const err = new Error(`Command failed (${error.code}): ${command} ${args.join(' ')}`)
@@ -54,7 +54,7 @@ function runCommand(command, args, { cwd = process.cwd(), capture = false, useSh
           reject(err)
           return
         }
-        
+
         if (capture) {
           resolve({ stdout: stdout.trim(), stderr: stderr.trim() })
         } else {
@@ -70,7 +70,7 @@ function runCommand(command, args, { cwd = process.cwd(), capture = false, useSh
         cwd,
         stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
       }
-      
+
       const child = spawn(command, args, spawnOptions)
       let stdout = ''
       let stderr = ''
@@ -277,10 +277,10 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
     // Prefer test:run if available, otherwise use test with --run and --reporter flags
     if (hasScript(pkg, 'test:run')) {
       // Pass reporter flag to test:run script
-      await runCommand('npm', ['run', 'test:run', '--', '--reporter=verbose'], { cwd: rootDir })
+      await runCommand('npm', ['run', 'test:run', '--', '--reporter=dot'], { cwd: rootDir })
     } else {
       // For test script, pass --run and --reporter flags (works with vitest)
-      await runCommand('npm', ['test', '--', '--run', '--reporter=verbose'], { cwd: rootDir })
+      await runCommand('npm', ['test', '--', '--run', '--reporter=dot'], { cwd: rootDir })
     }
 
     logSuccess('Tests passed.')
@@ -449,7 +449,7 @@ async function pushChanges(rootDir = process.cwd()) {
 async function publishPackage(pkg, rootDir = process.cwd()) {
   // Check if package is configured as private/restricted
   const isPrivate = pkg.publishConfig?.access === 'restricted'
-  
+
   if (isPrivate) {
     logWarning('Skipping npm publish (package is configured as private/restricted).')
     logWarning('Private packages require npm paid plan. Publish manually or use GitHub Packages.')
