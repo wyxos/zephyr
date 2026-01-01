@@ -594,11 +594,11 @@ export async function releaseNode() {
 
     await runLint(skipLint, pkg, rootDir)
     await runTests(skipTests, pkg, rootDir)
-    await runBuild(skipBuild, pkg, rootDir)
     await runLibBuild(skipBuild, pkg, rootDir)
     await ensureNpmAuth(rootDir)
 
     const updatedPkg = await bumpVersion(releaseType, rootDir)
+    await runBuild(skipBuild, updatedPkg, rootDir)
     await pushChanges(rootDir)
     await publishPackage(updatedPkg, rootDir)
     await deployGHPages(skipDeploy, updatedPkg, rootDir)
