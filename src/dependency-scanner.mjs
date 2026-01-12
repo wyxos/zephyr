@@ -219,16 +219,16 @@ async function updateComposerJsonDependency(rootDir, packageName, newVersion, fi
 
 async function runCommand(command, args, { cwd = process.cwd(), capture = false } = {}) {
   return new Promise((resolve, reject) => {
+    const resolvedCommand = IS_WINDOWS && (command === 'npm' || command === 'npx' || command === 'pnpm' || command === 'yarn')
+      ? `${command}.cmd`
+      : command
+
     const spawnOptions = {
       stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
       cwd
     }
 
-    if (IS_WINDOWS && command !== 'git') {
-      spawnOptions.shell = true
-    }
-
-    const child = spawn(command, args, spawnOptions)
+    const child = spawn(resolvedCommand, args, spawnOptions)
     let stdout = ''
     let stderr = ''
 
@@ -247,7 +247,7 @@ async function runCommand(command, args, { cwd = process.cwd(), capture = false 
       if (code === 0) {
         resolve(capture ? { stdout: stdout.trim(), stderr: stderr.trim() } : undefined)
       } else {
-        const error = new Error(`Command failed (${code}): ${command} ${args.join(' ')}`)
+        const error = new Error(`Command failed (${code}): ${resolvedCommand} ${args.join(' ')}`)
         if (capture) {
           error.stdout = stdout
           error.stderr = stderr
