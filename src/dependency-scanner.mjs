@@ -148,7 +148,7 @@ async function fetchLatestNpmVersion(packageName) {
     }
     const data = await response.json()
     return data.version || null
-  } catch (error) {
+  } catch (_error) {
     return null
   }
 }
@@ -167,7 +167,7 @@ async function fetchLatestPackagistVersion(packageName) {
       return latest.version || null
     }
     return null
-  } catch (error) {
+  } catch (_error) {
     return null
   }
 }
@@ -263,7 +263,7 @@ async function getGitStatus(rootDir) {
   try {
     const result = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
     return result.stdout || ''
-  } catch (error) {
+  } catch (_error) {
     return ''
   }
 }
@@ -289,8 +289,6 @@ async function commitDependencyUpdates(rootDir, updatedFiles, logFn) {
     // Not a git repository, skip commit
     return false
   }
-
-  const status = await getGitStatus(rootDir)
 
   // Stage the updated files
   for (const file of updatedFiles) {
