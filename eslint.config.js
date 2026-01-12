@@ -21,7 +21,7 @@ export default [
     rules: {
       'max-lines': ['warn', { max: 500, skipComments: false, skipBlankLines: false }],
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
-      'no-console': 'off',
+      'no-console': 'warn',
       'no-empty': ['warn', { allowEmptyCatch: true }],
       'no-useless-escape': 'warn'
     }

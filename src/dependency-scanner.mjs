@@ -281,12 +281,37 @@ function hasStagedChanges(statusOutput) {
   })
 }
 
-async function commitDependencyUpdates(rootDir, updatedFiles, logFn) {
+async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn) {
   try {
     // Check if we're in a git repository
     await runCommand('git', ['rev-parse', '--is-inside-work-tree'], { capture: true, cwd: rootDir })
   } catch {
     // Not a git repository, skip commit
+    return false
+  }
+
+  const statusBefore = await getGitStatus(rootDir)
+
+  // Avoid accidentally committing unrelated staged changes
+  if (hasStagedChanges(statusBefore)) {
+    if (logFn) {
+      logFn('Staged changes detected. Skipping auto-commit of dependency updates.')
+    }
+    return false
+  }
+
+  const fileList = updatedFiles.map((f) => path.basename(f)).join(', ')
+
+  const { shouldCommit } = await promptFn([
+    {
+      type: 'confirm',
+      name: 'shouldCommit',
+      message: `Commit dependency updates now? (${fileList})`,
+      default: true
+    }
+  ])
+
+  if (!shouldCommit) {
     return false
   }
 
@@ -305,7 +330,6 @@ async function commitDependencyUpdates(rootDir, updatedFiles, logFn) {
   }
 
   // Build commit message
-  const fileList = updatedFiles.map(f => path.basename(f)).join(', ')
   const commitMessage = `chore: update local file dependencies to online versions (${fileList})`
 
   if (logFn) {
@@ -447,7 +471,7 @@ async function validateLocalDependencies(rootDir, promptFn, logFn = null) {
 
   // Commit the changes if any files were updated
   if (updatedFiles.size > 0) {
-    await commitDependencyUpdates(rootDir, Array.from(updatedFiles), logFn)
+    await commitDependencyUpdates(rootDir, Array.from(updatedFiles), promptFn, logFn)
   }
 }
 
