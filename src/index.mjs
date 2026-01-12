@@ -303,7 +303,9 @@ async function ensureCommittedChangesPushed(targetBranch, rootDir) {
   const commitLabel = aheadCount === 1 ? 'commit' : 'commits'
   logProcessing(`Found ${aheadCount} ${commitLabel} not yet pushed to ${upstreamRef}. Pushing before deployment...`)
 
-  await runCommand('git', ['push', remoteName, `${targetBranch}:${upstreamBranch}`], { cwd: rootDir })
+  // Keep terminal output clean: suppress git push progress output (it is very noisy),
+  // but still surface errors via the thrown exception message.
+  await runCommandCapture('git', ['push', remoteName, `${targetBranch}:${upstreamBranch}`], { cwd: rootDir })
   logSuccess(`Pushed committed changes to ${upstreamRef}.`)
 
   return { pushed: true, upstreamRef }
