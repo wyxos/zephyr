@@ -3,9 +3,11 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import process from 'node:process'
+import https from 'node:https'
 import semver from 'semver'
 
 const IS_WINDOWS = process.platform === 'win32'
+const ZEPHYR_SKIP_VERSION_CHECK_ENV = 'ZEPHYR_SKIP_VERSION_CHECK'
 
 async function getCurrentVersion() {
   try {
@@ -24,13 +26,49 @@ async function getCurrentVersion() {
   }
 }
 
+function httpsGetJson(url) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(
+      url,
+      {
+        headers: {
+          accept: 'application/json'
+        }
+      },
+      (response) => {
+        const { statusCode } = response
+        if (!statusCode || statusCode < 200 || statusCode >= 300) {
+          response.resume()
+          resolve(null)
+          return
+        }
+
+        response.setEncoding('utf8')
+        let raw = ''
+        response.on('data', (chunk) => {
+          raw += chunk
+        })
+        response.on('end', () => {
+          try {
+            resolve(JSON.parse(raw))
+          } catch (error) {
+            reject(error)
+          }
+        })
+      }
+    )
+
+    request.on('error', reject)
+    request.end()
+  })
+}
+
 async function getLatestVersion() {
   try {
-    const response = await fetch('https://registry.npmjs.org/@wyxos/zephyr/latest')
-    if (!response.ok) {
+    const data = await httpsGetJson('https://registry.npmjs.org/@wyxos/zephyr/latest')
+    if (!data) {
       return null
     }
-    const data = await response.json()
     return data.version || null
   } catch (_error) {
     return null
@@ -59,7 +97,11 @@ async function reExecuteWithLatest(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, npxArgs, {
       stdio: 'inherit',
-      shell: IS_WINDOWS
+      shell: IS_WINDOWS,
+      env: {
+        ...process.env,
+        [ZEPHYR_SKIP_VERSION_CHECK_ENV]: '1'
+      }
     })
 
     child.on('error', reject)
@@ -75,12 +117,7 @@ async function reExecuteWithLatest(args) {
 
 export async function checkAndUpdateVersion(promptFn, args) {
   try {
-    // Skip check if already running @latest (detected via environment or process)
-    // When npx runs @latest, the version should already be latest
-    const isRunningLatest = process.env.npm_config_user_config?.includes('@latest') ||
-                           process.argv.some(arg => arg.includes('@latest'))
-
-    if (isRunningLatest) {
+    if (process.env[ZEPHYR_SKIP_VERSION_CHECK_ENV] === '1') {
       return false
     }
 
