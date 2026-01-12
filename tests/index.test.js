@@ -134,6 +134,12 @@ vi.mock('node:os', () => ({
   hostname: () => 'test-host'
 }))
 
+const mockValidateLocalDependencies = vi.fn().mockResolvedValue(undefined)
+
+vi.mock('../src/dependency-scanner.mjs', () => ({
+  validateLocalDependencies: mockValidateLocalDependencies
+}))
+
 describe('zephyr deployment helpers', () => {
   let originalConsoleLog
   let originalConsoleWarn
@@ -163,9 +169,11 @@ describe('zephyr deployment helpers', () => {
     mockConnect.mockReset()
     mockDispose.mockReset()
     mockPrompt.mockReset()
+    mockValidateLocalDependencies.mockReset()
     
     // Default mock implementations
     mockMkdir.mockResolvedValue(undefined)
+    mockValidateLocalDependencies.mockResolvedValue(undefined)
     mockReaddir.mockResolvedValue([]) // Empty directory for log cleanup
     mockStat.mockImplementation(async (path) => {
       return { mtime: new Date() }

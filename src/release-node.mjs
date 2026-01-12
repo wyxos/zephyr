@@ -6,6 +6,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import chalk from 'chalk'
+import inquirer from 'inquirer'
+import { validateLocalDependencies } from './dependency-scanner.mjs'
 
 const IS_WINDOWS = process.platform === 'win32'
 
@@ -579,6 +581,9 @@ export async function releaseNode() {
 
     logStep('Reading package metadata...')
     const pkg = await readPackage(rootDir)
+
+    logStep('Validating dependencies...')
+    await validateLocalDependencies(rootDir, (questions) => inquirer.prompt(questions))
 
     logStep('Checking working tree status...')
     await ensureCleanWorkingTree(rootDir)

@@ -6,6 +6,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import semver from 'semver'
+import inquirer from 'inquirer'
+import { validateLocalDependencies } from './dependency-scanner.mjs'
 
 const STEP_PREFIX = '→'
 const OK_PREFIX = '✔'
@@ -303,7 +305,7 @@ async function runTests(skipTests, composer, rootDir = process.cwd()) {
     }, 200)
 
     if (hasArtisanFile) {
-      await runCommand('php', ['artisan', 'test'], { capture: true, cwd: rootDir })
+      await runCommand('php', ['artisan', 'test', '--compact'], { capture: true, cwd: rootDir })
     } else if (hasTestScript) {
       await runCommand('composer', ['test'], { capture: true, cwd: rootDir })
     }
@@ -383,6 +385,9 @@ export async function releasePackagist() {
   if (!composer.version) {
     throw new Error('composer.json does not have a version field. Add "version": "0.0.0" to composer.json.')
   }
+
+  logStep('Validating dependencies...')
+  await validateLocalDependencies(rootDir, (questions) => inquirer.prompt(questions))
 
   logStep('Checking working tree status...')
   await ensureCleanWorkingTree(rootDir)

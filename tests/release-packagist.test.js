@@ -95,6 +95,12 @@ vi.mock('node:child_process', () => ({
   }
 }))
 
+const mockValidateLocalDependencies = vi.fn().mockResolvedValue(undefined)
+
+vi.mock('../src/dependency-scanner.mjs', () => ({
+  validateLocalDependencies: mockValidateLocalDependencies
+}))
+
 describe('release-packagist module', () => {
   beforeEach(() => {
     // Suppress console output during tests
@@ -112,6 +118,8 @@ describe('release-packagist module', () => {
     mockWriteFile.mockReset()
     mockAccess.mockReset()
     mockStat.mockReset()
+    mockValidateLocalDependencies.mockClear()
+    mockValidateLocalDependencies.mockResolvedValue(undefined)
   })
 
   afterEach(() => {

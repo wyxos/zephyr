@@ -9,6 +9,7 @@ import inquirer from 'inquirer'
 import { NodeSSH } from 'node-ssh'
 import { releaseNode } from './release-node.mjs'
 import { releasePackagist } from './release-packagist.mjs'
+import { validateLocalDependencies } from './dependency-scanner.mjs'
 
 const IS_WINDOWS = process.platform === 'win32'
 
@@ -1249,7 +1250,7 @@ async function runRemoteTasks(config, options = {}) {
   if (isLaravel) {
     logProcessing('Running Laravel tests locally...')
     try {
-      await runCommand('php', ['artisan', 'test'], { cwd: rootDir })
+      await runCommand('php', ['artisan', 'test', '--compact'], { cwd: rootDir })
       logSuccess('Local tests passed.')
     } catch (error) {
       throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
@@ -1905,6 +1906,17 @@ async function main(releaseType = null) {
 
   await ensureGitignoreEntry(rootDir)
   await ensureProjectReleaseScript(rootDir)
+
+  // Validate dependencies if package.json or composer.json exists
+  const packageJsonPath = path.join(rootDir, 'package.json')
+  const composerJsonPath = path.join(rootDir, 'composer.json')
+  const hasPackageJson = await fs.access(packageJsonPath).then(() => true).catch(() => false)
+  const hasComposerJson = await fs.access(composerJsonPath).then(() => true).catch(() => false)
+
+  if (hasPackageJson || hasComposerJson) {
+    logProcessing('Validating dependencies...')
+    await validateLocalDependencies(rootDir, runPrompt)
+  }
 
   // Load servers first (they may be migrated)
   const servers = await loadServers()
