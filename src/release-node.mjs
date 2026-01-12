@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import fs from 'node:fs'
