@@ -1,5 +1,9 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
+import process from 'node:process'
+
+const IS_WINDOWS = process.platform === 'win32'
 
 function isLocalPathOutsideRepo(depPath, rootDir) {
   if (!depPath || typeof depPath !== 'string') {
@@ -212,7 +216,113 @@ async function updateComposerJsonDependency(rootDir, packageName, newVersion, fi
   await writeFile(composerJsonPath, updatedContent, 'utf8')
 }
 
-async function validateLocalDependencies(rootDir, promptFn) {
+async function runCommand(command, args, { cwd = process.cwd(), capture = false } = {}) {
+  return new Promise((resolve, reject) => {
+    const spawnOptions = {
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      cwd
+    }
+
+    if (IS_WINDOWS && command !== 'git') {
+      spawnOptions.shell = true
+    }
+
+    const child = spawn(command, args, spawnOptions)
+    let stdout = ''
+    let stderr = ''
+
+    if (capture) {
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk
+      })
+
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk
+      })
+    }
+
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(capture ? { stdout: stdout.trim(), stderr: stderr.trim() } : undefined)
+      } else {
+        const error = new Error(`Command failed (${code}): ${command} ${args.join(' ')}`)
+        if (capture) {
+          error.stdout = stdout
+          error.stderr = stderr
+        }
+        error.exitCode = code
+        reject(error)
+      }
+    })
+  })
+}
+
+async function getGitStatus(rootDir) {
+  try {
+    const result = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
+    return result.stdout || ''
+  } catch (error) {
+    return ''
+  }
+}
+
+function hasStagedChanges(statusOutput) {
+  if (!statusOutput || statusOutput.length === 0) {
+    return false
+  }
+
+  const lines = statusOutput.split('\n').filter((line) => line.trim().length > 0)
+
+  return lines.some((line) => {
+    const firstChar = line[0]
+    return firstChar && firstChar !== ' ' && firstChar !== '?'
+  })
+}
+
+async function commitDependencyUpdates(rootDir, updatedFiles, logFn) {
+  try {
+    // Check if we're in a git repository
+    await runCommand('git', ['rev-parse', '--is-inside-work-tree'], { capture: true, cwd: rootDir })
+  } catch {
+    // Not a git repository, skip commit
+    return false
+  }
+
+  const status = await getGitStatus(rootDir)
+
+  // Stage the updated files
+  for (const file of updatedFiles) {
+    try {
+      await runCommand('git', ['add', file], { cwd: rootDir })
+    } catch {
+      // File might not exist or not be tracked, continue
+    }
+  }
+
+  const newStatus = await getGitStatus(rootDir)
+  if (!hasStagedChanges(newStatus)) {
+    return false
+  }
+
+  // Build commit message
+  const fileList = updatedFiles.map(f => path.basename(f)).join(', ')
+  const commitMessage = `chore: update local file dependencies to online versions (${fileList})`
+
+  if (logFn) {
+    logFn('Committing dependency updates...')
+  }
+
+  await runCommand('git', ['commit', '-m', commitMessage], { cwd: rootDir })
+
+  if (logFn) {
+    logFn('Dependency updates committed.')
+  }
+
+  return true
+}
+
+async function validateLocalDependencies(rootDir, promptFn, logFn = null) {
   const packageDeps = await scanPackageJsonDependencies(rootDir)
   const composerDeps = await scanComposerJsonDependencies(rootDir)
 
@@ -265,6 +375,9 @@ async function validateLocalDependencies(rootDir, promptFn) {
     throw new Error('Release cancelled: local file dependencies must be updated before release.')
   }
 
+  // Track which files were updated
+  const updatedFiles = new Set()
+
   // Update dependencies
   for (const dep of depsWithVersions) {
     if (!dep.latestVersion) {
@@ -273,8 +386,10 @@ async function validateLocalDependencies(rootDir, promptFn) {
 
     if (dep.field === 'dependencies' || dep.field === 'devDependencies') {
       await updatePackageJsonDependency(rootDir, dep.packageName, dep.latestVersion, dep.field)
+      updatedFiles.add('package.json')
     } else if (dep.field === 'require' || dep.field === 'require-dev') {
       await updateComposerJsonDependency(rootDir, dep.packageName, dep.latestVersion, dep.field)
+      updatedFiles.add('composer.json')
     } else if (dep.field === 'repositories') {
       // For repositories, we need to remove the repository entry
       // But we still need to update the dependency version
@@ -319,8 +434,14 @@ async function validateLocalDependencies(rootDir, promptFn) {
           const updatedContent = JSON.stringify(updatedComposer, null, 2) + '\n'
           await writeFile(composerJsonPath, updatedContent, 'utf8')
         }
+        updatedFiles.add('composer.json')
       }
     }
+  }
+
+  // Commit the changes if any files were updated
+  if (updatedFiles.size > 0) {
+    await commitDependencyUpdates(rootDir, Array.from(updatedFiles), logFn)
   }
 }
 
