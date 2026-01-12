@@ -97,7 +97,6 @@ async function reExecuteWithLatest(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, npxArgs, {
       stdio: 'inherit',
-      shell: IS_WINDOWS,
       env: {
         ...process.env,
         [ZEPHYR_SKIP_VERSION_CHECK_ENV]: '1'

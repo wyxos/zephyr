@@ -130,25 +130,23 @@ const runPrompt = async (questions) => {
 
 async function runCommand(command, args, { silent = false, cwd } = {}) {
   return new Promise((resolve, reject) => {
+    const resolvedCommand = IS_WINDOWS && (command === 'npm' || command === 'npx' || command === 'pnpm' || command === 'yarn')
+      ? `${command}.cmd`
+      : command
+
     const spawnOptions = {
       stdio: silent ? 'ignore' : 'inherit',
       cwd
     }
 
-    // On Windows, use shell for commands that might need PATH resolution (php, composer, etc.)
-    // Git commands work fine without shell
-    if (IS_WINDOWS && command !== 'git') {
-      spawnOptions.shell = true
-    }
-
-    const child = spawn(command, args, spawnOptions)
+    const child = spawn(resolvedCommand, args, spawnOptions)
 
     child.on('error', reject)
     child.on('close', (code) => {
       if (code === 0) {
         resolve()
       } else {
-        const error = new Error(`${command} exited with code ${code}`)
+        const error = new Error(`${resolvedCommand} exited with code ${code}`)
         error.exitCode = code
         reject(error)
       }
@@ -158,6 +156,10 @@ async function runCommand(command, args, { silent = false, cwd } = {}) {
 
 async function runCommandCapture(command, args, { cwd } = {}) {
   return new Promise((resolve, reject) => {
+    const resolvedCommand = IS_WINDOWS && (command === 'npm' || command === 'npx' || command === 'pnpm' || command === 'yarn')
+      ? `${command}.cmd`
+      : command
+
     let stdout = ''
     let stderr = ''
 
@@ -166,13 +168,7 @@ async function runCommandCapture(command, args, { cwd } = {}) {
       cwd
     }
 
-    // On Windows, use shell for commands that might need PATH resolution (php, composer, etc.)
-    // Git commands work fine without shell
-    if (IS_WINDOWS && command !== 'git') {
-      spawnOptions.shell = true
-    }
-
-    const child = spawn(command, args, spawnOptions)
+    const child = spawn(resolvedCommand, args, spawnOptions)
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk
@@ -187,7 +183,7 @@ async function runCommandCapture(command, args, { cwd } = {}) {
       if (code === 0) {
         resolve(stdout)
       } else {
-        const error = new Error(`${command} exited with code ${code}: ${stderr.trim()}`)
+        const error = new Error(`${resolvedCommand} exited with code ${code}: ${stderr.trim()}`)
         error.exitCode = code
         reject(error)
       }
