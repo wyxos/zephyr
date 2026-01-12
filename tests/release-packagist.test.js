@@ -5,9 +5,8 @@ const mockWriteFile = vi.fn()
 const mockAccess = vi.fn()
 const mockStat = vi.fn()
 
-let originalConsoleLog
-let originalConsoleWarn
-let originalConsoleError
+let originalStdoutWrite
+let originalStderrWrite
 
 vi.mock('node:fs/promises', () => ({
   default: {
@@ -103,13 +102,11 @@ vi.mock('../src/dependency-scanner.mjs', () => ({
 
 describe('release-packagist module', () => {
   beforeEach(() => {
-    // Suppress console output during tests
-    originalConsoleLog = console.log
-    originalConsoleWarn = console.warn
-    originalConsoleError = console.error
-    console.log = vi.fn()
-    console.warn = vi.fn()
-    console.error = vi.fn()
+    // Suppress terminal output during tests
+    originalStdoutWrite = process.stdout.write
+    originalStderrWrite = process.stderr.write
+    process.stdout.write = vi.fn()
+    process.stderr.write = vi.fn()
 
     vi.resetModules()
     spawnQueue.length = 0
@@ -123,10 +120,9 @@ describe('release-packagist module', () => {
   })
 
   afterEach(() => {
-    // Restore console output after tests
-    console.log = originalConsoleLog
-    console.warn = originalConsoleWarn
-    console.error = originalConsoleError
+    // Restore terminal output after tests
+    process.stdout.write = originalStdoutWrite
+    process.stderr.write = originalStderrWrite
   })
 
   it('loads without syntax errors and exports releasePackagist', async () => {
