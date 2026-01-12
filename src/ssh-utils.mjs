@@ -4,23 +4,9 @@ import path from 'node:path'
 import { NodeSSH } from 'node-ssh'
 import chalk from 'chalk'
 import process from 'node:process'
+import { createChalkLogger } from './utils/output.mjs'
 
-// Import utility functions - these need to be passed in or redefined to avoid circular dependency
-// For now, we'll redefine the simple ones and accept others as parameters
-function writeStdoutLine(message = '') {
-  const text = message == null ? '' : String(message)
-  process.stdout.write(`${text}\n`)
-}
-
-function writeStderrLine(message = '') {
-  const text = message == null ? '' : String(message)
-  process.stderr.write(`${text}\n`)
-}
-
-const logProcessing = (message = '') => writeStdoutLine(chalk.yellow(message))
-const logSuccess = (message = '') => writeStdoutLine(chalk.green(message))
-const logError = (message = '') => writeStderrLine(chalk.red(message))
-const logWarning = (message = '') => writeStderrLine(chalk.yellow(message))
+const { logProcessing, logSuccess, logWarning, logError } = createChalkLogger(chalk)
 
 function expandHomePath(targetPath) {
   if (!targetPath) {

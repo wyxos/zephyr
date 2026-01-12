@@ -11,6 +11,10 @@ import { releaseNode } from './release-node.mjs'
 import { releasePackagist } from './release-packagist.mjs'
 import { validateLocalDependencies } from './dependency-scanner.mjs'
 import { checkAndUpdateVersion } from './version-checker.mjs'
+import { createChalkLogger, writeStderrLine, writeStdoutLine } from './utils/output.mjs'
+import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
+import { getCurrentBranch as getGitCurrentBranch, getUpstreamRef as getGitUpstreamRef } from './utils/git.mjs'
+import { planLaravelDeploymentTasks } from './utils/task-planner.mjs'
 
 const IS_WINDOWS = process.platform === 'win32'
 
@@ -23,20 +27,7 @@ const PENDING_TASKS_FILE = 'pending-tasks.json'
 const RELEASE_SCRIPT_NAME = 'release'
 const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@latest'
 
-function writeStdoutLine(message = '') {
-  const text = message == null ? '' : String(message)
-  process.stdout.write(`${text}\n`)
-}
-
-function writeStderrLine(message = '') {
-  const text = message == null ? '' : String(message)
-  process.stderr.write(`${text}\n`)
-}
-
-const logProcessing = (message = '') => writeStdoutLine(chalk.yellow(message))
-const logSuccess = (message = '') => writeStdoutLine(chalk.green(message))
-const logWarning = (message = '') => writeStderrLine(chalk.yellow(message))
-const logError = (message = '') => writeStderrLine(chalk.red(message))
+const { logProcessing, logSuccess, logWarning, logError } = createChalkLogger(chalk)
 
 let logFilePath = null
 
@@ -129,74 +120,18 @@ const runPrompt = async (questions) => {
 }
 
 async function runCommand(command, args, { silent = false, cwd } = {}) {
-  return new Promise((resolve, reject) => {
-    const resolvedCommand = IS_WINDOWS && (command === 'npm' || command === 'npx' || command === 'pnpm' || command === 'yarn')
-      ? `${command}.cmd`
-      : command
-
-    const spawnOptions = {
-      stdio: silent ? 'ignore' : 'inherit',
-      cwd
-    }
-
-    const child = spawn(resolvedCommand, args, spawnOptions)
-
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve()
-      } else {
-        const error = new Error(`${resolvedCommand} exited with code ${code}`)
-        error.exitCode = code
-        reject(error)
-      }
-    })
-  })
+  const stdio = silent ? 'ignore' : 'inherit'
+  return runCommandBase(command, args, { cwd, stdio })
 }
 
 async function runCommandCapture(command, args, { cwd } = {}) {
-  return new Promise((resolve, reject) => {
-    const resolvedCommand = IS_WINDOWS && (command === 'npm' || command === 'npx' || command === 'pnpm' || command === 'yarn')
-      ? `${command}.cmd`
-      : command
-
-    let stdout = ''
-    let stderr = ''
-
-    const spawnOptions = {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      cwd
-    }
-
-    const child = spawn(resolvedCommand, args, spawnOptions)
-
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk
-    })
-
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk
-    })
-
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(stdout)
-      } else {
-        const error = new Error(`${resolvedCommand} exited with code ${code}: ${stderr.trim()}`)
-        error.exitCode = code
-        reject(error)
-      }
-    })
-  })
+  const { stdout } = await runCommandCaptureBase(command, args, { cwd })
+  return stdout
 }
 
 async function getCurrentBranch(rootDir) {
-  const output = await runCommandCapture('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-    cwd: rootDir
-  })
-
-  return output.trim()
+  const branch = await getGitCurrentBranch(rootDir)
+  return branch ?? ''
 }
 
 async function getGitStatus(rootDir) {
@@ -226,16 +161,7 @@ function hasStagedChanges(statusOutput) {
 }
 
 async function getUpstreamRef(rootDir) {
-  try {
-    const output = await runCommandCapture('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], {
-      cwd: rootDir
-    })
-
-    const ref = output.trim()
-    return ref.length > 0 ? ref : null
-  } catch {
-    return null
-  }
+  return await getGitUpstreamRef(rootDir)
 }
 
 async function ensureCommittedChangesPushed(targetBranch, rootDir) {
@@ -1422,48 +1348,10 @@ async function runRemoteTasks(config, options = {}) {
       }
     }
 
-    const shouldRunComposer =
-      isLaravel &&
-      changedFiles.some(
-        (file) =>
-          file === 'composer.json' ||
-          file === 'composer.lock' ||
-          file.endsWith('/composer.json') ||
-          file.endsWith('/composer.lock')
-      )
-
-    const shouldRunMigrations =
-      isLaravel &&
-      changedFiles.some(
-        (file) => file.startsWith('database/migrations/') && file.endsWith('.php')
-      )
-
     const hasPhpChanges = isLaravel && changedFiles.some((file) => file.endsWith('.php'))
 
-    const shouldRunNpmInstall =
-      isLaravel &&
-      changedFiles.some(
-        (file) =>
-          file === 'package.json' ||
-          file === 'package-lock.json' ||
-          file.endsWith('/package.json') ||
-          file.endsWith('/package-lock.json')
-      )
-
-    const hasFrontendChanges =
-      isLaravel &&
-      changedFiles.some((file) =>
-        ['.vue', '.css', '.scss', '.js', '.ts', '.tsx', '.less'].some((ext) =>
-          file.endsWith(ext)
-        )
-      )
-
-    const shouldRunBuild = isLaravel && (hasFrontendChanges || shouldRunNpmInstall)
-    const shouldClearCaches = hasPhpChanges
-    const shouldRestartQueues = hasPhpChanges
-
     let horizonConfigured = false
-    if (shouldRestartQueues) {
+    if (hasPhpChanges) {
       const horizonCheck = await ssh.execCommand(
         'if [ -f config/horizon.php ]; then echo "yes"; else echo "no"; fi',
         { cwd: remoteCwd }
@@ -1471,54 +1359,12 @@ async function runRemoteTasks(config, options = {}) {
       horizonConfigured = horizonCheck.stdout.trim() === 'yes'
     }
 
-    const steps = [
-      {
-        label: `Pull latest changes for ${config.branch}`,
-        command: `git pull origin ${config.branch}`
-      }
-    ]
-
-    if (shouldRunComposer) {
-      steps.push({
-        label: 'Update Composer dependencies',
-        command: 'composer update --no-dev --no-interaction --prefer-dist'
-      })
-    }
-
-    if (shouldRunMigrations) {
-      steps.push({
-        label: 'Run database migrations',
-        command: 'php artisan migrate --force'
-      })
-    }
-
-    if (shouldRunNpmInstall) {
-      steps.push({
-        label: 'Install Node dependencies',
-        command: 'npm install'
-      })
-    }
-
-    if (shouldRunBuild) {
-      steps.push({
-        label: 'Compile frontend assets',
-        command: 'npm run build'
-      })
-    }
-
-    if (shouldClearCaches) {
-      steps.push({
-        label: 'Clear Laravel caches',
-        command: 'php artisan cache:clear && php artisan config:clear && php artisan view:clear'
-      })
-    }
-
-    if (shouldRestartQueues) {
-      steps.push({
-        label: horizonConfigured ? 'Restart Horizon workers' : 'Restart queue workers',
-        command: horizonConfigured ? 'php artisan horizon:terminate' : 'php artisan queue:restart'
-      })
-    }
+    const steps = planLaravelDeploymentTasks({
+      branch: config.branch,
+      isLaravel,
+      changedFiles,
+      horizonConfigured
+    })
 
     const usefulSteps = steps.length > 1
 
