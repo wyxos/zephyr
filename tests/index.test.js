@@ -141,18 +141,15 @@ vi.mock('../src/dependency-scanner.mjs', () => ({
 }))
 
 describe('zephyr deployment helpers', () => {
-  let originalConsoleLog
-  let originalConsoleWarn
-  let originalConsoleError
+  let originalStdoutWrite
+  let originalStderrWrite
 
   beforeEach(() => {
-    // Suppress console output during tests
-    originalConsoleLog = console.log
-    originalConsoleWarn = console.warn
-    originalConsoleError = console.error
-    console.log = vi.fn()
-    console.warn = vi.fn()
-    console.error = vi.fn()
+    // Suppress terminal output during tests
+    originalStdoutWrite = process.stdout.write
+    originalStderrWrite = process.stderr.write
+    process.stdout.write = vi.fn()
+    process.stderr.write = vi.fn()
 
     vi.resetModules()
     spawnQueue.length = 0
@@ -187,10 +184,9 @@ describe('zephyr deployment helpers', () => {
   })
 
   afterEach(() => {
-    // Restore console output after tests
-    console.log = originalConsoleLog
-    console.warn = originalConsoleWarn
-    console.error = originalConsoleError
+    // Restore terminal output after tests
+    process.stdout.write = originalStdoutWrite
+    process.stderr.write = originalStderrWrite
     delete globalThis.__zephyrSSHFactory
     delete globalThis.__zephyrPrompt
   })
