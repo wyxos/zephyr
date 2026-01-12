@@ -469,9 +469,9 @@ describe('zephyr deployment helpers', () => {
     expect(lockFileWrites.length).toBeGreaterThan(0)
 
     // Verify local test command was executed (not remote)
-    // Check that php artisan test was called locally via spawn
+    // Check that php artisan test was called locally via spawn with --compact flag
     const phpTestCalls = mockSpawn.mock.calls.filter(
-      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && !args.includes('--compact')
+      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && args.includes('--compact')
     )
     expect(phpTestCalls.length).toBeGreaterThan(0)
   })
