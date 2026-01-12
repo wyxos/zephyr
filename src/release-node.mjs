@@ -10,16 +10,34 @@ import { validateLocalDependencies } from './dependency-scanner.mjs'
 
 const IS_WINDOWS = process.platform === 'win32'
 
+function writeStdoutLine(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stdout.write(`${text}\n`)
+}
+
+function writeStderrLine(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stderr.write(`${text}\n`)
+}
+
+function writeStderr(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stderr.write(text)
+  if (text && !text.endsWith('\n')) {
+    process.stderr.write('\n')
+  }
+}
+
 function logStep(message) {
-  console.log(chalk.yellow(`→ ${message}`))
+  writeStdoutLine(chalk.yellow(`→ ${message}`))
 }
 
 function logSuccess(message) {
-  console.log(chalk.green(`✔ ${message}`))
+  writeStdoutLine(chalk.green(`✔ ${message}`))
 }
 
 function logWarning(message) {
-  console.warn(chalk.yellow(`⚠ ${message}`))
+  writeStderrLine(chalk.yellow(`⚠ ${message}`))
 }
 
 function runCommand(command, args, { cwd = process.cwd(), capture = false, useShell = false } = {}) {
@@ -155,7 +173,7 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef, rootDir = process
       await runCommand('git', ['fetch', remoteName, remoteBranch], { capture: true, cwd: rootDir })
     } catch (error) {
       if (error.stderr) {
-        console.error(error.stderr)
+        writeStderr(error.stderr)
       }
       throw new Error(`Failed to fetch ${upstreamRef}: ${error.message}`)
     }
@@ -181,7 +199,7 @@ async function ensureUpToDateWithUpstream(branch, upstreamRef, rootDir = process
         await runCommand('git', ['pull', '--ff-only', remoteName, remoteBranch], { capture: true, cwd: rootDir })
       } catch (error) {
         if (error.stderr) {
-          console.error(error.stderr)
+          writeStderr(error.stderr)
         }
         throw new Error(
           `Unable to fast-forward ${branch} with ${upstreamRef}. Resolve conflicts manually, then rerun the release.\n${error.message}`
@@ -251,10 +269,10 @@ async function runLint(skipLint, pkg, rootDir = process.cwd()) {
     logSuccess('Lint passed.')
   } catch (error) {
     if (error.stdout) {
-      console.error(error.stdout)
+      writeStderr(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }
@@ -287,10 +305,10 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
     logSuccess('Tests passed.')
   } catch (error) {
     if (error.stdout) {
-      console.error(error.stdout)
+      writeStderr(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }
@@ -314,10 +332,10 @@ async function runBuild(skipBuild, pkg, rootDir = process.cwd()) {
     logSuccess('Build completed.')
   } catch (error) {
     if (error.stdout) {
-      console.error(error.stdout)
+      writeStderr(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }
@@ -341,10 +359,10 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
     logSuccess('Library built.')
   } catch (error) {
     if (error.stdout) {
-      console.error(error.stdout)
+      writeStderr(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }
@@ -377,7 +395,7 @@ async function ensureNpmAuth(rootDir = process.cwd()) {
     logSuccess('npm authenticated.')
   } catch (error) {
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }
@@ -438,10 +456,10 @@ async function pushChanges(rootDir = process.cwd()) {
     logSuccess('Git push completed.')
   } catch (error) {
     if (error.stdout) {
-      console.error(error.stdout)
+      writeStderr(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }
@@ -472,10 +490,10 @@ async function publishPackage(pkg, rootDir = process.cwd()) {
     logSuccess('npm publish completed.')
   } catch (error) {
     if (error.stdout) {
-      console.error(error.stdout)
+      writeStderr(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }
@@ -566,10 +584,10 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
     logSuccess('GitHub Pages deployment completed.')
   } catch (error) {
     if (error.stdout) {
-      console.error(error.stdout)
+      writeStderr(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }
@@ -611,8 +629,8 @@ export async function releaseNode() {
 
     logSuccess(`Release workflow completed for ${updatedPkg.name}@${updatedPkg.version}.`)
   } catch (error) {
-    console.error('\nRelease failed:')
-    console.error(error.message)
+    writeStderrLine('\nRelease failed:')
+    writeStderrLine(error.message)
     throw error
   }
 }

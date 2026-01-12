@@ -3,13 +3,24 @@ import os from 'node:os'
 import path from 'node:path'
 import { NodeSSH } from 'node-ssh'
 import chalk from 'chalk'
+import process from 'node:process'
 
 // Import utility functions - these need to be passed in or redefined to avoid circular dependency
 // For now, we'll redefine the simple ones and accept others as parameters
-const logProcessing = (message = '') => console.log(chalk.yellow(message))
-const logSuccess = (message = '') => console.log(chalk.green(message))
-const logError = (message = '') => console.error(chalk.red(message))
-const logWarning = (message = '') => console.warn(chalk.yellow(message))
+function writeStdoutLine(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stdout.write(`${text}\n`)
+}
+
+function writeStderrLine(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stderr.write(`${text}\n`)
+}
+
+const logProcessing = (message = '') => writeStdoutLine(chalk.yellow(message))
+const logSuccess = (message = '') => writeStdoutLine(chalk.green(message))
+const logError = (message = '') => writeStderrLine(chalk.red(message))
+const logWarning = (message = '') => writeStderrLine(chalk.yellow(message))
 
 function expandHomePath(targetPath) {
   if (!targetPath) {
