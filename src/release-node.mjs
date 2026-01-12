@@ -583,7 +583,7 @@ export async function releaseNode() {
     const pkg = await readPackage(rootDir)
 
     logStep('Validating dependencies...')
-    await validateLocalDependencies(rootDir, (questions) => inquirer.prompt(questions))
+    await validateLocalDependencies(rootDir, (questions) => inquirer.prompt(questions), logSuccess)
 
     logStep('Checking working tree status...')
     await ensureCleanWorkingTree(rootDir)

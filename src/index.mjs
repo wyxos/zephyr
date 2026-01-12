@@ -1915,7 +1915,7 @@ async function main(releaseType = null) {
 
   if (hasPackageJson || hasComposerJson) {
     logProcessing('Validating dependencies...')
-    await validateLocalDependencies(rootDir, runPrompt)
+    await validateLocalDependencies(rootDir, runPrompt, logSuccess)
   }
 
   // Load servers first (they may be migrated)
