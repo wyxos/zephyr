@@ -1,10 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
 import process from 'node:process'
 import chalk from 'chalk'
-
-const IS_WINDOWS = process.platform === 'win32'
+import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
 
 function isLocalPathOutsideRepo(depPath, rootDir) {
   if (!depPath || typeof depPath !== 'string') {
@@ -218,45 +216,13 @@ async function updateComposerJsonDependency(rootDir, packageName, newVersion, fi
 }
 
 async function runCommand(command, args, { cwd = process.cwd(), capture = false } = {}) {
-  return new Promise((resolve, reject) => {
-    const resolvedCommand = IS_WINDOWS && (command === 'npm' || command === 'npx' || command === 'pnpm' || command === 'yarn')
-      ? `${command}.cmd`
-      : command
+  if (capture) {
+    const { stdout, stderr } = await runCommandCaptureBase(command, args, { cwd })
+    return { stdout: stdout.trim(), stderr: stderr.trim() }
+  }
 
-    const spawnOptions = {
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-      cwd
-    }
-
-    const child = spawn(resolvedCommand, args, spawnOptions)
-    let stdout = ''
-    let stderr = ''
-
-    if (capture) {
-      child.stdout.on('data', (chunk) => {
-        stdout += chunk
-      })
-
-      child.stderr.on('data', (chunk) => {
-        stderr += chunk
-      })
-    }
-
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(capture ? { stdout: stdout.trim(), stderr: stderr.trim() } : undefined)
-      } else {
-        const error = new Error(`Command failed (${code}): ${resolvedCommand} ${args.join(' ')}`)
-        if (capture) {
-          error.stdout = stdout
-          error.stderr = stderr
-        }
-        error.exitCode = code
-        reject(error)
-      }
-    })
-  })
+  await runCommandBase(command, args, { cwd })
+  return undefined
 }
 
 async function getGitStatus(rootDir) {

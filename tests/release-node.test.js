@@ -13,7 +13,7 @@ describe('release-node module', () => {
   })
 
   it('loads without syntax errors and exports releaseNode', async () => {
-    const module = await import('../src/release-node.mjs?' + Math.random())
+    const module = await import('../src/release-node.mjs')
     expect(typeof module.releaseNode).toBe('function')
   })
 })

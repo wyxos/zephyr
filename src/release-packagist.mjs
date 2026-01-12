@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { readFile, writeFile } from 'node:fs/promises'
 import fs from 'node:fs'
@@ -6,30 +5,15 @@ import process from 'node:process'
 import semver from 'semver'
 import inquirer from 'inquirer'
 import { validateLocalDependencies } from './dependency-scanner.mjs'
+import { writeStderr, writeStderrLine, writeStdoutLine } from './utils/output.mjs'
+import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
+import { ensureUpToDateWithUpstream, getCurrentBranch as getGitCurrentBranch, getUpstreamRef } from './utils/git.mjs'
 
 const STEP_PREFIX = '→'
 const OK_PREFIX = '✔'
 const WARN_PREFIX = '⚠'
 
 const IS_WINDOWS = process.platform === 'win32'
-
-function writeStdoutLine(message = '') {
-  const text = message == null ? '' : String(message)
-  process.stdout.write(`${text}\n`)
-}
-
-function writeStderrLine(message = '') {
-  const text = message == null ? '' : String(message)
-  process.stderr.write(`${text}\n`)
-}
-
-function writeStderr(message = '') {
-  const text = message == null ? '' : String(message)
-  process.stderr.write(text)
-  if (text && !text.endsWith('\n')) {
-    process.stderr.write('\n')
-  }
-}
 
 function logStep(message) {
   writeStdoutLine(`${STEP_PREFIX} ${message}`)
@@ -43,60 +27,14 @@ function logWarning(message) {
   writeStderrLine(`${WARN_PREFIX} ${message}`)
 }
 
-function runCommand(command, args, { cwd = process.cwd(), capture = false, useShell = false } = {}) {
-  return new Promise((resolve, reject) => {
-    const needsShell = useShell || (IS_WINDOWS && (command === 'php' || command === 'composer'))
-    
-    const spawnOptions = {
-      cwd,
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit'
-    }
+async function runCommand(command, args, { cwd = process.cwd(), capture = false } = {}) {
+  if (capture) {
+    const { stdout, stderr } = await runCommandCaptureBase(command, args, { cwd })
+    return { stdout: stdout.trim(), stderr: stderr.trim() }
+  }
 
-    let child
-    if (needsShell) {
-      // When using shell, construct the command string to avoid deprecation warning
-      // Properly escape arguments for Windows cmd.exe
-      const escapedArgs = args.map(arg => {
-        // If arg contains spaces or special chars, wrap in quotes and escape internal quotes
-        if (arg.includes(' ') || arg.includes('"') || arg.includes('&') || arg.includes('|')) {
-          return `"${arg.replace(/"/g, '\\"')}"`
-        }
-        return arg
-      })
-      const commandString = `${command} ${escapedArgs.join(' ')}`
-      spawnOptions.shell = true
-      child = spawn(commandString, [], spawnOptions)
-    } else {
-      child = spawn(command, args, spawnOptions)
-    }
-    let stdout = ''
-    let stderr = ''
-
-    if (capture) {
-      child.stdout.on('data', (chunk) => {
-        stdout += chunk
-      })
-
-      child.stderr.on('data', (chunk) => {
-        stderr += chunk
-      })
-    }
-
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(capture ? { stdout: stdout.trim(), stderr: stderr.trim() } : undefined)
-      } else {
-        const error = new Error(`Command failed (${code}): ${command} ${args.join(' ')}`)
-        if (capture) {
-          error.stdout = stdout
-          error.stderr = stderr
-        }
-        error.exitCode = code
-        reject(error)
-      }
-    })
-  })
+  await runCommandBase(command, args, { cwd })
+  return undefined
 }
 
 async function readComposer(rootDir = process.cwd()) {
@@ -145,78 +83,7 @@ async function ensureCleanWorkingTree(rootDir = process.cwd()) {
   }
 }
 
-async function getCurrentBranch(rootDir = process.cwd()) {
-  const { stdout } = await runCommand('git', ['branch', '--show-current'], { capture: true, cwd: rootDir })
-  return stdout || null
-}
-
-async function getUpstreamRef(rootDir = process.cwd()) {
-  try {
-    const { stdout } = await runCommand('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], {
-      capture: true,
-      cwd: rootDir
-    })
-
-    return stdout || null
-  } catch {
-    return null
-  }
-}
-
-async function ensureUpToDateWithUpstream(branch, upstreamRef, rootDir = process.cwd()) {
-  if (!upstreamRef) {
-    logWarning(`Branch ${branch} has no upstream configured; skipping ahead/behind checks.`)
-    return
-  }
-
-  const [remoteName, ...branchParts] = upstreamRef.split('/')
-  const remoteBranch = branchParts.join('/')
-
-  if (remoteName && remoteBranch) {
-    logStep(`Fetching latest updates from ${remoteName}/${remoteBranch}...`)
-    try {
-      await runCommand('git', ['fetch', remoteName, remoteBranch], { cwd: rootDir })
-    } catch (error) {
-      throw new Error(`Failed to fetch ${upstreamRef}: ${error.message}`)
-    }
-  }
-
-  const aheadResult = await runCommand('git', ['rev-list', '--count', `${upstreamRef}..HEAD`], {
-    capture: true,
-    cwd: rootDir
-  })
-  const behindResult = await runCommand('git', ['rev-list', '--count', `HEAD..${upstreamRef}`], {
-    capture: true,
-    cwd: rootDir
-  })
-
-  const ahead = Number.parseInt(aheadResult.stdout || '0', 10)
-  const behind = Number.parseInt(behindResult.stdout || '0', 10)
-
-  if (Number.isFinite(behind) && behind > 0) {
-    if (remoteName && remoteBranch) {
-      logStep(`Fast-forwarding ${branch} with ${upstreamRef}...`)
-
-      try {
-        await runCommand('git', ['pull', '--ff-only', remoteName, remoteBranch], { cwd: rootDir })
-      } catch (error) {
-        throw new Error(
-          `Unable to fast-forward ${branch} with ${upstreamRef}. Resolve conflicts manually, then rerun the release.\n${error.message}`
-        )
-      }
-
-      return ensureUpToDateWithUpstream(branch, upstreamRef, rootDir)
-    }
-
-    throw new Error(
-      `Branch ${branch} is behind ${upstreamRef} by ${behind} commit${behind === 1 ? '' : 's'}. Pull or rebase first.`
-    )
-  }
-
-  if (Number.isFinite(ahead) && ahead > 0) {
-    logWarning(`Branch ${branch} is ahead of ${upstreamRef} by ${ahead} commit${ahead === 1 ? '' : 's'}.`)
-  }
-}
+// Git helpers imported from src/utils/git.mjs
 
 function parseArgs() {
   const args = process.argv.slice(2)
@@ -408,14 +275,14 @@ export async function releasePackagist() {
   logStep('Checking working tree status...')
   await ensureCleanWorkingTree(rootDir)
 
-  const branch = await getCurrentBranch(rootDir)
+  const branch = await getGitCurrentBranch(rootDir, { method: 'show-current' })
   if (!branch) {
     throw new Error('Unable to determine current branch.')
   }
 
   logStep(`Current branch: ${branch}`)
   const upstreamRef = await getUpstreamRef(rootDir)
-  await ensureUpToDateWithUpstream(branch, upstreamRef, rootDir)
+  await ensureUpToDateWithUpstream({ branch, upstreamRef, rootDir, logStep, logWarning })
 
   await runLint(skipLint, rootDir)
   await runTests(skipTests, composer, rootDir)

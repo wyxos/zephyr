@@ -126,7 +126,7 @@ describe('release-packagist module', () => {
   })
 
   it('loads without syntax errors and exports releasePackagist', async () => {
-    const module = await import('../src/release-packagist.mjs?' + Math.random())
+    const module = await import('../src/release-packagist.mjs')
     expect(typeof module.releasePackagist).toBe('function')
   })
 
@@ -156,7 +156,7 @@ describe('release-packagist module', () => {
     queueSpawnResponse({}) // git push (commits)
     queueSpawnResponse({}) // git push origin --tags (tags)
 
-    const module = await import('../src/release-packagist.mjs?' + Math.random())
+    const module = await import('../src/release-packagist.mjs')
 
     // This will fail because we're not in a real git repo, but we can verify the commands
     // Let's just verify the push commands are called in the right order
