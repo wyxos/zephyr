@@ -18,7 +18,7 @@ async function getCurrentVersion() {
     )
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'))
     return packageJson.version
-  } catch (error) {
+  } catch (_error) {
     // If we can't read package.json, return null
     return null
   }
@@ -32,7 +32,7 @@ async function getLatestVersion() {
     }
     const data = await response.json()
     return data.version || null
-  } catch (error) {
+  } catch (_error) {
     return null
   }
 }
@@ -45,7 +45,7 @@ function isNewerVersionAvailable(current, latest) {
   // Use semver to properly compare versions
   try {
     return semver.gt(latest, current)
-  } catch (error) {
+  } catch (_error) {
     // If semver comparison fails, fall back to simple string comparison
     return latest !== current
   }
@@ -118,7 +118,7 @@ export async function checkAndUpdateVersion(promptFn, args) {
     // User confirmed, re-execute with latest version
     await reExecuteWithLatest(args)
     return true // Indicates we've re-executed, so the current process should exit
-  } catch (error) {
+  } catch (_error) {
     // If version check fails, just continue with current version
     // Don't block the user from using the tool
     return false

@@ -1,6 +1,5 @@
 import { spawn, exec } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -489,7 +488,7 @@ function extractDomainFromHomepage(homepage) {
     return url.hostname
   } catch {
     // If it's not a valid URL, try to extract domain from string
-    const match = homepage.match(/(?:https?:\/\/)?([^\/]+)/)
+    const match = homepage.match(/(?:https?:\/\/)?([^/]+)/)
     return match ? match[1] : null
   }
 }
@@ -537,7 +536,9 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
   try {
     try {
       await runCommand('git', ['worktree', 'remove', worktreeDir, '-f'], { capture: true, cwd: rootDir })
-    } catch { }
+    } catch (_error) {
+      // Ignore if worktree doesn't exist
+    }
 
     try {
       await runCommand('git', ['worktree', 'add', worktreeDir, 'gh-pages'], { capture: true, cwd: rootDir })

@@ -25,7 +25,7 @@ async function resolveSshKeyPath(targetPath) {
   const expanded = expandHomePath(targetPath)
   try {
     await fs.access(expanded)
-  } catch (error) {
+  } catch (_error) {
     throw new Error(`SSH key not accessible at ${expanded}`)
   }
   return expanded
@@ -64,7 +64,7 @@ const createSshClient = () => {
  * @param {string} rootDir - Local root directory for logging
  * @returns {Promise<{ssh: NodeSSH, remoteCwd: string, remoteHome: string}>}
  */
-export async function connectToServer(config, rootDir) {
+export async function connectToServer(config, _rootDir) {
   const ssh = createSshClient()
   const sshUser = config.sshUser || os.userInfo().username
   const privateKeyPath = await resolveSshKeyPath(config.sshKey)
@@ -96,7 +96,7 @@ export async function connectToServer(config, rootDir) {
  * @returns {Promise<Object>} Command result
  */
 export async function executeRemoteCommand(ssh, label, command, options = {}) {
-  const { cwd, allowFailure = false, printStdout = true, bootstrapEnv = true, rootDir = null, writeToLogFile = null, env = {} } = options
+  const { cwd, allowFailure = false, bootstrapEnv = true, rootDir = null, writeToLogFile = null, env = {} } = options
 
   logProcessing(`\n→ ${label}`)
 

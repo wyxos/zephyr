@@ -89,7 +89,7 @@ async function cleanupOldLogs(rootDir) {
     for (const file of filesToDelete) {
       try {
         await fs.unlink(file.path)
-      } catch (error) {
+      } catch (_error) {
         // Ignore errors when deleting old logs
       }
     }
@@ -414,7 +414,7 @@ async function ensureProjectReleaseScript(rootDir) {
   let packageJson
   try {
     packageJson = JSON.parse(raw)
-  } catch (error) {
+  } catch (_error) {
     logWarning('Unable to parse package.json; skipping release script injection.')
     return false
   }
@@ -453,7 +453,7 @@ async function ensureProjectReleaseScript(rootDir) {
   try {
     await runCommand('git', ['rev-parse', '--is-inside-work-tree'], { cwd: rootDir, silent: true })
     isGitRepo = true
-  } catch (error) {
+  } catch (_error) {
     logWarning('Not a git repository; skipping commit for release script addition.')
   }
 
@@ -541,7 +541,7 @@ async function readRemoteLock(ssh, remoteCwd) {
   if (checkResult.stdout && checkResult.stdout.trim() !== 'LOCK_NOT_FOUND' && checkResult.stdout.trim() !== '') {
     try {
       return JSON.parse(checkResult.stdout.trim())
-    } catch (error) {
+    } catch (_error) {
       return { raw: checkResult.stdout.trim() }
     }
   }
@@ -605,7 +605,7 @@ async function acquireRemoteLock(ssh, remoteCwd, rootDir) {
         let details = {}
         try {
           details = JSON.parse(checkResult.stdout.trim())
-        } catch (error) {
+        } catch (_error) {
           details = { raw: checkResult.stdout.trim() }
         }
 
@@ -620,7 +620,7 @@ async function acquireRemoteLock(ssh, remoteCwd, rootDir) {
       let details = {}
       try {
         details = JSON.parse(checkResult.stdout.trim())
-      } catch (error) {
+      } catch (_error) {
         details = { raw: checkResult.stdout.trim() }
       }
 
@@ -727,7 +727,7 @@ async function ensureGitignoreEntry(rootDir) {
       cwd: rootDir
     })
     isGitRepo = true
-  } catch (error) {
+  } catch (_error) {
     logWarning('Not a git repository; skipping commit for .gitignore update.')
   }
 
@@ -949,7 +949,7 @@ async function listGitBranches(currentDir) {
       .filter(Boolean)
 
     return branches.length ? branches : ['master']
-  } catch (error) {
+  } catch (_error) {
     logWarning('Unable to read git branches; defaulting to master.')
     return ['master']
   }
@@ -1002,7 +1002,7 @@ async function isPrivateKeyFile(filePath) {
   try {
     const content = await fs.readFile(filePath, 'utf8')
     return /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(content)
-  } catch (error) {
+  } catch (_error) {
     return false
   }
 }
@@ -1091,7 +1091,7 @@ async function resolveSshKeyPath(targetPath) {
 
   try {
     await fs.access(expanded)
-  } catch (error) {
+  } catch (_error) {
     throw new Error(`SSH key not accessible at ${expanded}`)
   }
 
@@ -1247,14 +1247,14 @@ async function runRemoteTasks(config, options = {}) {
     }
 
     // Run tests for Laravel projects
-  if (isLaravel) {
-    logProcessing('Running Laravel tests locally...')
-    try {
-      await runCommand('php', ['artisan', 'test', '--compact'], { cwd: rootDir })
-      logSuccess('Local tests passed.')
-    } catch (error) {
-      throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
-    }
+    if (isLaravel) {
+      logProcessing('Running Laravel tests locally...')
+      try {
+        await runCommand('php', ['artisan', 'test', '--compact'], { cwd: rootDir })
+        logSuccess('Local tests passed.')
+      } catch (error) {
+        throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
+      }
     }
   } else {
     logProcessing('Pre-push git hook detected. Skipping local linting and test execution.')
@@ -1314,7 +1314,7 @@ async function runRemoteTasks(config, options = {}) {
     const escapeForDoubleQuotes = (value) => value.replace(/(["\\$`])/g, '\\$1')
 
     const executeRemote = async (label, command, options = {}) => {
-      const { cwd = remoteCwd, allowFailure = false, printStdout = true, bootstrapEnv = true } = options
+      const { cwd = remoteCwd, allowFailure = false, bootstrapEnv = true } = options
       logProcessing(`\n→ ${label}`)
 
       let wrappedCommand = command
@@ -1583,7 +1583,7 @@ async function runRemoteTasks(config, options = {}) {
         const remoteHome = remoteHomeResult.stdout.trim() || `/home/${sshUser}`
         const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
         await compareLocksAndPrompt(rootDir, ssh, remoteCwd)
-      } catch (lockError) {
+      } catch (_lockError) {
         // Ignore lock comparison errors during error handling
       }
     }
@@ -1739,9 +1739,9 @@ async function selectApp(projectConfig, server, currentDir) {
     if (apps.length > 0) {
       const availableServers = [...new Set(apps.map((app) => app.serverName).filter(Boolean))]
       if (availableServers.length > 0) {
-      logWarning(
-        `No applications configured for server "${server.serverName}". Available servers: ${availableServers.join(', ')}`
-      )
+        logWarning(
+          `No applications configured for server "${server.serverName}". Available servers: ${availableServers.join(', ')}`
+        )
       }
     }
     logProcessing(`No applications configured for ${server.serverName}. Let's create one.`)
@@ -1758,7 +1758,7 @@ async function selectApp(projectConfig, server, currentDir) {
     return appConfig
   }
 
-  const choices = matches.map(({ app, index }, matchIndex) => ({
+  const choices = matches.map(({ app }, matchIndex) => ({
     name: `${app.projectPath} (${app.branch})`,
     value: matchIndex
   }))
@@ -1796,23 +1796,6 @@ async function selectApp(projectConfig, server, currentDir) {
   return chosen
 }
 
-async function promptPresetName() {
-  const { presetName } = await runPrompt([
-    {
-      type: 'input',
-      name: 'presetName',
-      message: 'Enter a name for this preset',
-      validate: (value) => (value && value.trim().length > 0 ? true : 'Preset name cannot be empty.')
-    }
-  ])
-
-  return presetName.trim()
-}
-
-function generatePresetKey(serverName, projectPath) {
-  return `${serverName}:${projectPath}`
-}
-
 async function selectPreset(projectConfig, servers) {
   const presets = projectConfig.presets ?? []
   const apps = projectConfig.apps ?? []
@@ -1844,7 +1827,7 @@ async function selectPreset(projectConfig, servers) {
 
     return {
       name: displayName,
-    value: index
+      value: index
     }
   })
 
@@ -2041,11 +2024,11 @@ async function main(releaseType = null) {
       } else {
         // Check if preset with this appId already exists
         const existingIndex = presets.findIndex((p) => p.appId === appId)
-      if (existingIndex >= 0) {
+        if (existingIndex >= 0) {
           presets[existingIndex].name = trimmedName
           presets[existingIndex].branch = deploymentConfig.branch
-      } else {
-        presets.push({
+        } else {
+          presets.push({
             name: trimmedName,
             appId: appId,
             branch: deploymentConfig.branch
