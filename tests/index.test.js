@@ -426,6 +426,7 @@ describe('zephyr deployment helpers', () => {
           ...response,
           stdout:
             'composer.json\n' +
+            'package.json\n' +
             'database/migrations/2025_10_21_000000_create_table.php\n' +
             'resources/js/app.js\n' +
             'resources/views/welcome.blade.php\n' +
@@ -454,6 +455,7 @@ describe('zephyr deployment helpers', () => {
     expect(executedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('composer update'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('php artisan migrate'))).toBe(true)
+    expect(executedCommands.some((cmd) => cmd.includes('npm install'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('npm run build'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('cache:clear'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('horizon:terminate'))).toBe(true)

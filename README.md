@@ -30,6 +30,12 @@ Follow the interactive prompts to configure your deployment target:
 
 Configuration is saved automatically for future deployments.
 
+## Update Checks
+
+When run via `npx`, Zephyr can prompt to re-run itself using the latest published version.
+
+- **Skip update check**: set `ZEPHYR_SKIP_VERSION_CHECK=1`
+
 ## Features
 
 - Automated Git operations (branch switching, commits, pushes)
@@ -49,11 +55,12 @@ Configuration is saved automatically for future deployments.
 Zephyr analyzes changed files and runs appropriate tasks:
 
 - **Always**: `git pull origin <branch>`
-- **Composer files changed**: `composer update --no-dev --no-interaction --prefer-dist`
-- **Migration files added**: `php artisan migrate --force`
-- **package.json changed**: `npm install`
-- **Frontend files changed**: `npm run build`
-- **PHP files changed**: Clear Laravel caches, restart queues
+- **Composer files changed** (`composer.json` / `composer.lock`): `composer update --no-dev --no-interaction --prefer-dist`
+- **Migrations changed** (`database/migrations/*.php`): `php artisan migrate --force`
+- **Node dependency files changed** (`package.json` / `package-lock.json`, including nested): `npm install`
+- **Frontend files changed** (`.vue/.js/.ts/.tsx/.css/.scss/.less`): `npm run build`
+  - Note: `npm run build` is also scheduled when `npm install` is scheduled.
+- **PHP files changed**: clear caches + restart queue workers (Horizon if configured)
 
 ## Configuration
 
@@ -64,6 +71,7 @@ Servers are stored globally at `~/.config/zephyr/servers.json`:
 ```json
 [
   {
+    "id": "server_abc123",
     "serverName": "production",
     "serverIp": "192.168.1.100"
   }
@@ -76,8 +84,17 @@ Deployment targets are stored per-project at `.zephyr/config.json`:
 
 ```json
 {
+  "presets": [
+    {
+      "name": "prod-main",
+      "appId": "app_def456",
+      "branch": "main"
+    }
+  ],
   "apps": [
     {
+      "id": "app_def456",
+      "serverId": "server_abc123",
       "serverName": "production",
       "projectPath": "~/webapps/myapp",
       "branch": "main",
@@ -97,6 +114,11 @@ Zephyr creates a `.zephyr/` directory in your project with:
 - `{timestamp}.log` - Log files for each deployment run
 
 The `.zephyr/` directory is automatically added to `.gitignore`.
+
+## Notes
+
+- If Zephyr reports **"No upstream file changes detected"**, it means the remote repository already matches `origin/<branch>` after `git fetch`. In that case, Zephyr will only run `git pull` and skip all conditional maintenance tasks.
+- If Zephyr prompts to update local file dependencies (path-based deps outside the repo), it may also prompt to commit those updates before continuing.
 
 ## Requirements
 
