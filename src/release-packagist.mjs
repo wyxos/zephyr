@@ -13,16 +13,34 @@ const WARN_PREFIX = '⚠'
 
 const IS_WINDOWS = process.platform === 'win32'
 
+function writeStdoutLine(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stdout.write(`${text}\n`)
+}
+
+function writeStderrLine(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stderr.write(`${text}\n`)
+}
+
+function writeStderr(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stderr.write(text)
+  if (text && !text.endsWith('\n')) {
+    process.stderr.write('\n')
+  }
+}
+
 function logStep(message) {
-  console.log(`${STEP_PREFIX} ${message}`)
+  writeStdoutLine(`${STEP_PREFIX} ${message}`)
 }
 
 function logSuccess(message) {
-  console.log(`${OK_PREFIX} ${message}`)
+  writeStdoutLine(`${OK_PREFIX} ${message}`)
 }
 
 function logWarning(message) {
-  console.warn(`${WARN_PREFIX} ${message}`)
+  writeStderrLine(`${WARN_PREFIX} ${message}`)
 }
 
 function runCommand(command, args, { cwd = process.cwd(), capture = false, useShell = false } = {}) {
@@ -269,10 +287,10 @@ async function runLint(skipLint, rootDir = process.cwd()) {
     }
     process.stdout.write('\n')
     if (error.stdout) {
-      console.error(error.stdout)
+      writeStderr(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }
@@ -322,10 +340,10 @@ async function runTests(skipTests, composer, rootDir = process.cwd()) {
     }
     process.stdout.write('\n')
     if (error.stdout) {
-      console.error(error.stdout)
+      writeStderr(error.stdout)
     }
     if (error.stderr) {
-      console.error(error.stderr)
+      writeStderr(error.stderr)
     }
     throw error
   }

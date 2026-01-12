@@ -23,10 +23,20 @@ const PENDING_TASKS_FILE = 'pending-tasks.json'
 const RELEASE_SCRIPT_NAME = 'release'
 const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@latest'
 
-const logProcessing = (message = '') => console.log(chalk.yellow(message))
-const logSuccess = (message = '') => console.log(chalk.green(message))
-const logWarning = (message = '') => console.warn(chalk.yellow(message))
-const logError = (message = '') => console.error(chalk.red(message))
+function writeStdoutLine(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stdout.write(`${text}\n`)
+}
+
+function writeStderrLine(message = '') {
+  const text = message == null ? '' : String(message)
+  process.stderr.write(`${text}\n`)
+}
+
+const logProcessing = (message = '') => writeStdoutLine(chalk.yellow(message))
+const logSuccess = (message = '') => writeStdoutLine(chalk.green(message))
+const logWarning = (message = '') => writeStderrLine(chalk.yellow(message))
+const logError = (message = '') => writeStderrLine(chalk.red(message))
 
 let logFilePath = null
 
@@ -1882,7 +1892,7 @@ async function main(releaseType = null) {
       logError('\nRelease failed:')
       logError(error.message)
       if (error.stack) {
-        console.error(error.stack)
+        writeStderrLine(error.stack)
       }
       process.exit(1)
     }
@@ -1897,7 +1907,7 @@ async function main(releaseType = null) {
       logError('\nRelease failed:')
       logError(error.message)
       if (error.stack) {
-        console.error(error.stack)
+        writeStderrLine(error.stack)
       }
       process.exit(1)
     }
@@ -2018,7 +2028,7 @@ async function main(releaseType = null) {
   }
 
   logProcessing('\nSelected deployment target:')
-  console.log(JSON.stringify(deploymentConfig, null, 2))
+  writeStdoutLine(JSON.stringify(deploymentConfig, null, 2))
 
   if (isCreatingNewPreset || !preset) {
     const { presetName } = await runPrompt([
