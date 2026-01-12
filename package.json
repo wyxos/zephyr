@@ -13,6 +13,7 @@
   },
   "scripts": {
     "test": "vitest run",
+    "lint": "eslint .",
     "release": "node bin/zephyr.mjs --type=node"
   },
   "keywords": [
@@ -48,6 +49,9 @@
     "semver": "^7.6.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "globals": "^17.0.0",
     "vitest": "^2.1.8"
   }
 }

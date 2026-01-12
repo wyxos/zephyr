@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import process from 'node:process'
+import chalk from 'chalk'
 
 const IS_WINDOWS = process.platform === 'win32'
 
@@ -353,20 +354,27 @@ async function validateLocalDependencies(rootDir, promptFn, logFn = null) {
     })
   )
 
-  // Build warning messages
+  // Build warning messages with colored output (danger color for package name and version)
   const messages = depsWithVersions.map((dep) => {
+    const packageNameColored = chalk.red(dep.packageName)
+    const pathColored = chalk.dim(dep.path)
     const versionInfo = dep.latestVersion
-      ? ` Latest version available: ${dep.latestVersion}.`
+      ? ` Latest version available: ${chalk.red(dep.latestVersion)}.`
       : ' Latest version could not be determined.'
-    return `Dependency '${dep.packageName}' is pointing to a local path outside the repository: ${dep.path}.${versionInfo}`
+    return `Dependency ${packageNameColored} is pointing to a local path outside the repository: ${pathColored}.${versionInfo}`
   })
+
+  // Build the prompt message with colored count (danger color)
+  const countColored = chalk.red(allDeps.length)
+  const countText = allDeps.length === 1 ? 'dependency' : 'dependencies'
+  const promptMessage = `Found ${countColored} local file ${countText} pointing outside the repository:\n\n${messages.join('\n\n')}\n\nUpdate to latest version?`
 
   // Prompt user
   const { shouldUpdate } = await promptFn([
     {
       type: 'confirm',
       name: 'shouldUpdate',
-      message: `Found ${allDeps.length} local file dependency/dependencies pointing outside the repository:\n\n${messages.join('\n\n')}\n\nUpdate to latest version?`,
+      message: promptMessage,
       default: true
     }
   ])
