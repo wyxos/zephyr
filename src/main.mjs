@@ -2,7 +2,6 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import process from 'node:process'
-import crypto from 'node:crypto'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { NodeSSH } from 'node-ssh'
@@ -14,11 +13,8 @@ import { createChalkLogger, writeStderrLine, writeStdoutLine } from './utils/out
 import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
 import { planLaravelDeploymentTasks } from './utils/task-planner.mjs'
 import {
-  ensureDirectory,
-  getProjectConfigPath,
   PENDING_TASKS_FILE,
-  PROJECT_CONFIG_DIR,
-  PROJECT_CONFIG_FILE
+  PROJECT_CONFIG_DIR
 } from './utils/paths.mjs'
 import { cleanupOldLogs, closeLogFile, getLogFilePath, writeToLogFile } from './utils/log-file.mjs'
 import {
@@ -32,84 +28,44 @@ import {
   loadPendingTasksSnapshot,
   savePendingTasksSnapshot
 } from './deploy/snapshots.mjs'
-import {
-  ensureGitignoreEntry as ensureGitignoreEntryImpl,
-  ensureProjectReleaseScript as ensureProjectReleaseScriptImpl
-} from './project/bootstrap.mjs'
-import {
-  commitLintingChanges as commitLintingChangesImpl,
-  hasPrePushHook as hasPrePushHookImpl,
-  isLocalLaravelProject as isLocalLaravelProjectImpl,
-  runLinting as runLintingImpl
-} from './deploy/preflight.mjs'
+import * as bootstrap from './project/bootstrap.mjs'
+import * as preflight from './deploy/preflight.mjs'
 import { createRemoteExecutor } from './deploy/remote-exec.mjs'
-import {
-  ensureSshDetails as ensureSshDetailsImpl,
-  isPrivateKeyFile as isPrivateKeyFileImpl,
-  listSshKeys as listSshKeysImpl,
-  promptSshDetails as promptSshDetailsImpl,
-  resolveSshKeyPath as resolveSshKeyPathImpl
-} from './ssh/keys.mjs'
-import {
-  ensureLocalRepositoryState as ensureLocalRepositoryStateImpl,
-  getGitStatus as getGitStatusImpl,
-  hasUncommittedChanges as hasUncommittedChangesImpl
-} from './deploy/local-repo.mjs'
-import {
-  defaultProjectPath as defaultProjectPathImpl,
-  listGitBranches as listGitBranchesImpl,
-  promptAppDetails as promptAppDetailsImpl,
-  promptServerDetails as promptServerDetailsImpl,
-  selectApp as selectAppImpl,
-  selectPreset as selectPresetImpl,
-  selectServer as selectServerImpl
-} from './utils/config-flow.mjs'
+import * as sshKeys from './ssh/keys.mjs'
+import * as localRepo from './deploy/local-repo.mjs'
+import * as configFlow from './utils/config-flow.mjs'
+import { createRunPrompt } from './runtime/prompt.mjs'
+import { createSshClientFactory } from './runtime/ssh-client.mjs'
+import { createLocalCommandRunners } from './runtime/local-command.mjs'
+import { generateId } from './utils/id.mjs'
+import { loadServers, saveServers } from './config/servers.mjs'
+import { loadProjectConfig, saveProjectConfig } from './config/project.mjs'
+import { resolveRemotePath } from './utils/remote-path.mjs'
 
-const GLOBAL_CONFIG_DIR = path.join(os.homedir(), '.config', 'zephyr')
-const SERVERS_FILE = path.join(GLOBAL_CONFIG_DIR, 'servers.json')
 const RELEASE_SCRIPT_NAME = 'release'
 const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@latest'
 
 const { logProcessing, logSuccess, logWarning, logError } = createChalkLogger(chalk)
 
-const createSshClient = () => {
-  if (typeof globalThis !== 'undefined' && globalThis.__zephyrSSHFactory) {
-    return globalThis.__zephyrSSHFactory()
-  }
-
-  return new NodeSSH()
-}
-
-const runPrompt = async (questions) => {
-  if (typeof globalThis !== 'undefined' && globalThis.__zephyrPrompt) {
-    return globalThis.__zephyrPrompt(questions)
-  }
-
-  return inquirer.prompt(questions)
-}
-
-async function runCommand(command, args, { silent = false, cwd } = {}) {
-  const stdio = silent ? 'ignore' : 'inherit'
-  return runCommandBase(command, args, { cwd, stdio })
-}
-
-async function runCommandCapture(command, args, { cwd } = {}) {
-  const { stdout } = await runCommandCaptureBase(command, args, { cwd })
-  return stdout
-}
+const runPrompt = createRunPrompt({ inquirer })
+const createSshClient = createSshClientFactory({ NodeSSH })
+const { runCommand, runCommandCapture } = createLocalCommandRunners({
+  runCommandBase,
+  runCommandCaptureBase
+})
 
 // Local repository state moved to src/deploy/local-repo.mjs
 
 async function getGitStatus(rootDir) {
-  return await getGitStatusImpl(rootDir, { runCommandCapture })
+  return await localRepo.getGitStatus(rootDir, { runCommandCapture })
 }
 
 async function hasUncommittedChanges(rootDir) {
-  return await hasUncommittedChangesImpl(rootDir, { getGitStatus })
+  return await localRepo.hasUncommittedChanges(rootDir, { getGitStatus })
 }
 
 async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd()) {
-  return await ensureLocalRepositoryStateImpl(targetBranch, rootDir, {
+  return await localRepo.ensureLocalRepositoryState(targetBranch, rootDir, {
     runPrompt,
     runCommand,
     runCommandCapture,
@@ -120,7 +76,7 @@ async function ensureLocalRepositoryState(targetBranch, rootDir = process.cwd())
 }
 
 async function ensureProjectReleaseScript(rootDir) {
-  return await ensureProjectReleaseScriptImpl(rootDir, {
+  return await bootstrap.ensureProjectReleaseScript(rootDir, {
     runPrompt,
     runCommand,
     logSuccess,
@@ -133,7 +89,7 @@ async function ensureProjectReleaseScript(rootDir) {
 // Locks and snapshots moved to src/deploy/*
 
 async function ensureGitignoreEntry(rootDir) {
-  return await ensureGitignoreEntryImpl(rootDir, {
+  return await bootstrap.ensureGitignoreEntry(rootDir, {
     projectConfigDir: PROJECT_CONFIG_DIR,
     runCommand,
     logSuccess,
@@ -141,239 +97,36 @@ async function ensureGitignoreEntry(rootDir) {
   })
 }
 
-function generateId() {
-  return crypto.randomBytes(8).toString('hex')
-}
-
-function migrateServers(servers) {
-  if (!Array.isArray(servers)) {
-    return []
-  }
-
-  let needsMigration = false
-  const migrated = servers.map((server) => {
-    if (!server.id) {
-      needsMigration = true
-      return {
-        ...server,
-        id: generateId()
-      }
-    }
-    return server
-  })
-
-  return { servers: migrated, needsMigration }
-}
-
-function migrateApps(apps, servers) {
-  if (!Array.isArray(apps)) {
-    return { apps: [], needsMigration: false }
-  }
-
-  // Create a map of serverName -> serverId for migration
-  const serverNameToId = new Map()
-  servers.forEach((server) => {
-    if (server.id && server.serverName) {
-      serverNameToId.set(server.serverName, server.id)
-    }
-  })
-
-  let needsMigration = false
-  const migrated = apps.map((app) => {
-    const updated = { ...app }
-
-    if (!app.id) {
-      needsMigration = true
-      updated.id = generateId()
-    }
-
-    // Migrate serverName to serverId if needed
-    if (app.serverName && !app.serverId) {
-      const serverId = serverNameToId.get(app.serverName)
-      if (serverId) {
-        needsMigration = true
-        updated.serverId = serverId
-      }
-    }
-
-    return updated
-  })
-
-  return { apps: migrated, needsMigration }
-}
-
-function migratePresets(presets, apps) {
-  if (!Array.isArray(presets)) {
-    return { presets: [], needsMigration: false }
-  }
-
-  // Create a map of serverName:projectPath -> appId for migration
-  const keyToAppId = new Map()
-  apps.forEach((app) => {
-    if (app.id && app.serverName && app.projectPath) {
-      const key = `${app.serverName}:${app.projectPath}`
-      keyToAppId.set(key, app.id)
-    }
-  })
-
-  let needsMigration = false
-  const migrated = presets.map((preset) => {
-    const updated = { ...preset }
-
-    // Migrate from key-based to appId-based if needed
-    if (preset.key && !preset.appId) {
-      const appId = keyToAppId.get(preset.key)
-      if (appId) {
-        needsMigration = true
-        updated.appId = appId
-        // Keep key for backward compatibility during transition, but it's deprecated
-      }
-    }
-
-    return updated
-  })
-
-  return { presets: migrated, needsMigration }
-}
-
-async function loadServers() {
-  try {
-    const raw = await fs.readFile(SERVERS_FILE, 'utf8')
-    const data = JSON.parse(raw)
-    const servers = Array.isArray(data) ? data : []
-
-    const { servers: migrated, needsMigration } = migrateServers(servers)
-
-    if (needsMigration) {
-      await saveServers(migrated)
-      logSuccess('Migrated servers configuration to use unique IDs.')
-    }
-
-    return migrated
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return []
-    }
-
-    logWarning('Failed to read servers.json, starting with an empty list.')
-    return []
-  }
-}
-
-async function saveServers(servers) {
-  await ensureDirectory(GLOBAL_CONFIG_DIR)
-  const payload = JSON.stringify(servers, null, 2)
-  await fs.writeFile(SERVERS_FILE, `${payload}\n`)
-}
-
-async function loadProjectConfig(rootDir, servers = []) {
-  const configPath = getProjectConfigPath(rootDir)
-
-  try {
-    const raw = await fs.readFile(configPath, 'utf8')
-    const data = JSON.parse(raw)
-    const apps = Array.isArray(data?.apps) ? data.apps : []
-    const presets = Array.isArray(data?.presets) ? data.presets : []
-
-    // Migrate apps first (needs servers for serverName -> serverId mapping)
-    const { apps: migratedApps, needsMigration: appsNeedMigration } = migrateApps(apps, servers)
-
-    // Migrate presets (needs migrated apps for key -> appId mapping)
-    const { presets: migratedPresets, needsMigration: presetsNeedMigration } = migratePresets(presets, migratedApps)
-
-    if (appsNeedMigration || presetsNeedMigration) {
-      await saveProjectConfig(rootDir, {
-        apps: migratedApps,
-        presets: migratedPresets
-      })
-      logSuccess('Migrated project configuration to use unique IDs.')
-    }
-
-    return {
-      apps: migratedApps,
-      presets: migratedPresets
-    }
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return { apps: [], presets: [] }
-    }
-
-    logWarning('Failed to read .zephyr/config.json, starting with an empty list of apps.')
-    return { apps: [], presets: [] }
-  }
-}
-
-async function saveProjectConfig(rootDir, config) {
-  const configDir = path.join(rootDir, PROJECT_CONFIG_DIR)
-  await ensureDirectory(configDir)
-  const payload = JSON.stringify(
-    {
-      apps: config.apps ?? [],
-      presets: config.presets ?? []
-    },
-    null,
-    2
-  )
-  await fs.writeFile(path.join(configDir, PROJECT_CONFIG_FILE), `${payload}\n`)
-}
+// Config storage/migrations moved to src/config/*
 
 function defaultProjectPath(currentDir) {
-  return defaultProjectPathImpl(currentDir)
+  return configFlow.defaultProjectPath(currentDir)
 }
 
 async function listGitBranches(currentDir) {
-  return await listGitBranchesImpl(currentDir, { runCommandCapture, logWarning })
-}
-
-async function listSshKeys() {
-  return await listSshKeysImpl()
-}
-
-async function isPrivateKeyFile(filePath) {
-  return await isPrivateKeyFileImpl(filePath)
+  return await configFlow.listGitBranches(currentDir, { runCommandCapture, logWarning })
 }
 
 async function promptSshDetails(currentDir, existing = {}) {
-  return await promptSshDetailsImpl(currentDir, existing, { runPrompt })
+  return await sshKeys.promptSshDetails(currentDir, existing, { runPrompt })
 }
 
 async function ensureSshDetails(config, currentDir) {
-  return await ensureSshDetailsImpl(config, currentDir, { runPrompt, logProcessing })
+  return await sshKeys.ensureSshDetails(config, currentDir, { runPrompt, logProcessing })
 }
 
 async function resolveSshKeyPath(targetPath) {
-  return await resolveSshKeyPathImpl(targetPath)
+  return await sshKeys.resolveSshKeyPath(targetPath)
 }
 
-function resolveRemotePath(projectPath, remoteHome) {
-  if (!projectPath) {
-    return projectPath
-  }
-
-  const sanitizedHome = remoteHome.replace(/\/+$/, '')
-
-  if (projectPath === '~') {
-    return sanitizedHome
-  }
-
-  if (projectPath.startsWith('~/')) {
-    const remainder = projectPath.slice(2)
-    return remainder ? `${sanitizedHome}/${remainder}` : sanitizedHome
-  }
-
-  if (projectPath.startsWith('/')) {
-    return projectPath
-  }
-
-  return `${sanitizedHome}/${projectPath}`
-}
+// resolveRemotePath moved to src/utils/remote-path.mjs
 
 async function runLinting(rootDir) {
-  return await runLintingImpl(rootDir, { runCommand, logProcessing, logSuccess })
+  return await preflight.runLinting(rootDir, { runCommand, logProcessing, logSuccess })
 }
 
 async function commitLintingChanges(rootDir) {
-  return await commitLintingChangesImpl(rootDir, {
+  return await preflight.commitLintingChanges(rootDir, {
     getGitStatus,
     runCommand,
     logProcessing,
@@ -387,8 +140,8 @@ async function runRemoteTasks(config, options = {}) {
   await cleanupOldLogs(rootDir)
   await ensureLocalRepositoryState(config.branch, rootDir)
 
-  const isLaravel = await isLocalLaravelProjectImpl(rootDir)
-  const hasHook = await hasPrePushHookImpl(rootDir)
+  const isLaravel = await preflight.isLocalLaravelProject(rootDir)
+  const hasHook = await preflight.hasPrePushHook(rootDir)
 
   if (!hasHook) {
     // Run linting before tests
@@ -612,11 +365,11 @@ async function runRemoteTasks(config, options = {}) {
 }
 
 async function promptServerDetails(existingServers = []) {
-  return await promptServerDetailsImpl(existingServers, { runPrompt, generateId })
+  return await configFlow.promptServerDetails(existingServers, { runPrompt, generateId })
 }
 
 async function selectServer(servers) {
-  return await selectServerImpl(servers, {
+  return await configFlow.selectServer(servers, {
     runPrompt,
     logProcessing,
     logSuccess,
@@ -626,7 +379,7 @@ async function selectServer(servers) {
 }
 
 async function promptAppDetails(currentDir, existing = {}) {
-  return await promptAppDetailsImpl(currentDir, existing, {
+  return await configFlow.promptAppDetails(currentDir, existing, {
     runPrompt,
     listGitBranches,
     defaultProjectPath,
@@ -635,7 +388,7 @@ async function promptAppDetails(currentDir, existing = {}) {
 }
 
 async function selectApp(projectConfig, server, currentDir) {
-  return await selectAppImpl(projectConfig, server, currentDir, {
+  return await configFlow.selectApp(projectConfig, server, currentDir, {
     runPrompt,
     logWarning,
     logProcessing,
@@ -647,7 +400,7 @@ async function selectApp(projectConfig, server, currentDir) {
 }
 
 async function selectPreset(projectConfig, servers) {
-  return await selectPresetImpl(projectConfig, servers, { runPrompt })
+  return await configFlow.selectPreset(projectConfig, servers, { runPrompt })
 }
 
 async function main(releaseType = null) {
@@ -717,9 +470,9 @@ async function main(releaseType = null) {
   }
 
   // Load servers first (they may be migrated)
-  const servers = await loadServers()
+  const servers = await loadServers({ logSuccess, logWarning })
   // Load project config with servers for migration
-  const projectConfig = await loadProjectConfig(rootDir, servers)
+  const projectConfig = await loadProjectConfig(rootDir, servers, { logSuccess, logWarning })
 
   let server = null
   let appConfig = null
@@ -896,36 +649,4 @@ async function main(releaseType = null) {
   await runRemoteTasks(deploymentConfig, { rootDir, snapshot: snapshotToUse })
 }
 
-export {
-  ensureGitignoreEntry,
-  ensureProjectReleaseScript,
-  listSshKeys,
-  resolveRemotePath,
-  isPrivateKeyFile,
-  runRemoteTasks,
-  promptServerDetails,
-  selectServer,
-  promptAppDetails,
-  selectApp,
-  promptSshDetails,
-  ensureSshDetails,
-  ensureLocalRepositoryState,
-  loadServers,
-  loadProjectConfig,
-  saveProjectConfig,
-  main,
-  releaseNode,
-  releasePackagist,
-  createSshClient,
-  resolveSshKeyPath,
-  selectPreset,
-  logProcessing,
-  logSuccess,
-  logWarning,
-  logError,
-  writeToLogFile,
-  getLogFilePath,
-  ensureDirectory,
-  runCommand,
-  runCommandCapture
-}
+export { main, runRemoteTasks }
