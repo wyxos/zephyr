@@ -1,57 +1,17 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
-import path from 'node:path'
-import { NodeSSH } from 'node-ssh'
 import chalk from 'chalk'
 import process from 'node:process'
 import { createChalkLogger } from './utils/output.mjs'
+import { resolveRemotePath } from './utils/remote-path.mjs'
+import { resolveSshKeyPath } from './ssh/keys.mjs'
+import { createRemoteExecutor } from './deploy/remote-exec.mjs'
+import { createSshClientFactory } from './runtime/ssh-client.mjs'
+import { NodeSSH } from 'node-ssh'
 
 const { logProcessing, logSuccess, logWarning, logError } = createChalkLogger(chalk)
 
-function expandHomePath(targetPath) {
-  if (!targetPath) {
-    return targetPath
-  }
-  if (targetPath.startsWith('~')) {
-    return path.join(os.homedir(), targetPath.slice(1))
-  }
-  return targetPath
-}
-
-async function resolveSshKeyPath(targetPath) {
-  const expanded = expandHomePath(targetPath)
-  try {
-    await fs.access(expanded)
-  } catch (_error) {
-    throw new Error(`SSH key not accessible at ${expanded}`)
-  }
-  return expanded
-}
-
-function resolveRemotePath(projectPath, remoteHome) {
-  if (!projectPath) {
-    return projectPath
-  }
-  const sanitizedHome = remoteHome.replace(/\/+$/, '')
-  if (projectPath === '~') {
-    return sanitizedHome
-  }
-  if (projectPath.startsWith('~/')) {
-    const remainder = projectPath.slice(2)
-    return remainder ? `${sanitizedHome}/${remainder}` : sanitizedHome
-  }
-  if (projectPath.startsWith('/')) {
-    return projectPath
-  }
-  return `${sanitizedHome}/${projectPath}`
-}
-
-const createSshClient = () => {
-  if (typeof globalThis !== 'undefined' && globalThis.__zephyrSSHFactory) {
-    return globalThis.__zephyrSSHFactory()
-  }
-  return new NodeSSH()
-}
+const createSshClient = createSshClientFactory({ NodeSSH })
 
 // writeToLogFile will be passed as an optional parameter to avoid circular dependency
 
@@ -93,91 +53,30 @@ export async function connectToServer(config, _rootDir) {
  * @returns {Promise<Object>} Command result
  */
 export async function executeRemoteCommand(ssh, label, command, options = {}) {
-  const { cwd, allowFailure = false, bootstrapEnv = true, rootDir = null, writeToLogFile = null, env = {} } = options
+  const {
+    cwd,
+    allowFailure = false,
+    bootstrapEnv = true,
+    rootDir = null,
+    writeToLogFile = null,
+    env = {}
+    // printStdout: legacy option, intentionally ignored (we log to file)
+  } = options
 
-  logProcessing(`\n→ ${label}`)
+  const rootDirForLogging = rootDir ?? process.cwd()
+  const writeToLogFileFn = writeToLogFile ?? (async () => { })
 
-  // Robust environment bootstrap for non-interactive shells
-  const profileBootstrap = [
-    'if [ -f "$HOME/.profile" ]; then . "$HOME/.profile"; fi',
-    'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"; fi',
-    'if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi',
-    'if [ -f "$HOME/.zprofile" ]; then . "$HOME/.zprofile"; fi',
-    'if [ -f "$HOME/.zshrc" ]; then . "$HOME/.zshrc"; fi',
-    'if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi',
-    'if [ -s "$HOME/.config/nvm/nvm.sh" ]; then . "$HOME/.config/nvm/nvm.sh"; fi',
-    'if [ -s "/usr/local/opt/nvm/nvm.sh" ]; then . "/usr/local/opt/nvm/nvm.sh"; fi',
-    'if command -v npm >/dev/null 2>&1; then :',
-    'elif [ -d "$HOME/.nvm/versions/node" ]; then NODE_VERSION=$(ls -1 "$HOME/.nvm/versions/node" | tail -1) && export PATH="$HOME/.nvm/versions/node/$NODE_VERSION/bin:$PATH"',
-    'elif [ -d "/usr/local/lib/node_modules/npm/bin" ]; then export PATH="/usr/local/lib/node_modules/npm/bin:$PATH"',
-    'elif [ -d "/opt/homebrew/bin" ] && [ -f "/opt/homebrew/bin/npm" ]; then export PATH="/opt/homebrew/bin:$PATH"',
-    'elif [ -d "/usr/local/bin" ] && [ -f "/usr/local/bin/npm" ]; then export PATH="/usr/local/bin:$PATH"',
-    'elif [ -d "$HOME/.local/bin" ] && [ -f "$HOME/.local/bin/npm" ]; then export PATH="$HOME/.local/bin:$PATH"',
-    'fi'
-  ].join('; ')
+  const executeRemote = createRemoteExecutor({
+    ssh,
+    rootDir: rootDirForLogging,
+    remoteCwd: cwd,
+    writeToLogFile: writeToLogFileFn,
+    logProcessing,
+    logSuccess,
+    logError
+  })
 
-  const escapeForDoubleQuotes = (value) => value.replace(/(["\\$`])/g, '\\$1')
-  const escapeForSingleQuotes = (value) => value.replace(/'/g, "'\\''")
-
-  // Build environment variable exports
-  let envExports = ''
-  if (Object.keys(env).length > 0) {
-    const envPairs = Object.entries(env).map(([key, value]) => {
-      const escapedValue = escapeForSingleQuotes(String(value))
-      return `${key}='${escapedValue}'`
-    })
-    envExports = envPairs.join(' ') + ' '
-  }
-
-  let wrappedCommand = command
-  let execOptions = { cwd }
-
-  if (bootstrapEnv && cwd) {
-    const cwdForShell = escapeForDoubleQuotes(cwd)
-    wrappedCommand = `${profileBootstrap}; cd "${cwdForShell}" && ${envExports}${command}`
-    execOptions = {}
-  } else if (Object.keys(env).length > 0) {
-    wrappedCommand = `${envExports}${command}`
-  }
-
-  const result = await ssh.execCommand(wrappedCommand, execOptions)
-
-  // Log to file if writeToLogFile function provided
-  if (writeToLogFile && rootDir) {
-    if (result.stdout && result.stdout.trim()) {
-      await writeToLogFile(rootDir, `[${label}] STDOUT:\n${result.stdout.trim()}`)
-    }
-    if (result.stderr && result.stderr.trim()) {
-      await writeToLogFile(rootDir, `[${label}] STDERR:\n${result.stderr.trim()}`)
-    }
-  }
-
-  // Show errors in terminal
-  if (result.code !== 0) {
-    if (result.stdout && result.stdout.trim()) {
-      logError(`\n[${label}] Output:\n${result.stdout.trim()}`)
-    }
-    if (result.stderr && result.stderr.trim()) {
-      logError(`\n[${label}] Error:\n${result.stderr.trim()}`)
-    }
-  }
-
-  if (result.code !== 0 && !allowFailure) {
-    const stderr = result.stderr?.trim() ?? ''
-    if (/command not found/.test(stderr) || /is not recognized/.test(stderr)) {
-      throw new Error(
-        `Command failed: ${command}. Ensure the remote environment loads required tools for non-interactive shells (e.g. export PATH in profile scripts).`
-      )
-    }
-    throw new Error(`Command failed: ${command}`)
-  }
-
-  // Show success confirmation
-  if (result.code === 0) {
-    logSuccess(`✓ ${command}`)
-  }
-
-  return result
+  return await executeRemote(label, command, { cwd, allowFailure, bootstrapEnv, env })
 }
 
 /**
