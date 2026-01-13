@@ -22,6 +22,22 @@ Navigate to your project directory and run:
 zephyr
 ```
 
+See all flags:
+
+```bash
+zephyr --help
+```
+
+Common flags:
+
+```bash
+# Run a release workflow
+zephyr --type node
+
+# Skip the best-effort update check for this run
+zephyr --skip-version-check
+```
+
 Follow the interactive prompts to configure your deployment target:
 - Server name and IP address
 - Project path on the remote server
@@ -34,7 +50,9 @@ Configuration is saved automatically for future deployments.
 
 When run via `npx`, Zephyr can prompt to re-run itself using the latest published version.
 
-- **Skip update check**: set `ZEPHYR_SKIP_VERSION_CHECK=1`
+- **Skip update check**:
+  - Set `ZEPHYR_SKIP_VERSION_CHECK=1`, or
+  - Use `zephyr --skip-version-check`
 
 ## Features
 

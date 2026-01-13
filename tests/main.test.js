@@ -193,7 +193,7 @@ describe('zephyr deployment helpers', () => {
 
 
   it('resolves remote paths correctly', async () => {
-    const { resolveRemotePath } = await import('../src/main.mjs')
+    const { resolveRemotePath } = await import('../src/utils/remote-path.mjs')
 
     expect(resolveRemotePath('~/webapps/app', '/home/runcloud')).toBe(
       '/home/runcloud/webapps/app'
@@ -208,7 +208,7 @@ describe('zephyr deployment helpers', () => {
   it('detects private key files from contents', async () => {
     mockReadFile.mockResolvedValueOnce('-----BEGIN OPENSSH PRIVATE KEY-----')
 
-    const { isPrivateKeyFile } = await import('../src/main.mjs')
+    const { isPrivateKeyFile } = await import('../src/ssh/keys.mjs')
 
     await expect(isPrivateKeyFile('/home/local/.ssh/id_rsa')).resolves.toBe(true)
 
@@ -239,7 +239,7 @@ describe('zephyr deployment helpers', () => {
 
     // Import path module to ensure cross-platform path handling
     const path = await import('node:path')
-    const { listSshKeys } = await import('../src/main.mjs')
+    const { listSshKeys } = await import('../src/ssh/keys.mjs')
 
     const result = await listSshKeys()
 
@@ -253,10 +253,19 @@ describe('zephyr deployment helpers', () => {
     it('registers a new server when none exist', async () => {
       mockPrompt.mockResolvedValueOnce({ serverName: 'production', serverIp: '203.0.113.10' })
 
-      const { selectServer } = await import('../src/main.mjs')
+      const { selectServer, promptServerDetails } = await import('../src/utils/config-flow.mjs')
+      const { saveServers } = await import('../src/config/servers.mjs')
+      const { generateId } = await import('../src/utils/id.mjs')
 
       const servers = []
-      const server = await selectServer(servers)
+      const server = await selectServer(servers, {
+        runPrompt: mockPrompt,
+        logProcessing: () => {},
+        logSuccess: () => {},
+        saveServers,
+        promptServerDetails: (existingServers = []) =>
+          promptServerDetails(existingServers, { runPrompt: mockPrompt, generateId })
+      })
 
       expect(server).toMatchObject({ serverName: 'production', serverIp: '203.0.113.10' })
       expect(server.id).toBeDefined()
@@ -275,12 +284,32 @@ describe('zephyr deployment helpers', () => {
         .mockResolvedValueOnce({ sshUser: 'forge', sshKeySelection: '/home/local/.ssh/id_rsa' })
       mockReaddir.mockResolvedValue([])
 
-      const { selectApp } = await import('../src/main.mjs')
+      const { selectApp, promptAppDetails, listGitBranches, defaultProjectPath } = await import('../src/utils/config-flow.mjs')
+      const { saveProjectConfig } = await import('../src/config/project.mjs')
+      const { generateId } = await import('../src/utils/id.mjs')
+      const { promptSshDetails } = await import('../src/ssh/keys.mjs')
+      const { runCommandCapture: runCommandCaptureBase } = await import('../src/utils/command.mjs')
 
       const projectConfig = { apps: [] }
       const server = { serverName: 'production', serverIp: '203.0.113.10' }
 
-      const app = await selectApp(projectConfig, server, process.cwd())
+      const runCommandCapture = async (command, args, options) => (await runCommandCaptureBase(command, args, options)).stdout
+
+      const app = await selectApp(projectConfig, server, process.cwd(), {
+        runPrompt: mockPrompt,
+        logWarning: () => {},
+        logProcessing: () => {},
+        logSuccess: () => {},
+        saveProjectConfig,
+        generateId,
+        promptAppDetails: (currentDir, existing = {}) =>
+          promptAppDetails(currentDir, existing, {
+            runPrompt: mockPrompt,
+            listGitBranches: (dir) => listGitBranches(dir, { runCommandCapture, logWarning: () => {} }),
+            defaultProjectPath,
+            promptSshDetails: (dir, existingSsh = {}) => promptSshDetails(dir, existingSsh, { runPrompt: mockPrompt })
+          })
+      })
 
       expect(app).toMatchObject({
         serverName: 'production',
@@ -299,7 +328,9 @@ describe('zephyr deployment helpers', () => {
     it('shows existing applications when apps exist for a server', async () => {
       mockPrompt.mockResolvedValueOnce({ selection: 0 })
 
-      const { selectApp } = await import('../src/main.mjs')
+      const { selectApp } = await import('../src/utils/config-flow.mjs')
+      const { saveProjectConfig } = await import('../src/config/project.mjs')
+      const { generateId } = await import('../src/utils/id.mjs')
 
       const projectConfig = {
         apps: [
@@ -328,7 +359,15 @@ describe('zephyr deployment helpers', () => {
       }
       const server = { serverName: 'production', serverIp: '203.0.113.10' }
 
-      const app = await selectApp(projectConfig, server, process.cwd())
+      const app = await selectApp(projectConfig, server, process.cwd(), {
+        runPrompt: mockPrompt,
+        logWarning: () => {},
+        logProcessing: () => {},
+        logSuccess: () => {},
+        saveProjectConfig,
+        generateId,
+        promptAppDetails: vi.fn()
+      })
 
       expect(app).toMatchObject({
         serverName: 'production',
@@ -363,9 +402,17 @@ describe('zephyr deployment helpers', () => {
     queueSpawnResponse({}) // git add package.json
     queueSpawnResponse({}) // git commit
 
-    const { ensureProjectReleaseScript } = await import('../src/main.mjs')
+    const { ensureProjectReleaseScript } = await import('../src/project/bootstrap.mjs')
+    const { createLocalCommandRunners } = await import('../src/runtime/local-command.mjs')
+    const { runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase } = await import('../src/utils/command.mjs')
+    const { runCommand } = createLocalCommandRunners({ runCommandBase, runCommandCaptureBase })
 
-    await ensureProjectReleaseScript('/workspace/project')
+    await ensureProjectReleaseScript('/workspace/project', {
+      runPrompt: mockPrompt,
+      runCommand,
+      logSuccess: () => {},
+      logWarning: () => {}
+    })
 
     expect(mockWriteFile).toHaveBeenCalledWith(
       expect.stringMatching(/[\\/]workspace[\\/]project[\\/]package\.json/),
@@ -674,10 +721,20 @@ describe('zephyr deployment helpers', () => {
       queueSpawnResponse({})
       queueSpawnResponse({ stdout: '' })
 
-      const { ensureLocalRepositoryState } = await import('../src/main.mjs')
+      const { ensureLocalRepositoryState } = await import('../src/deploy/local-repo.mjs')
+      const { createLocalCommandRunners } = await import('../src/runtime/local-command.mjs')
+      const { runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase } = await import('../src/utils/command.mjs')
+      const { runCommand, runCommandCapture } = createLocalCommandRunners({ runCommandBase, runCommandCaptureBase })
 
       await expect(
-        ensureLocalRepositoryState('main', process.cwd())
+        ensureLocalRepositoryState('main', process.cwd(), {
+          runPrompt: mockPrompt,
+          runCommand,
+          runCommandCapture,
+          logProcessing: () => {},
+          logSuccess: () => {},
+          logWarning: () => {}
+        })
       ).resolves.toBeUndefined()
 
       expect(
@@ -691,10 +748,20 @@ describe('zephyr deployment helpers', () => {
       queueSpawnResponse({ stdout: 'develop\n' })
       queueSpawnResponse({ stdout: ' M file.txt\n' })
 
-      const { ensureLocalRepositoryState } = await import('../src/main.mjs')
+      const { ensureLocalRepositoryState } = await import('../src/deploy/local-repo.mjs')
+      const { createLocalCommandRunners } = await import('../src/runtime/local-command.mjs')
+      const { runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase } = await import('../src/utils/command.mjs')
+      const { runCommand, runCommandCapture } = createLocalCommandRunners({ runCommandBase, runCommandCaptureBase })
 
       await expect(
-        ensureLocalRepositoryState('main', process.cwd())
+        ensureLocalRepositoryState('main', process.cwd(), {
+          runPrompt: mockPrompt,
+          runCommand,
+          runCommandCapture,
+          logProcessing: () => {},
+          logSuccess: () => {},
+          logWarning: () => {}
+        })
       ).rejects.toThrow(/uncommitted changes/)
     })
 
@@ -708,10 +775,20 @@ describe('zephyr deployment helpers', () => {
 
       mockPrompt.mockResolvedValueOnce({ commitMessage: 'Prepare deployment' })
 
-      const { ensureLocalRepositoryState } = await import('../src/main.mjs')
+      const { ensureLocalRepositoryState } = await import('../src/deploy/local-repo.mjs')
+      const { createLocalCommandRunners } = await import('../src/runtime/local-command.mjs')
+      const { runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase } = await import('../src/utils/command.mjs')
+      const { runCommand, runCommandCapture } = createLocalCommandRunners({ runCommandBase, runCommandCaptureBase })
 
       await expect(
-        ensureLocalRepositoryState('main', process.cwd())
+        ensureLocalRepositoryState('main', process.cwd(), {
+          runPrompt: mockPrompt,
+          runCommand,
+          runCommandCapture,
+          logProcessing: () => {},
+          logSuccess: () => {},
+          logWarning: () => {}
+        })
       ).resolves.toBeUndefined()
 
       expect(mockPrompt).toHaveBeenCalledTimes(1)
@@ -743,7 +820,7 @@ describe('zephyr deployment helpers', () => {
         })
       )
 
-      const { loadProjectConfig } = await import('../src/main.mjs')
+      const { loadProjectConfig } = await import('../src/config/project.mjs')
 
       const config = await loadProjectConfig(process.cwd())
 
@@ -761,7 +838,7 @@ describe('zephyr deployment helpers', () => {
         })
       )
 
-      const { loadProjectConfig, saveProjectConfig } = await import('../src/main.mjs')
+      const { loadProjectConfig, saveProjectConfig } = await import('../src/config/project.mjs')
 
       const config = await loadProjectConfig(process.cwd())
       config.presets.push({
