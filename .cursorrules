@@ -126,7 +126,7 @@ Zephyr is a command-line deployment tool for web applications with intelligent L
 
 ### Test Suite
 - Framework: Vitest (`npm test`)
-- Location: `tests/index.test.js`
+- Location: `tests/main.test.js`
 - Mocks: fs, child_process, inquirer, node-ssh
 - **Always**: Extend existing mocks rather than shelling out
 - **Update tests** when altering:
