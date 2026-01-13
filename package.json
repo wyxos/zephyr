@@ -3,9 +3,9 @@
   "version": "0.2.19",
   "description": "A streamlined deployment tool for web applications with intelligent Laravel project detection",
   "type": "module",
-  "main": "./src/main.mjs",
+  "main": "./src/index.mjs",
   "exports": {
-    ".": "./src/main.mjs",
+    ".": "./src/index.mjs",
     "./ssh": "./src/ssh/index.mjs"
   },
   "bin": {
