@@ -50,7 +50,7 @@ export function createRemoteExecutor({ ssh, rootDir, remoteCwd, writeToLogFile, 
         .join(' ') + ' '
     }
 
-    if (bootstrapEnv) {
+    if (bootstrapEnv && cwd) {
       const cwdForShell = escapeForDoubleQuotes(cwd)
       wrappedCommand = `${profileBootstrap}; cd "${cwdForShell}" && ${envExports}${command}`
       execOptions = {}

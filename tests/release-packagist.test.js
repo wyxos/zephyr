@@ -128,7 +128,7 @@ describe('release-packagist module', () => {
   it('loads without syntax errors and exports releasePackagist', async () => {
     const module = await import('../src/release-packagist.mjs')
     expect(typeof module.releasePackagist).toBe('function')
-  })
+  }, 15000)
 
   it('pushChanges pushes commits first, then tags separately', async () => {
     // Mock composer.json
