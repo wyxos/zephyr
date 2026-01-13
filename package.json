@@ -6,7 +6,7 @@
   "main": "./src/main.mjs",
   "exports": {
     ".": "./src/main.mjs",
-    "./ssh-utils": "./src/ssh-utils.mjs"
+    "./ssh": "./src/ssh/index.mjs"
   },
   "bin": {
     "zephyr": "bin/zephyr.mjs"
