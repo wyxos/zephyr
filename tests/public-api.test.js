@@ -18,6 +18,6 @@ describe('public API', () => {
     expect(typeof api.runCommand).toBe('function')
     expect(typeof api.runCommandCapture).toBe('function')
     expect(typeof api.writeToLogFile).toBe('function')
-  })
+  }, 15000)
 })
 

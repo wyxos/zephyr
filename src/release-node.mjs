@@ -126,13 +126,25 @@ async function runTests(skipTests, pkg, rootDir = process.cwd()) {
   logStep('Running test suite...')
 
   try {
+    const testRunScript = pkg?.scripts?.['test:run'] ?? ''
+    const testScript = pkg?.scripts?.test ?? ''
+    const usesNodeTest = (script) => /\bnode\b.*\s--test\b/.test(script)
+
     // Prefer test:run if available, otherwise use test with --run and --reporter flags
     if (hasScript(pkg, 'test:run')) {
-      // Pass reporter flag to test:run script
-      await runCommand('npm', ['run', 'test:run', '--', '--reporter=dot'], { cwd: rootDir })
+      if (usesNodeTest(testRunScript)) {
+        await runCommand('npm', ['run', 'test:run'], { cwd: rootDir })
+      } else {
+        // Pass reporter flag to test:run script
+        await runCommand('npm', ['run', 'test:run', '--', '--reporter=dot'], { cwd: rootDir })
+      }
     } else {
-      // For test script, pass --run and --reporter flags (works with vitest)
-      await runCommand('npm', ['test', '--', '--run', '--reporter=dot'], { cwd: rootDir })
+      if (usesNodeTest(testScript)) {
+        await runCommand('npm', ['test'], { cwd: rootDir })
+      } else {
+        // For test script, pass --run and --reporter flags (works with vitest)
+        await runCommand('npm', ['test', '--', '--run', '--reporter=dot'], { cwd: rootDir })
+      }
     }
 
     logSuccess('Tests passed.')
@@ -217,7 +229,13 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
   return hasLibChanges
 }
 
-async function ensureNpmAuth(rootDir = process.cwd()) {
+async function ensureNpmAuth(pkg, rootDir = process.cwd()) {
+  const isPrivate = pkg?.publishConfig?.access === 'restricted'
+  if (isPrivate) {
+    logStep('Skipping npm authentication check (package is private/restricted).')
+    return
+  }
+
   logStep('Confirming npm authentication...')
   try {
     const result = await runCommand('npm', ['whoami'], { capture: true, cwd: rootDir })
@@ -452,7 +470,7 @@ export async function releaseNode() {
     await runLint(skipLint, pkg, rootDir)
     await runTests(skipTests, pkg, rootDir)
     await runLibBuild(skipBuild, pkg, rootDir)
-    await ensureNpmAuth(rootDir)
+    await ensureNpmAuth(pkg, rootDir)
 
     const updatedPkg = await bumpVersion(releaseType, rootDir)
     await runBuild(skipBuild, updatedPkg, rootDir)

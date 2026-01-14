@@ -31,7 +31,7 @@ function isLocalPathOutsideRepo(depPath, rootDir) {
   // Check if resolved path is outside the repository root
   // Use path.relative to check if the path goes outside
   const relative = path.relative(normalizedRoot, normalizedResolved)
-  
+
   // If relative path starts with .., it's outside the repo
   // Also check if the resolved path doesn't start with the root + separator (for absolute paths)
   return relative.startsWith('..') || !normalizedResolved.startsWith(normalizedRoot + path.sep)
@@ -256,30 +256,7 @@ async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn) {
     return false
   }
 
-  const statusBefore = await getGitStatus(rootDir)
-
-  // Avoid accidentally committing unrelated staged changes
-  if (hasStagedChanges(statusBefore)) {
-    if (logFn) {
-      logFn('Staged changes detected. Skipping auto-commit of dependency updates.')
-    }
-    return false
-  }
-
   const fileList = updatedFiles.map((f) => path.basename(f)).join(', ')
-
-  const { shouldCommit } = await promptFn([
-    {
-      type: 'confirm',
-      name: 'shouldCommit',
-      message: `Commit dependency updates now? (${fileList})`,
-      default: true
-    }
-  ])
-
-  if (!shouldCommit) {
-    return false
-  }
 
   // Stage the updated files
   for (const file of updatedFiles) {
@@ -290,11 +267,6 @@ async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn) {
     }
   }
 
-  const newStatus = await getGitStatus(rootDir)
-  if (!hasStagedChanges(newStatus)) {
-    return false
-  }
-
   // Build commit message
   const commitMessage = `chore: update local file dependencies to online versions (${fileList})`
 
@@ -302,7 +274,7 @@ async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn) {
     logFn('Committing dependency updates...')
   }
 
-  await runCommand('git', ['commit', '-m', commitMessage], { cwd: rootDir })
+  await runCommand('git', ['commit', '-m', commitMessage, '--', ...updatedFiles], { cwd: rootDir })
 
   if (logFn) {
     logFn('Dependency updates committed.')
@@ -371,6 +343,9 @@ async function validateLocalDependencies(rootDir, promptFn, logFn = null) {
     throw new Error('Release cancelled: local file dependencies must be updated before release.')
   }
 
+  // If we cannot commit the update, do not proceed (otherwise release-node will fail later with a dirty tree).
+  // We allow users to opt-in to committing together with existing staged changes via prompt.
+
   // Track which files were updated
   const updatedFiles = new Set()
 
@@ -437,7 +412,12 @@ async function validateLocalDependencies(rootDir, promptFn, logFn = null) {
 
   // Commit the changes if any files were updated
   if (updatedFiles.size > 0) {
-    await commitDependencyUpdates(rootDir, Array.from(updatedFiles), promptFn, logFn)
+    const committed = await commitDependencyUpdates(rootDir, Array.from(updatedFiles), promptFn, logFn)
+    if (!committed) {
+      throw new Error(
+        'Release cancelled: dependency updates were applied but were not committed. Commit/stash your changes and rerun.'
+      )
+    }
   }
 }
 

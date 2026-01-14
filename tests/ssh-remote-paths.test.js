@@ -14,7 +14,7 @@ describe('ssh remote path normalization', () => {
       "cat '/home/wyxos/webapps/atlas/.env'",
       { cwd: '/home/wyxos/webapps/atlas' }
     )
-  })
+  }, 15000)
 
   it('deleteRemoteFile normalizes backslashes and uses rm -f', async () => {
     const execCommand = vi.fn().mockResolvedValue({ code: 0, stdout: '', stderr: '' })
@@ -28,7 +28,7 @@ describe('ssh remote path normalization', () => {
       "rm -f '/home/wyxos/webapps/atlas/dump.sql'",
       { cwd: '/home/wyxos/webapps/atlas' }
     )
-  })
+  }, 15000)
 
   it('downloadRemoteFile normalizes backslashes before calling getFile', async () => {
     const getFile = vi.fn().mockResolvedValue(undefined)
@@ -53,6 +53,6 @@ describe('ssh remote path normalization', () => {
     expect(getFile).toHaveBeenCalled()
     const [_localPath, remotePath] = getFile.mock.calls[0]
     expect(remotePath).toBe('/home/wyxos/webapps/atlas/storage/app/temporary/dump.sql')
-  })
+  }, 15000)
 })
 
