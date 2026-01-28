@@ -55,7 +55,7 @@ export function planLaravelDeploymentTasks({
     // Try composer.phar first, then system composer, ensuring it uses the correct PHP
     steps.push({
       label: 'Update Composer dependencies',
-      command: `COMPOSER_ALLOW_SUPERUSER=1 if [ -f composer.phar ]; then ${phpCommand} composer.phar update --no-dev --no-interaction --prefer-dist; elif command -v composer >/dev/null 2>&1; then ${phpCommand} $(command -v composer) update --no-dev --no-interaction --prefer-dist; else ${phpCommand} composer update --no-dev --no-interaction --prefer-dist; fi`
+      command: `if [ -f composer.phar ]; then ${phpCommand} composer.phar update --no-dev --no-interaction --prefer-dist; elif command -v composer >/dev/null 2>&1; then ${phpCommand} $(command -v composer) update --no-dev --no-interaction --prefer-dist; else ${phpCommand} composer update --no-dev --no-interaction --prefer-dist; fi`
     })
   }
 
