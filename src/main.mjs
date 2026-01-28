@@ -141,6 +141,14 @@ async function runRemoteTasks(config, options = {}) {
   await cleanupOldLogs(rootDir)
   await ensureLocalRepositoryState(config.branch, rootDir)
 
+  // Detect PHP version requirement from local composer.json
+  let requiredPhpVersion = null
+  try {
+    requiredPhpVersion = await getPhpVersionRequirement(rootDir)
+  } catch {
+    // Ignore - composer.json might not exist or be unreadable
+  }
+
   const isLaravel = await preflight.isLocalLaravelProject(rootDir)
   const hasHook = await preflight.hasPrePushHook(rootDir)
 
@@ -474,14 +482,6 @@ async function main(releaseType = null) {
 
   await ensureGitignoreEntry(rootDir)
   await ensureProjectReleaseScript(rootDir)
-
-  // Detect PHP version requirement from local composer.json
-  let requiredPhpVersion = null
-  try {
-    requiredPhpVersion = await getPhpVersionRequirement(rootDir)
-  } catch (error) {
-    // Ignore - composer.json might not exist or be unreadable
-  }
 
   // Validate dependencies if package.json or composer.json exists
   const packageJsonPath = path.join(rootDir, 'package.json')
