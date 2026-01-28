@@ -8,7 +8,6 @@ import { NodeSSH } from 'node-ssh'
 import { releaseNode } from './release-node.mjs'
 import { releasePackagist } from './release-packagist.mjs'
 import { validateLocalDependencies } from './dependency-scanner.mjs'
-import { checkAndUpdateVersion } from './version-checker.mjs'
 import { createChalkLogger, writeStderrLine, writeStdoutLine } from './utils/output.mjs'
 import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
 import { planLaravelDeploymentTasks } from './utils/task-planner.mjs'
@@ -429,24 +428,6 @@ async function selectPreset(projectConfig, servers) {
 }
 
 async function main(releaseType = null) {
-  // Best-effort update check (skip during tests or when explicitly disabled)
-  // If an update is accepted, the process will re-execute via npx @latest and we should exit early.
-  if (
-    process.env.ZEPHYR_SKIP_VERSION_CHECK !== '1' &&
-    process.env.NODE_ENV !== 'test' &&
-    process.env.VITEST !== 'true'
-  ) {
-    try {
-      const args = process.argv.slice(2)
-      const reExecuted = await checkAndUpdateVersion(runPrompt, args)
-      if (reExecuted) {
-        return
-      }
-    } catch (_error) {
-      // Never block execution due to update check issues
-    }
-  }
-
   // Handle node/vue package release
   if (releaseType === 'node' || releaseType === 'vue') {
     try {

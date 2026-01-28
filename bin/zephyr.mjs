@@ -13,14 +13,9 @@ program
   .name('zephyr')
   .description('A streamlined deployment tool for web applications with intelligent Laravel project detection')
   .option('--type <type>', 'Release type (node|vue|packagist)')
-  .option('--skip-version-check', 'Skip the version check for this run')
 
 program.parse(process.argv)
 const options = program.opts()
-
-if (options.skipVersionCheck) {
-  process.env.ZEPHYR_SKIP_VERSION_CHECK = '1'
-}
 
 try {
   await main(options.type ?? null)
