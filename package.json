@@ -1,6 +1,6 @@
 {
   "name": "@wyxos/zephyr",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "description": "A streamlined deployment tool for web applications with intelligent Laravel project detection",
   "type": "module",
   "main": "./src/index.mjs",
