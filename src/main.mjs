@@ -12,6 +12,7 @@ import { checkAndUpdateVersion } from './version-checker.mjs'
 import { createChalkLogger, writeStderrLine, writeStdoutLine } from './utils/output.mjs'
 import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
 import { planLaravelDeploymentTasks } from './utils/task-planner.mjs'
+import { getPhpVersionRequirement, findPhpBinary } from './utils/php-version.mjs'
 import {
   PENDING_TASKS_FILE,
   PROJECT_CONFIG_DIR
@@ -260,11 +261,27 @@ async function runRemoteTasks(config, options = {}) {
       horizonConfigured = horizonCheck.stdout.trim() === 'yes'
     }
 
+    // Find the appropriate PHP binary based on local composer.json requirement
+    let phpCommand = 'php'
+    if (requiredPhpVersion) {
+      try {
+        phpCommand = await findPhpBinary(ssh, remoteCwd, requiredPhpVersion)
+        
+        if (phpCommand !== 'php') {
+          logProcessing(`Detected PHP requirement: ${requiredPhpVersion}, using ${phpCommand}`)
+        }
+      } catch (error) {
+        // If we can't find the PHP binary, fall back to default 'php'
+        logWarning(`Could not find PHP binary for version ${requiredPhpVersion}: ${error.message}`)
+      }
+    }
+
     const steps = planLaravelDeploymentTasks({
       branch: config.branch,
       isLaravel,
       changedFiles,
-      horizonConfigured
+      horizonConfigured,
+      phpCommand
     })
 
     const usefulSteps = steps.length > 1
@@ -457,6 +474,14 @@ async function main(releaseType = null) {
 
   await ensureGitignoreEntry(rootDir)
   await ensureProjectReleaseScript(rootDir)
+
+  // Detect PHP version requirement from local composer.json
+  let requiredPhpVersion = null
+  try {
+    requiredPhpVersion = await getPhpVersionRequirement(rootDir)
+  } catch (error) {
+    // Ignore - composer.json might not exist or be unreadable
+  }
 
   // Validate dependencies if package.json or composer.json exists
   const packageJsonPath = path.join(rootDir, 'package.json')
