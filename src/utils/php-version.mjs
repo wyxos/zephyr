@@ -84,8 +84,6 @@ export async function findPhpBinary(ssh, remoteCwd, requiredVersion) {
     try {
       const result = await ssh.execCommand(`command -v ${candidate}`, { cwd: remoteCwd })
       if (result.code === 0 && result.stdout.trim()) {
-        const binaryPath = result.stdout.trim()
-        
         // Verify it's actually the right version
         const versionCheck = await ssh.execCommand(`${candidate} -r "echo PHP_VERSION;"`, { cwd: remoteCwd })
         if (versionCheck.code === 0) {

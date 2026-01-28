@@ -225,27 +225,6 @@ async function runCommand(command, args, { cwd = process.cwd(), capture = false 
   return undefined
 }
 
-async function getGitStatus(rootDir) {
-  try {
-    const result = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
-    return result.stdout || ''
-  } catch (_error) {
-    return ''
-  }
-}
-
-function hasStagedChanges(statusOutput) {
-  if (!statusOutput || statusOutput.length === 0) {
-    return false
-  }
-
-  const lines = statusOutput.split('\n').filter((line) => line.trim().length > 0)
-
-  return lines.some((line) => {
-    const firstChar = line[0]
-    return firstChar && firstChar !== ' ' && firstChar !== '?'
-  })
-}
 
 async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn) {
   try {
