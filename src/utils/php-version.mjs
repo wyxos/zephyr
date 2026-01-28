@@ -56,67 +56,130 @@ export async function getPhpVersionRequirement(rootDir) {
   }
 }
 
+const RUNCLOUD_PACKAGES = '/RunCloud/Packages'
+
+function satisfiesVersion(actualVersionStr, requiredVersion) {
+  const normalized = semver.coerce(actualVersionStr)
+  const required = semver.coerce(requiredVersion)
+  return normalized && required && semver.gte(normalized, required)
+}
+
+async function tryPhpPath(ssh, remoteCwd, pathOrCommand) {
+  const versionCheck = await ssh.execCommand(`${pathOrCommand} -r "echo PHP_VERSION;"`, { cwd: remoteCwd })
+  return versionCheck.code === 0 ? versionCheck.stdout.trim() : null
+}
+
 /**
- * Finds the appropriate PHP binary command for a given version
- * Tries common patterns: php8.4, php8.3, etc.
+ * Discovers PHP binaries under RunCloud Packages (e.g. /RunCloud/Packages/php84rc/bin/php).
+ * Lists the directory and tries each php*rc/bin/php, returning the path that satisfies the version.
+ */
+async function findRunCloudPhp(ssh, remoteCwd, requiredVersion) {
+  const listResult = await ssh.execCommand(`ls -1 ${RUNCLOUD_PACKAGES} 2>/dev/null || true`, { cwd: remoteCwd })
+  if (listResult.code !== 0 || !listResult.stdout.trim()) {
+    return null
+  }
+  const entries = listResult.stdout.trim().split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+  // e.g. php74rc, php80rc, php84rc
+  const phpDirs = entries.filter((name) => /^php\d+rc$/.test(name))
+  const majorMinor = semver.major(requiredVersion) + '.' + semver.minor(requiredVersion)
+  const targetSuffix = `php${majorMinor.replace('.', '')}rc` // php84rc for 8.4
+
+  // Prefer exact match (php84rc for 8.4), then try any that might satisfy
+  const toTry = phpDirs.filter((d) => d === targetSuffix).concat(phpDirs.filter((d) => d !== targetSuffix))
+
+  for (const dir of toTry) {
+    const binPath = `${RUNCLOUD_PACKAGES}/${dir}/bin/php`
+    const actualVersion = await tryPhpPath(ssh, remoteCwd, binPath)
+    if (actualVersion && satisfiesVersion(actualVersion, requiredVersion)) {
+      return binPath
+    }
+  }
+  return null
+}
+
+/**
+ * Resolves a command (e.g. php84) via login shell so aliases are expanded; returns the path if it runs and satisfies version.
+ */
+async function resolveViaLoginShell(ssh, remoteCwd, commandName, requiredVersion) {
+  const whichResult = await ssh.execCommand(`bash -lc 'command -v ${commandName}' 2>/dev/null || true`, { cwd: remoteCwd })
+  if (whichResult.code !== 0 || !whichResult.stdout.trim()) {
+    return null
+  }
+  const pathOrCommand = whichResult.stdout.trim()
+  const actualVersion = await tryPhpPath(ssh, remoteCwd, pathOrCommand)
+  if (actualVersion && satisfiesVersion(actualVersion, requiredVersion)) {
+    return pathOrCommand
+  }
+  return null
+}
+
+/**
+ * Finds the appropriate PHP binary command for a given version.
+ * Tries RunCloud paths, login-shell alias resolution, then common names (php8.4, php84), then default php.
  * @param {object} ssh - SSH client instance
  * @param {string} remoteCwd - Remote working directory
  * @param {string} requiredVersion - Required PHP version (e.g., "8.4.0")
- * @returns {Promise<string>} - PHP command prefix (e.g., "php8.4" or "php")
+ * @returns {Promise<string>} - PHP command or path (e.g., "php8.4", "/RunCloud/Packages/php84rc/bin/php", or "php")
  */
 export async function findPhpBinary(ssh, remoteCwd, requiredVersion) {
   if (!requiredVersion) {
     return 'php'
   }
 
-  // Extract major.minor version (e.g., "8.4" from "8.4.0")
   const majorMinor = semver.major(requiredVersion) + '.' + semver.minor(requiredVersion)
   const versionedPhp = `php${majorMinor.replace('.', '')}` // e.g., "php84"
 
-  // Try versioned PHP binary first (e.g., php8.4, php84)
-  const candidates = [
-    `php${majorMinor}`, // php8.4
-    versionedPhp, // php84
-    'php' // fallback
-  ]
-
-  for (const candidate of candidates) {
-    try {
-      const result = await ssh.execCommand(`command -v ${candidate}`, { cwd: remoteCwd })
-      if (result.code === 0 && result.stdout.trim()) {
-        // Verify it's actually the right version
-        const versionCheck = await ssh.execCommand(`${candidate} -r "echo PHP_VERSION;"`, { cwd: remoteCwd })
-        if (versionCheck.code === 0) {
-          const actualVersion = versionCheck.stdout.trim()
-          // Normalize version and check if it satisfies the requirement
-          const normalizedVersion = semver.coerce(actualVersion)
-          if (normalizedVersion && semver.gte(normalizedVersion, semver.coerce(requiredVersion))) {
-            return candidate
-          }
-        }
-      }
-    } catch {
-      // Continue to next candidate
-    }
-  }
-
-  // Fallback: try to use default php and check version
+  // 1. RunCloud: discover /RunCloud/Packages/php*rc/bin/php
   try {
-    const versionCheck = await ssh.execCommand('php -r "echo PHP_VERSION;"', { cwd: remoteCwd })
-    if (versionCheck.code === 0) {
-      const actualVersion = versionCheck.stdout.trim()
-      const normalizedVersion = semver.coerce(actualVersion)
-      if (normalizedVersion && semver.gte(normalizedVersion, semver.coerce(requiredVersion))) {
-        return 'php'
-      }
+    const runcloudPath = await findRunCloudPhp(ssh, remoteCwd, requiredVersion)
+    if (runcloudPath) {
+      return runcloudPath
     }
   } catch {
     // Ignore
   }
 
-  // If we can't find a suitable version, return the versioned command anyway
-  // The error will be clearer when the command fails
-  return `php${majorMinor}`
+  // 2. Resolve alias via login shell (e.g. php84 -> real path)
+  try {
+    const resolved = await resolveViaLoginShell(ssh, remoteCwd, versionedPhp, requiredVersion)
+    if (resolved) {
+      return resolved
+    }
+    const resolvedDot = await resolveViaLoginShell(ssh, remoteCwd, `php${majorMinor}`, requiredVersion)
+    if (resolvedDot) {
+      return resolvedDot
+    }
+  } catch {
+    // Ignore
+  }
+
+  // 3. Try common names in current PATH (non-login shell)
+  const candidates = [`php${majorMinor}`, versionedPhp]
+  for (const candidate of candidates) {
+    try {
+      const result = await ssh.execCommand(`command -v ${candidate}`, { cwd: remoteCwd })
+      if (result.code === 0 && result.stdout.trim()) {
+        const actualVersion = await tryPhpPath(ssh, remoteCwd, candidate)
+        if (actualVersion && satisfiesVersion(actualVersion, requiredVersion)) {
+          return candidate
+        }
+      }
+    } catch {
+      // Continue
+    }
+  }
+
+  // 4. Default php
+  try {
+    const actualVersion = await tryPhpPath(ssh, remoteCwd, 'php')
+    if (actualVersion && satisfiesVersion(actualVersion, requiredVersion)) {
+      return 'php'
+    }
+  } catch {
+    // Ignore
+  }
+
+  return 'php'
 }
 
 /**
