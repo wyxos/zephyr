@@ -90,7 +90,7 @@ export function createRemoteExecutor({ ssh, rootDir, remoteCwd, writeToLogFile, 
     }
 
     if (result.code === 0) {
-      logSuccess?.(`✓ ${command}`)
+      logSuccess?.(`✓ ${label}`)
     }
 
     return result

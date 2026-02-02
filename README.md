@@ -33,9 +33,6 @@ Common flags:
 ```bash
 # Run a release workflow
 zephyr --type node
-
-# Skip the best-effort update check for this run
-zephyr --skip-version-check
 ```
 
 Follow the interactive prompts to configure your deployment target:
@@ -45,14 +42,6 @@ Follow the interactive prompts to configure your deployment target:
 - SSH user and private key
 
 Configuration is saved automatically for future deployments.
-
-## Update Checks
-
-When run via `npx`, Zephyr can prompt to re-run itself using the latest published version.
-
-- **Skip update check**:
-  - Set `ZEPHYR_SKIP_VERSION_CHECK=1`, or
-  - Use `zephyr --skip-version-check`
 
 ## Features
 

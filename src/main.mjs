@@ -8,10 +8,10 @@ import { NodeSSH } from 'node-ssh'
 import { releaseNode } from './release-node.mjs'
 import { releasePackagist } from './release-packagist.mjs'
 import { validateLocalDependencies } from './dependency-scanner.mjs'
-import { checkAndUpdateVersion } from './version-checker.mjs'
 import { createChalkLogger, writeStderrLine, writeStdoutLine } from './utils/output.mjs'
 import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase, commandExists } from './utils/command.mjs'
 import { planLaravelDeploymentTasks } from './utils/task-planner.mjs'
+import { getPhpVersionRequirement, findPhpBinary } from './utils/php-version.mjs'
 import {
   PENDING_TASKS_FILE,
   PROJECT_CONFIG_DIR
@@ -139,6 +139,14 @@ async function runRemoteTasks(config, options = {}) {
 
   await cleanupOldLogs(rootDir)
   await ensureLocalRepositoryState(config.branch, rootDir)
+
+  // Detect PHP version requirement from local composer.json
+  let requiredPhpVersion = null
+  try {
+    requiredPhpVersion = await getPhpVersionRequirement(rootDir)
+  } catch {
+    // Ignore - composer.json might not exist or be unreadable
+  }
 
   const isLaravel = await preflight.isLocalLaravelProject(rootDir)
   const hasHook = await preflight.hasPrePushHook(rootDir)
@@ -276,11 +284,27 @@ async function runRemoteTasks(config, options = {}) {
       horizonConfigured = horizonCheck.stdout.trim() === 'yes'
     }
 
+    // Find the appropriate PHP binary based on local composer.json requirement
+    let phpCommand = 'php'
+    if (requiredPhpVersion) {
+      try {
+        phpCommand = await findPhpBinary(ssh, remoteCwd, requiredPhpVersion)
+        
+        if (phpCommand !== 'php') {
+          logProcessing(`Detected PHP requirement: ${requiredPhpVersion}, using ${phpCommand}`)
+        }
+      } catch (error) {
+        // If we can't find the PHP binary, fall back to default 'php'
+        logWarning(`Could not find PHP binary for version ${requiredPhpVersion}: ${error.message}`)
+      }
+    }
+
     const steps = planLaravelDeploymentTasks({
       branch: config.branch,
       isLaravel,
       changedFiles,
-      horizonConfigured
+      horizonConfigured,
+      phpCommand
     })
 
     const usefulSteps = steps.length > 1
@@ -420,24 +444,6 @@ async function selectPreset(projectConfig, servers) {
 }
 
 async function main(releaseType = null) {
-  // Best-effort update check (skip during tests or when explicitly disabled)
-  // If an update is accepted, the process will re-execute via npx @latest and we should exit early.
-  if (
-    process.env.ZEPHYR_SKIP_VERSION_CHECK !== '1' &&
-    process.env.NODE_ENV !== 'test' &&
-    process.env.VITEST !== 'true'
-  ) {
-    try {
-      const args = process.argv.slice(2)
-      const reExecuted = await checkAndUpdateVersion(runPrompt, args)
-      if (reExecuted) {
-        return
-      }
-    } catch (_error) {
-      // Never block execution due to update check issues
-    }
-  }
-
   // Handle node/vue package release
   if (releaseType === 'node' || releaseType === 'vue') {
     try {

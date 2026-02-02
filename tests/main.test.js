@@ -421,9 +421,10 @@ describe('zephyr deployment helpers', () => {
   })
 
   it('schedules Laravel tasks based on diff', async () => {
-    // Mock reads: composer.json for Laravel detection, package.json for lint check, then SSH key
+    // Mock reads: composer.json for Laravel detection, composer.json for PHP version detection, package.json for lint check, then SSH key
     mockReadFile
       .mockResolvedValueOnce('{"require":{"laravel/framework":"^10.0"}}') // composer.json for Laravel detection
+      .mockResolvedValueOnce('{"require":{"laravel/framework":"^10.0","php":"^8.4"}}') // composer.json for PHP version detection
       .mockResolvedValueOnce('{"scripts":{}}') // package.json - no lint script
       .mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----') // SSH key
     // Mock fs.access for artisan file check, hook detection, and pint check
