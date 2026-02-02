@@ -10,7 +10,7 @@ import { releasePackagist } from './release-packagist.mjs'
 import { validateLocalDependencies } from './dependency-scanner.mjs'
 import { checkAndUpdateVersion } from './version-checker.mjs'
 import { createChalkLogger, writeStderrLine, writeStdoutLine } from './utils/output.mjs'
-import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
+import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase, commandExists } from './utils/command.mjs'
 import { planLaravelDeploymentTasks } from './utils/task-planner.mjs'
 import {
   PENDING_TASKS_FILE,
@@ -122,7 +122,7 @@ async function resolveSshKeyPath(targetPath) {
 // resolveRemotePath moved to src/utils/remote-path.mjs
 
 async function runLinting(rootDir) {
-  return await preflight.runLinting(rootDir, { runCommand, logProcessing, logSuccess })
+  return await preflight.runLinting(rootDir, { runCommand, logProcessing, logSuccess, logWarning, commandExists })
 }
 
 async function commitLintingChanges(rootDir) {
@@ -156,12 +156,28 @@ async function runRemoteTasks(config, options = {}) {
 
     // Run tests for Laravel projects
     if (isLaravel) {
-      logProcessing('Running Laravel tests locally...')
-      try {
-        await runCommand('php', ['artisan', 'test', '--compact'], { cwd: rootDir })
-        logSuccess('Local tests passed.')
-      } catch (error) {
-        throw new Error(`Local tests failed. Fix test failures before deploying. ${error.message}`)
+      // Check if PHP is available before trying to run tests
+      if (!commandExists('php')) {
+        logWarning(
+          'PHP is not available in PATH. Skipping local Laravel tests.\n' +
+          '  To run tests locally, ensure PHP is installed and added to your PATH.\n' +
+          '  On Windows with Laravel Herd, you may need to add Herd\'s PHP to your system PATH.'
+        )
+      } else {
+        logProcessing('Running Laravel tests locally...')
+        try {
+          await runCommand('php', ['artisan', 'test', '--compact'], { cwd: rootDir })
+          logSuccess('Local tests passed.')
+        } catch (error) {
+          // Provide clearer error message based on error type
+          if (error.code === 'ENOENT') {
+            throw new Error(
+              'Failed to run Laravel tests: PHP executable not found.\n' +
+              'Make sure PHP is installed and available in your PATH.'
+            )
+          }
+          throw new Error(`Local tests failed. Fix test failures before deploying.\n${error.message}`)
+        }
       }
     }
   } else {
