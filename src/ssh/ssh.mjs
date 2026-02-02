@@ -121,13 +121,18 @@ export async function deleteRemoteFile(ssh, remotePath, remoteCwd) {
   const escapedPath = absoluteRemotePath.replace(/'/g, "'\\''")
   const command = `rm -f '${escapedPath}'`
 
-  logProcessing(`Deleting remote file: ${absoluteRemotePath}...`)
+  const inTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true'
+  if (!inTest) {
+    logProcessing(`Deleting remote file: ${absoluteRemotePath}...`)
+  }
 
   const result = await ssh.execCommand(command, { cwd: normalizedCwd })
 
   if (result.code !== 0 && result.code !== 1) {
-    logWarning(`Failed to delete remote file ${absoluteRemotePath}: ${result.stderr}`)
-  } else {
+    if (!inTest) {
+      logWarning(`Failed to delete remote file ${absoluteRemotePath}: ${result.stderr}`)
+    }
+  } else if (!inTest) {
     logSuccess(`Deleted remote file: ${absoluteRemotePath}`)
   }
 }

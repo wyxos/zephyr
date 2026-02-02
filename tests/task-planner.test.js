@@ -54,7 +54,7 @@ describe('task-planner', () => {
       horizonConfigured: true
     })
 
-    expect(horizonSteps.some((s) => s.command === 'php artisan horizon:terminate')).toBe(true)
+    expect(horizonSteps.some((s) => s.command.includes('artisan horizon:terminate'))).toBe(true)
 
     const queueSteps = planLaravelDeploymentTasks({
       branch: 'main',
@@ -63,7 +63,31 @@ describe('task-planner', () => {
       horizonConfigured: false
     })
 
-    expect(queueSteps.some((s) => s.command === 'php artisan queue:restart')).toBe(true)
+    expect(queueSteps.some((s) => s.command.includes('artisan queue:restart'))).toBe(true)
+  })
+
+  it('uses custom PHP command when provided', () => {
+    const steps = planLaravelDeploymentTasks({
+      branch: 'main',
+      isLaravel: true,
+      changedFiles: ['app/Jobs/Foo.php'],
+      phpCommand: 'php8.4'
+    })
+
+    expect(steps.some((s) => s.command.startsWith('php8.4 artisan'))).toBe(true)
+  })
+
+  it('uses php8.4 for composer when phpCommand is php8.4', () => {
+    const steps = planLaravelDeploymentTasks({
+      branch: 'main',
+      isLaravel: true,
+      changedFiles: ['composer.json'],
+      phpCommand: 'php8.4'
+    })
+
+    const composerStep = steps.find((s) => s.label === 'Update Composer dependencies')
+    expect(composerStep).toBeDefined()
+    expect(composerStep.command).toContain('php8.4')
   })
 
   it('does not schedule Laravel maintenance tasks for non-Laravel projects', () => {

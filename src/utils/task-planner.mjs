@@ -2,7 +2,8 @@ export function planLaravelDeploymentTasks({
   branch,
   isLaravel,
   changedFiles,
-  horizonConfigured = false
+  horizonConfigured = false,
+  phpCommand = 'php'
 }) {
   const safeChangedFiles = Array.isArray(changedFiles) ? changedFiles : []
 
@@ -50,16 +51,18 @@ export function planLaravelDeploymentTasks({
   ]
 
   if (shouldRunComposer) {
+    // Composer is a PHP script, so we need to run it with the correct PHP version
+    // Try composer.phar first, then system composer, ensuring it uses the correct PHP
     steps.push({
       label: 'Update Composer dependencies',
-      command: 'composer update --no-dev --no-interaction --prefer-dist'
+      command: `if [ -f composer.phar ]; then ${phpCommand} composer.phar update --no-dev --no-interaction --prefer-dist; elif command -v composer >/dev/null 2>&1; then ${phpCommand} $(command -v composer) update --no-dev --no-interaction --prefer-dist; else ${phpCommand} composer update --no-dev --no-interaction --prefer-dist; fi`
     })
   }
 
   if (shouldRunMigrations) {
     steps.push({
       label: 'Run database migrations',
-      command: 'php artisan migrate --force'
+      command: `${phpCommand} artisan migrate --force`
     })
   }
 
@@ -80,14 +83,14 @@ export function planLaravelDeploymentTasks({
   if (shouldClearCaches) {
     steps.push({
       label: 'Clear Laravel caches',
-      command: 'php artisan cache:clear && php artisan config:clear && php artisan view:clear'
+      command: `${phpCommand} artisan cache:clear && ${phpCommand} artisan config:clear && ${phpCommand} artisan view:clear`
     })
   }
 
   if (shouldRestartQueues) {
     steps.push({
       label: horizonConfigured ? 'Restart Horizon workers' : 'Restart queue workers',
-      command: horizonConfigured ? 'php artisan horizon:terminate' : 'php artisan queue:restart'
+      command: horizonConfigured ? `${phpCommand} artisan horizon:terminate` : `${phpCommand} artisan queue:restart`
     })
   }
 
