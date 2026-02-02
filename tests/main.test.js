@@ -95,10 +95,19 @@ const mockSpawn = vi.fn((command, args) => {
   }
 })
 
+// Mock spawnSync for commandExists function
+const mockSpawnSync = vi.fn((command, args) => {
+  // Return success (status 0) for 'where' or 'which' commands checking php, git, npm, etc.
+  // This simulates that these commands exist in PATH
+  return { status: 0 }
+})
+
 vi.mock('node:child_process', () => ({
   spawn: mockSpawn,
+  spawnSync: mockSpawnSync,
   default: {
-    spawn: mockSpawn
+    spawn: mockSpawn,
+    spawnSync: mockSpawnSync
   }
 }))
 
@@ -154,6 +163,7 @@ describe('zephyr deployment helpers', () => {
     vi.resetModules()
     spawnQueue.length = 0
     mockSpawn.mockClear()
+    mockSpawnSync.mockClear()
     mockReadFile.mockReset()
     mockReaddir.mockReset()
     mockAccess.mockReset()
@@ -516,8 +526,20 @@ describe('zephyr deployment helpers', () => {
 
     // Verify local test command was executed (not remote)
     // Check that php artisan test was called locally via spawn with --compact flag
+    // On Windows with shell mode, command is a string like 'php artisan test --compact'
+    // On non-Windows, it's spawn('php', ['artisan', 'test', '--compact'])
     const phpTestCalls = mockSpawn.mock.calls.filter(
-      ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && args.includes('--compact')
+      ([cmd, args]) => {
+        // Shell mode: command is a string containing the full command
+        if (typeof cmd === 'string' && cmd.startsWith('php') && cmd.includes('artisan') && cmd.includes('test') && cmd.includes('--compact')) {
+          return true
+        }
+        // Non-shell mode: command is 'php' and args is an array
+        if (cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && args.includes('--compact')) {
+          return true
+        }
+        return false
+      }
     )
     expect(phpTestCalls.length).toBeGreaterThan(0)
   })

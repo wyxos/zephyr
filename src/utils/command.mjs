@@ -47,7 +47,8 @@ export function shouldUseShellOnWindows(command) {
     return false
   }
   // Commands that are commonly provided as batch file shims on Windows
-  const shellCommands = ['php', 'composer', 'git']
+  // Note: git is NOT included because Git for Windows installs a proper git.exe
+  const shellCommands = ['php', 'composer']
   return shellCommands.includes(command.toLowerCase())
 }
 
