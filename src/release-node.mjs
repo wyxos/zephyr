@@ -229,29 +229,6 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd()) {
   return hasLibChanges
 }
 
-async function ensureNpmAuth(pkg, rootDir = process.cwd()) {
-  const isPrivate = pkg?.publishConfig?.access === 'restricted'
-  if (isPrivate) {
-    logStep('Skipping npm authentication check (package is private/restricted).')
-    return
-  }
-
-  logStep('Confirming npm authentication...')
-  try {
-    const result = await runCommand('npm', ['whoami'], { capture: true, cwd: rootDir })
-    // Only show username if we captured it, otherwise just show success
-    if (result?.stdout) {
-      // Silently authenticated - we don't need to show the username
-    }
-    logSuccess('npm authenticated.')
-  } catch (error) {
-    if (error.stderr) {
-      writeStderr(error.stderr)
-    }
-    throw error
-  }
-}
-
 async function bumpVersion(releaseType, rootDir = process.cwd()) {
   logStep(`Bumping package version...`)
 
@@ -305,40 +282,6 @@ async function pushChanges(rootDir = process.cwd()) {
   try {
     await runCommand('git', ['push', '--follow-tags'], { capture: true, cwd: rootDir })
     logSuccess('Git push completed.')
-  } catch (error) {
-    if (error.stdout) {
-      writeStderr(error.stdout)
-    }
-    if (error.stderr) {
-      writeStderr(error.stderr)
-    }
-    throw error
-  }
-}
-
-async function publishPackage(pkg, rootDir = process.cwd()) {
-  // Check if package is configured as private/restricted
-  const isPrivate = pkg.publishConfig?.access === 'restricted'
-
-  if (isPrivate) {
-    logWarning('Skipping npm publish (package is configured as private/restricted).')
-    logWarning('Private packages require npm paid plan. Publish manually or use GitHub Packages.')
-    return
-  }
-
-  const publishArgs = ['publish', '--ignore-scripts'] // Skip prepublishOnly since we already built lib
-
-  if (pkg.name.startsWith('@')) {
-    // For scoped packages, determine access level from publishConfig
-    // Default to 'public' for scoped packages if not specified (free npm accounts require public for scoped packages)
-    const access = pkg.publishConfig?.access || 'public'
-    publishArgs.push('--access', access)
-  }
-
-  logStep(`Publishing ${pkg.name}@${pkg.version} to npm...`)
-  try {
-    await runCommand('npm', publishArgs, { capture: true, cwd: rootDir })
-    logSuccess('npm publish completed.')
   } catch (error) {
     if (error.stdout) {
       writeStderr(error.stdout)
@@ -470,13 +413,13 @@ export async function releaseNode() {
     await runLint(skipLint, pkg, rootDir)
     await runTests(skipTests, pkg, rootDir)
     await runLibBuild(skipBuild, pkg, rootDir)
-    await ensureNpmAuth(pkg, rootDir)
 
     const updatedPkg = await bumpVersion(releaseType, rootDir)
     await runBuild(skipBuild, updatedPkg, rootDir)
     await pushChanges(rootDir)
-    await publishPackage(updatedPkg, rootDir)
     await deployGHPages(skipDeploy, updatedPkg, rootDir)
+
+    logStep('Publishing will be handled by GitHub Actions via trusted publishing.')
 
     logSuccess(`Release workflow completed for ${updatedPkg.name}@${updatedPkg.version}.`)
   } catch (error) {
