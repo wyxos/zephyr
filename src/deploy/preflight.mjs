@@ -45,7 +45,7 @@ export async function hasLaravelPint(rootDir) {
   }
 }
 
-export async function runLinting(rootDir, { runCommand, logProcessing, logSuccess } = {}) {
+export async function runLinting(rootDir, { runCommand, logProcessing, logSuccess, logWarning, commandExists } = {}) {
   const hasNpmLint = await hasLintScript(rootDir)
   const hasPint = await hasLaravelPint(rootDir)
 
@@ -57,6 +57,15 @@ export async function runLinting(rootDir, { runCommand, logProcessing, logSucces
   }
 
   if (hasPint) {
+    // Check if PHP is available before trying to run Pint
+    if (commandExists && !commandExists('php')) {
+      logWarning?.(
+        'PHP is not available in PATH. Skipping Laravel Pint.\n' +
+        '  To run Pint locally, ensure PHP is installed and added to your PATH.'
+      )
+      return false
+    }
+
     logProcessing?.('Running Laravel Pint...')
     await runCommand('php', ['vendor/bin/pint'], { cwd: rootDir })
     logSuccess?.('Linting completed.')
