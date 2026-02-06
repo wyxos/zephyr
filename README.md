@@ -62,7 +62,7 @@ Configuration is saved automatically for future deployments.
 Zephyr analyzes changed files and runs appropriate tasks:
 
 - **Always**: `git pull origin <branch>`
-- **Composer files changed** (`composer.json` / `composer.lock`): `composer update --no-dev --no-interaction --prefer-dist`
+- **Composer files changed** (`composer.json` / `composer.lock`): `composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader` (requires `composer.lock`)
 - **Migrations changed** (`database/migrations/*.php`): `php artisan migrate --force`
 - **Node dependency files changed** (`package.json` / `package-lock.json`, including nested): `npm install`
 - **Frontend files changed** (`.vue/.js/.ts/.tsx/.css/.scss/.less`): `npm run build`

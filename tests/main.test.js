@@ -511,7 +511,7 @@ describe('zephyr deployment helpers', () => {
 
     const executedCommands = mockExecCommand.mock.calls.map(([cmd]) => cmd)
     expect(executedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
-    expect(executedCommands.some((cmd) => cmd.includes('composer update'))).toBe(true)
+    expect(executedCommands.some((cmd) => cmd.includes('composer install'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('php artisan migrate'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('npm install'))).toBe(true)
     expect(executedCommands.some((cmd) => cmd.includes('npm run build'))).toBe(true)
@@ -733,7 +733,7 @@ describe('zephyr deployment helpers', () => {
     })
 
     const skippedCommands = mockExecCommand.mock.calls.map(([cmd]) => cmd)
-    expect(skippedCommands.every((cmd) => !cmd.includes('composer update'))).toBe(true)
+    expect(skippedCommands.every((cmd) => !cmd.includes('composer install'))).toBe(true)
     expect(skippedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
   })
 
