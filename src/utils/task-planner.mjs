@@ -52,10 +52,12 @@ export function planLaravelDeploymentTasks({
 
   if (shouldRunComposer) {
     // Composer is a PHP script, so we need to run it with the correct PHP version
-    // Try composer.phar first, then system composer, ensuring it uses the correct PHP
+    // Deployments should be lockfile-based and reproducible.
+    // `composer update --no-dev` still resolves require-dev and can fail on production PHP versions.
+    // Prefer `composer install --no-dev` and fail loudly if composer.lock is missing.
     steps.push({
-      label: 'Update Composer dependencies',
-      command: `if [ -f composer.phar ]; then ${phpCommand} composer.phar update --no-dev --no-interaction --prefer-dist; elif command -v composer >/dev/null 2>&1; then ${phpCommand} $(command -v composer) update --no-dev --no-interaction --prefer-dist; else ${phpCommand} composer update --no-dev --no-interaction --prefer-dist; fi`
+      label: 'Install Composer dependencies',
+      command: `if [ ! -f composer.lock ]; then echo "composer.lock is missing; commit composer.lock for reproducible deploys." >&2; exit 1; fi; if [ -f composer.phar ]; then ${phpCommand} composer.phar install --no-dev --no-interaction --prefer-dist --optimize-autoloader; elif command -v composer >/dev/null 2>&1; then ${phpCommand} $(command -v composer) install --no-dev --no-interaction --prefer-dist --optimize-autoloader; else ${phpCommand} composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader; fi`
     })
   }
 
@@ -96,4 +98,3 @@ export function planLaravelDeploymentTasks({
 
   return steps
 }
-

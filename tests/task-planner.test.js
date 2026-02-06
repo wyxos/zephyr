@@ -85,7 +85,7 @@ describe('task-planner', () => {
       phpCommand: 'php8.4'
     })
 
-    const composerStep = steps.find((s) => s.label === 'Update Composer dependencies')
+    const composerStep = steps.find((s) => s.label === 'Install Composer dependencies')
     expect(composerStep).toBeDefined()
     expect(composerStep.command).toContain('php8.4')
   })
@@ -102,4 +102,3 @@ describe('task-planner', () => {
     expect(steps[0].command).toBe('git pull origin main')
   })
 })
-
