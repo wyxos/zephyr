@@ -1,13 +1,16 @@
-import { join } from 'node:path'
-import { readFile, writeFile } from 'node:fs/promises'
+import {join} from 'node:path'
+import {readFile, writeFile} from 'node:fs/promises'
 import fs from 'node:fs'
 import process from 'node:process'
 import semver from 'semver'
-import inquirer from 'inquirer'
-import { validateLocalDependencies } from './dependency-scanner.mjs'
-import { writeStderr, writeStderrLine, writeStdoutLine } from './utils/output.mjs'
-import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
-import { ensureUpToDateWithUpstream, getCurrentBranch as getGitCurrentBranch, getUpstreamRef } from './utils/git.mjs'
+import {writeStderr, writeStderrLine, writeStdoutLine} from './utils/output.mjs'
+import {
+    ensureCleanWorkingTree,
+    ensureReleaseBranchReady,
+    parseReleaseArgs,
+    runReleaseCommand as runCommand,
+    validateReleaseDependencies
+} from './release/shared.mjs'
 
 const STEP_PREFIX = '→'
 const OK_PREFIX = '✔'
@@ -16,281 +19,224 @@ const WARN_PREFIX = '⚠'
 const IS_WINDOWS = process.platform === 'win32'
 
 function logStep(message) {
-  writeStdoutLine(`${STEP_PREFIX} ${message}`)
+    writeStdoutLine(`${STEP_PREFIX} ${message}`)
 }
 
 function logSuccess(message) {
-  writeStdoutLine(`${OK_PREFIX} ${message}`)
+    writeStdoutLine(`${OK_PREFIX} ${message}`)
 }
 
 function logWarning(message) {
-  writeStderrLine(`${WARN_PREFIX} ${message}`)
-}
-
-async function runCommand(command, args, { cwd = process.cwd(), capture = false } = {}) {
-  if (capture) {
-    const { stdout, stderr } = await runCommandCaptureBase(command, args, { cwd })
-    return { stdout: stdout.trim(), stderr: stderr.trim() }
-  }
-
-  await runCommandBase(command, args, { cwd })
-  return undefined
+    writeStderrLine(`${WARN_PREFIX} ${message}`)
 }
 
 async function readComposer(rootDir = process.cwd()) {
-  const composerPath = join(rootDir, 'composer.json')
-  const raw = await readFile(composerPath, 'utf8')
-  return JSON.parse(raw)
+    const composerPath = join(rootDir, 'composer.json')
+    const raw = await readFile(composerPath, 'utf8')
+    return JSON.parse(raw)
 }
 
 async function writeComposer(rootDir, composer, composerPath = null) {
-  const pathToUse = composerPath || join(rootDir, 'composer.json')
-  const content = JSON.stringify(composer, null, 2) + '\n'
-  await writeFile(pathToUse, content, 'utf8')
+    const pathToUse = composerPath || join(rootDir, 'composer.json')
+    const content = JSON.stringify(composer, null, 2) + '\n'
+    await writeFile(pathToUse, content, 'utf8')
 }
 
 function hasComposerScript(composer, scriptName) {
-  return composer?.scripts?.[scriptName] !== undefined
+    return composer?.scripts?.[scriptName] !== undefined
 }
 
 async function hasLaravelPint(rootDir = process.cwd()) {
-  const pintPath = join(rootDir, 'vendor', 'bin', 'pint')
-  try {
-    await fs.promises.access(pintPath)
-    const stats = await fs.promises.stat(pintPath)
-    return stats.isFile()
-  } catch {
-    return false
-  }
+    const pintPath = join(rootDir, 'vendor', 'bin', 'pint')
+    try {
+        await fs.promises.access(pintPath)
+        const stats = await fs.promises.stat(pintPath)
+        return stats.isFile()
+    } catch {
+        return false
+    }
 }
 
 async function hasArtisan(rootDir = process.cwd()) {
-  const artisanPath = join(rootDir, 'artisan')
-  try {
-    await fs.promises.access(artisanPath)
-    const stats = await fs.promises.stat(artisanPath)
-    return stats.isFile()
-  } catch {
-    return false
-  }
-}
-
-async function ensureCleanWorkingTree(rootDir = process.cwd()) {
-  const { stdout } = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
-
-  if (stdout.length > 0) {
-    throw new Error('Working tree has uncommitted changes. Commit or stash them before releasing.')
-  }
-}
-
-// Git helpers imported from src/utils/git.mjs
-
-function parseArgs() {
-  const args = process.argv.slice(2)
-  // Filter out --type flag as it's handled by zephyr CLI
-  const filteredArgs = args.filter((arg) => !arg.startsWith('--type='))
-  const positionals = filteredArgs.filter((arg) => !arg.startsWith('--'))
-  const flags = new Set(filteredArgs.filter((arg) => arg.startsWith('--')))
-
-  const releaseType = positionals[0] ?? 'patch'
-  const skipTests = flags.has('--skip-tests')
-  const skipLint = flags.has('--skip-lint')
-
-  const allowedTypes = new Set([
-    'major',
-    'minor',
-    'patch',
-    'premajor',
-    'preminor',
-    'prepatch',
-    'prerelease'
-  ])
-
-  if (!allowedTypes.has(releaseType)) {
-    throw new Error(
-      `Invalid release type "${releaseType}". Use one of: ${Array.from(allowedTypes).join(', ')}.`
-    )
-  }
-
-  return { releaseType, skipTests, skipLint }
+    const artisanPath = join(rootDir, 'artisan')
+    try {
+        await fs.promises.access(artisanPath)
+        const stats = await fs.promises.stat(artisanPath)
+        return stats.isFile()
+    } catch {
+        return false
+    }
 }
 
 async function runLint(skipLint, rootDir = process.cwd()) {
-  if (skipLint) {
-    logWarning('Skipping lint because --skip-lint flag was provided.')
-    return
-  }
-
-  const hasPint = await hasLaravelPint(rootDir)
-  if (!hasPint) {
-    logStep('Skipping lint (Laravel Pint not found).')
-    return
-  }
-
-  logStep('Running Laravel Pint...')
-  const pintPath = IS_WINDOWS ? 'vendor\\bin\\pint' : 'vendor/bin/pint'
-  
-  let dotInterval = null
-  try {
-    // Capture output and show dots as progress
-    process.stdout.write('  ')
-    dotInterval = setInterval(() => {
-      process.stdout.write('.')
-    }, 200)
-
-    await runCommand('php', [pintPath], { capture: true, cwd: rootDir })
-
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
+    if (skipLint) {
+        logWarning('Skipping lint because --skip-lint flag was provided.')
+        return
     }
-    process.stdout.write('\n')
-    logSuccess('Lint passed.')
-  } catch (error) {
-    // Clear dots and show error output
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
+
+    const hasPint = await hasLaravelPint(rootDir)
+    if (!hasPint) {
+        logStep('Skipping lint (Laravel Pint not found).')
+        return
     }
-    process.stdout.write('\n')
-    if (error.stdout) {
-      writeStderr(error.stdout)
+
+    logStep('Running Laravel Pint...')
+    const pintPath = IS_WINDOWS ? 'vendor\\bin\\pint' : 'vendor/bin/pint'
+
+    let dotInterval = null
+    try {
+        // Capture output and show dots as progress
+        process.stdout.write('  ')
+        dotInterval = setInterval(() => {
+            process.stdout.write('.')
+        }, 200)
+
+        await runCommand('php', [pintPath], {capture: true, cwd: rootDir})
+
+        if (dotInterval) {
+            clearInterval(dotInterval)
+            dotInterval = null
+        }
+        process.stdout.write('\n')
+        logSuccess('Lint passed.')
+    } catch (error) {
+        // Clear dots and show error output
+        if (dotInterval) {
+            clearInterval(dotInterval)
+            dotInterval = null
+        }
+        process.stdout.write('\n')
+        if (error.stdout) {
+            writeStderr(error.stdout)
+        }
+        if (error.stderr) {
+            writeStderr(error.stderr)
+        }
+        throw error
     }
-    if (error.stderr) {
-      writeStderr(error.stderr)
-    }
-    throw error
-  }
 }
 
 async function runTests(skipTests, composer, rootDir = process.cwd()) {
-  if (skipTests) {
-    logWarning('Skipping tests because --skip-tests flag was provided.')
-    return
-  }
-
-  const hasArtisanFile = await hasArtisan(rootDir)
-  const hasTestScript = hasComposerScript(composer, 'test')
-
-  if (!hasArtisanFile && !hasTestScript) {
-    logStep('Skipping tests (no artisan file or test script found).')
-    return
-  }
-
-  logStep('Running test suite...')
-
-  let dotInterval = null
-  try {
-    // Capture output and show dots as progress
-    process.stdout.write('  ')
-    dotInterval = setInterval(() => {
-      process.stdout.write('.')
-    }, 200)
-
-    if (hasArtisanFile) {
-      await runCommand('php', ['artisan', 'test', '--compact'], { capture: true, cwd: rootDir })
-    } else if (hasTestScript) {
-      await runCommand('composer', ['test'], { capture: true, cwd: rootDir })
+    if (skipTests) {
+        logWarning('Skipping tests because --skip-tests flag was provided.')
+        return
     }
 
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
+    const hasArtisanFile = await hasArtisan(rootDir)
+    const hasTestScript = hasComposerScript(composer, 'test')
+
+    if (!hasArtisanFile && !hasTestScript) {
+        logStep('Skipping tests (no artisan file or test script found).')
+        return
     }
-    process.stdout.write('\n')
-    logSuccess('Tests passed.')
-  } catch (error) {
-    // Clear dots and show error output
-    if (dotInterval) {
-      clearInterval(dotInterval)
-      dotInterval = null
+
+    logStep('Running test suite...')
+
+    let dotInterval = null
+    try {
+        // Capture output and show dots as progress
+        process.stdout.write('  ')
+        dotInterval = setInterval(() => {
+            process.stdout.write('.')
+        }, 200)
+
+        if (hasArtisanFile) {
+            await runCommand('php', ['artisan', 'test', '--compact'], {capture: true, cwd: rootDir})
+        } else if (hasTestScript) {
+            await runCommand('composer', ['test'], {capture: true, cwd: rootDir})
+        }
+
+        if (dotInterval) {
+            clearInterval(dotInterval)
+            dotInterval = null
+        }
+        process.stdout.write('\n')
+        logSuccess('Tests passed.')
+    } catch (error) {
+        // Clear dots and show error output
+        if (dotInterval) {
+            clearInterval(dotInterval)
+            dotInterval = null
+        }
+        process.stdout.write('\n')
+        if (error.stdout) {
+            writeStderr(error.stdout)
+        }
+        if (error.stderr) {
+            writeStderr(error.stderr)
+        }
+        throw error
     }
-    process.stdout.write('\n')
-    if (error.stdout) {
-      writeStderr(error.stdout)
-    }
-    if (error.stderr) {
-      writeStderr(error.stderr)
-    }
-    throw error
-  }
 }
 
 async function bumpVersion(releaseType, rootDir = process.cwd()) {
-  logStep(`Bumping composer version...`)
+    logStep(`Bumping composer version...`)
 
-  const composer = await readComposer(rootDir)
-  const currentVersion = composer.version || '0.0.0'
+    const composer = await readComposer(rootDir)
+    const currentVersion = composer.version || '0.0.0'
 
-  if (!semver.valid(currentVersion)) {
-    throw new Error(`Invalid current version "${currentVersion}" in composer.json. Must be a valid semver.`)
-  }
+    if (!semver.valid(currentVersion)) {
+        throw new Error(`Invalid current version "${currentVersion}" in composer.json. Must be a valid semver.`)
+    }
 
-  const newVersion = semver.inc(currentVersion, releaseType)
-  if (!newVersion) {
-    throw new Error(`Failed to calculate next ${releaseType} version from ${currentVersion}`)
-  }
+    const newVersion = semver.inc(currentVersion, releaseType)
+    if (!newVersion) {
+        throw new Error(`Failed to calculate next ${releaseType} version from ${currentVersion}`)
+    }
 
-  composer.version = newVersion
-  await writeComposer(rootDir, composer)
+    composer.version = newVersion
+    await writeComposer(rootDir, composer)
 
-  logStep('Staging composer.json...')
-  await runCommand('git', ['add', 'composer.json'], { cwd: rootDir })
+    logStep('Staging composer.json...')
+    await runCommand('git', ['add', 'composer.json'], {cwd: rootDir})
 
-  const commitMessage = `chore: release ${newVersion}`
-  logStep('Committing version bump...')
-  await runCommand('git', ['commit', '-m', commitMessage], { cwd: rootDir })
+    const commitMessage = `chore: release ${newVersion}`
+    logStep('Committing version bump...')
+    await runCommand('git', ['commit', '-m', commitMessage], {cwd: rootDir})
 
-  logStep('Creating git tag...')
-  await runCommand('git', ['tag', `v${newVersion}`], { cwd: rootDir })
+    logStep('Creating git tag...')
+    await runCommand('git', ['tag', `v${newVersion}`], {cwd: rootDir})
 
-  logSuccess(`Version updated to ${newVersion}.`)
-  return { ...composer, version: newVersion }
+    logSuccess(`Version updated to ${newVersion}.`)
+    return {...composer, version: newVersion}
 }
 
 async function pushChanges(rootDir = process.cwd()) {
-  logStep('Pushing commits to origin...')
-  await runCommand('git', ['push'], { cwd: rootDir })
+    logStep('Pushing commits to origin...')
+    await runCommand('git', ['push'], {cwd: rootDir})
 
-  logStep('Pushing tags to origin...')
-  await runCommand('git', ['push', 'origin', '--tags'], { cwd: rootDir })
+    logStep('Pushing tags to origin...')
+    await runCommand('git', ['push', 'origin', '--tags'], {cwd: rootDir})
 
-  logSuccess('Git push completed.')
+    logSuccess('Git push completed.')
 }
 
 export async function releasePackagist() {
-  const { releaseType, skipTests, skipLint } = parseArgs()
-  const rootDir = process.cwd()
+    const {releaseType, skipTests, skipLint} = parseReleaseArgs({
+        booleanFlags: ['--skip-tests', '--skip-lint']
+    })
+    const rootDir = process.cwd()
 
-  logStep('Reading composer metadata...')
-  const composer = await readComposer(rootDir)
+    logStep('Reading composer metadata...')
+    const composer = await readComposer(rootDir)
 
-  if (!composer.version) {
-    throw new Error('composer.json does not have a version field. Add "version": "0.0.0" to composer.json.')
-  }
+    if (!composer.version) {
+        throw new Error('composer.json does not have a version field. Add "version": "0.0.0" to composer.json.')
+    }
 
-  logStep('Validating dependencies...')
-  await validateLocalDependencies(rootDir, (questions) => inquirer.prompt(questions), logSuccess)
+    logStep('Validating dependencies...')
+    await validateReleaseDependencies(rootDir, {logSuccess})
 
-  logStep('Checking working tree status...')
-  await ensureCleanWorkingTree(rootDir)
+    logStep('Checking working tree status...')
+    await ensureCleanWorkingTree(rootDir, {runCommand})
+    await ensureReleaseBranchReady({rootDir, branchMethod: 'show-current', logStep, logWarning})
 
-  const branch = await getGitCurrentBranch(rootDir, { method: 'show-current' })
-  if (!branch) {
-    throw new Error('Unable to determine current branch.')
-  }
+    await runLint(skipLint, rootDir)
+    await runTests(skipTests, composer, rootDir)
 
-  logStep(`Current branch: ${branch}`)
-  const upstreamRef = await getUpstreamRef(rootDir)
-  await ensureUpToDateWithUpstream({ branch, upstreamRef, rootDir, logStep, logWarning })
+    const updatedComposer = await bumpVersion(releaseType, rootDir)
+    await pushChanges(rootDir)
 
-  await runLint(skipLint, rootDir)
-  await runTests(skipTests, composer, rootDir)
-
-  const updatedComposer = await bumpVersion(releaseType, rootDir)
-  await pushChanges(rootDir)
-
-  logSuccess(`Release workflow completed for ${composer.name}@${updatedComposer.version}.`)
-  logStep('Note: Packagist will automatically detect the new git tag and update the package.')
+    logSuccess(`Release workflow completed for ${composer.name}@${updatedComposer.version}.`)
+    logStep('Note: Packagist will automatically detect the new git tag and update the package.')
 }
-

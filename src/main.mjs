@@ -9,7 +9,7 @@ import * as bootstrap from './project/bootstrap.mjs'
 import {PROJECT_CONFIG_DIR} from './utils/paths.mjs'
 import {writeStderrLine} from './utils/output.mjs'
 import {createAppContext} from './runtime/app-context.mjs'
-import {createConfigurationActions} from './application/configuration/actions.mjs'
+import {createConfigurationService} from './application/configuration/service.mjs'
 import {selectDeploymentTarget} from './application/configuration/select-deployment-target.mjs'
 import {resolvePendingSnapshot} from './application/deploy/resolve-pending-snapshot.mjs'
 import {runDeployment} from './application/deploy/run-deployment.mjs'
@@ -26,7 +26,7 @@ const {
     runPrompt,
     runCommand
 } = appContext
-const configurationActions = createConfigurationActions(appContext)
+const configurationService = createConfigurationService(appContext)
 
 async function runRemoteTasks(config, options = {}) {
     return await runDeployment(config, {
@@ -92,7 +92,7 @@ async function main(releaseType = null, versionArg = null) {
     }
 
     const {deploymentConfig} = await selectDeploymentTarget(rootDir, {
-        actions: configurationActions,
+        configurationService,
         runPrompt,
         logProcessing,
         logSuccess,

@@ -31,14 +31,14 @@ function createSelectionScenario() {
     sshKey: '~/.ssh/id_rsa'
   }
 
-  const actions = {
+  const configurationService = {
     selectPreset: vi.fn().mockResolvedValue(null),
     selectServer: vi.fn().mockResolvedValue(server),
     selectApp: vi.fn().mockResolvedValue(appConfig),
     ensureSshDetails: vi.fn().mockResolvedValue(false)
   }
 
-  return { projectConfig, server, appConfig, actions }
+  return { projectConfig, server, appConfig, configurationService }
 }
 
 describe('selectDeploymentTarget', () => {
@@ -52,7 +52,7 @@ describe('selectDeploymentTarget', () => {
   })
 
   it('returns a deployment config for a newly selected app without saving a blank preset', async () => {
-    const { projectConfig, server, actions } = createSelectionScenario()
+    const { projectConfig, server, configurationService } = createSelectionScenario()
 
     mockLoadServers.mockResolvedValue([server])
     mockLoadProjectConfig.mockResolvedValue(projectConfig)
@@ -63,7 +63,7 @@ describe('selectDeploymentTarget', () => {
     const { selectDeploymentTarget } = await import('../src/application/configuration/select-deployment-target.mjs')
 
     const result = await selectDeploymentTarget('/workspace/project', {
-      actions,
+      configurationService,
       runPrompt,
       logProcessing,
       logSuccess: vi.fn(),
@@ -84,7 +84,7 @@ describe('selectDeploymentTarget', () => {
   })
 
   it('saves a named preset for the selected app', async () => {
-    const { projectConfig, server, actions } = createSelectionScenario()
+    const { projectConfig, server, configurationService } = createSelectionScenario()
 
     mockLoadServers.mockResolvedValue([server])
     mockLoadProjectConfig.mockResolvedValue(projectConfig)
@@ -95,7 +95,7 @@ describe('selectDeploymentTarget', () => {
     const { selectDeploymentTarget } = await import('../src/application/configuration/select-deployment-target.mjs')
 
     await selectDeploymentTarget('/workspace/project', {
-      actions,
+      configurationService,
       runPrompt,
       logProcessing: vi.fn(),
       logSuccess,
@@ -111,5 +111,42 @@ describe('selectDeploymentTarget', () => {
     ])
     expect(mockSaveProjectConfig).toHaveBeenCalledWith('/workspace/project', projectConfig)
     expect(logSuccess).toHaveBeenCalledWith('Saved preset "Production" to .zephyr/config.json')
+  })
+
+  it('removes an invalid preset before creating a replacement configuration', async () => {
+    const { projectConfig, server, configurationService } = createSelectionScenario()
+    const invalidPreset = {
+      name: 'Broken preset',
+      appId: 'missing-app',
+      branch: 'main'
+    }
+
+    projectConfig.presets = [invalidPreset]
+    configurationService.selectPreset.mockResolvedValue(invalidPreset)
+    mockLoadServers.mockResolvedValue([server])
+    mockLoadProjectConfig.mockResolvedValue(projectConfig)
+    mockRemovePreset.mockImplementation((config, preset) => {
+      config.presets = config.presets.filter((entry) => entry !== preset)
+      return preset
+    })
+
+    const logWarning = vi.fn()
+
+    const { selectDeploymentTarget } = await import('../src/application/configuration/select-deployment-target.mjs')
+
+    await selectDeploymentTarget('/workspace/project', {
+      configurationService,
+      runPrompt: vi.fn().mockResolvedValue({ presetName: '' }),
+      logProcessing: vi.fn(),
+      logSuccess: vi.fn(),
+      logWarning
+    })
+
+    expect(mockRemovePreset).toHaveBeenCalledWith(projectConfig, invalidPreset)
+    expect(mockSaveProjectConfig).toHaveBeenCalledWith('/workspace/project', projectConfig)
+    expect(configurationService.selectServer).toHaveBeenCalledWith([server])
+    expect(configurationService.selectApp).toHaveBeenCalledWith(projectConfig, server, '/workspace/project')
+    expect(logWarning).toHaveBeenCalledWith('Preset references app configuration that no longer exists. Creating new configuration.')
+    expect(logWarning).toHaveBeenCalledWith('Removed "Broken preset" from .zephyr/config.json because it is invalid.')
   })
 })
