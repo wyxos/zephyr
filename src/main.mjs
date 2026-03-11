@@ -39,7 +39,7 @@ import { createSshClientFactory } from './runtime/ssh-client.mjs'
 import { createLocalCommandRunners } from './runtime/local-command.mjs'
 import { generateId } from './utils/id.mjs'
 import { loadServers, saveServers } from './config/servers.mjs'
-import { loadProjectConfig, saveProjectConfig } from './config/project.mjs'
+import { loadProjectConfig, saveProjectConfig, removePreset } from './config/project.mjs'
 import { resolveRemotePath } from './utils/remote-path.mjs'
 
 const RELEASE_SCRIPT_NAME = 'release'
@@ -597,6 +597,21 @@ async function main(releaseType = null, versionArg = null) {
   let isCreatingNewPreset = false
 
   const preset = await selectPreset(projectConfig, servers)
+  const removeInvalidPreset = async () => {
+    if (!preset || preset === 'create') {
+      return
+    }
+
+    const removedPreset = removePreset(projectConfig, preset)
+    if (!removedPreset) {
+      return
+    }
+
+    await saveProjectConfig(rootDir, projectConfig)
+    const presetLabel = removedPreset.name ? `"${removedPreset.name}"` : 'selected preset'
+    logWarning(`Removed ${presetLabel} from .zephyr/config.json because it is invalid.`)
+    isCreatingNewPreset = true
+  }
 
   if (preset === 'create') {
     // User explicitly chose to create a new preset
@@ -610,6 +625,7 @@ async function main(releaseType = null, versionArg = null) {
 
       if (!appConfig) {
         logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+        await removeInvalidPreset()
         server = await selectServer(servers)
         appConfig = await selectApp(projectConfig, server, rootDir)
       } else {
@@ -617,6 +633,7 @@ async function main(releaseType = null, versionArg = null) {
 
         if (!server) {
           logWarning(`Preset references server that no longer exists. Creating new configuration.`)
+          await removeInvalidPreset()
           server = await selectServer(servers)
           appConfig = await selectApp(projectConfig, server, rootDir)
         } else if (preset.branch && appConfig.branch !== preset.branch) {
@@ -637,6 +654,7 @@ async function main(releaseType = null, versionArg = null) {
 
       if (!server) {
         logWarning(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
+        await removeInvalidPreset()
         server = await selectServer(servers)
         appConfig = await selectApp(projectConfig, server, rootDir)
       } else {
@@ -646,6 +664,7 @@ async function main(releaseType = null, versionArg = null) {
 
         if (!appConfig) {
           logWarning(`Preset references app configuration that no longer exists. Creating new configuration.`)
+          await removeInvalidPreset()
           appConfig = await selectApp(projectConfig, server, rootDir)
         } else {
           // Migrate preset to use appId
@@ -659,6 +678,7 @@ async function main(releaseType = null, versionArg = null) {
       }
     } else {
       logWarning(`Preset format is invalid. Creating new configuration.`)
+      await removeInvalidPreset()
       server = await selectServer(servers)
       appConfig = await selectApp(projectConfig, server, rootDir)
     }

@@ -116,3 +116,16 @@ export async function saveProjectConfig(rootDir, config) {
   await fs.writeFile(getProjectConfigPath(rootDir), `${payload}\n`)
 }
 
+export function removePreset(config, preset) {
+  if (!config || !Array.isArray(config.presets)) {
+    return null
+  }
+
+  const presetIndex = config.presets.indexOf(preset)
+  if (presetIndex < 0) {
+    return null
+  }
+
+  const [removed] = config.presets.splice(presetIndex, 1)
+  return removed ?? null
+}
