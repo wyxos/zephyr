@@ -883,5 +883,32 @@ describe('zephyr deployment helpers', () => {
       expect(saved.presets[0].serverName).toBeUndefined()
       expect(saved.presets[0].projectPath).toBeUndefined()
     })
+
+    it('removes a preset from project config when requested', async () => {
+      const { removePreset } = await import('../src/config/project.mjs')
+
+      const presetToRemove = {
+        name: 'legacy-invalid',
+        serverName: 'old-server',
+        projectPath: '~/webapps/old-app'
+      }
+      const config = {
+        apps: [],
+        presets: [
+          presetToRemove,
+          {
+            name: 'valid',
+            appId: 'app-1',
+            branch: 'main'
+          }
+        ]
+      }
+
+      const removed = removePreset(config, presetToRemove)
+
+      expect(removed).toBe(presetToRemove)
+      expect(config.presets).toHaveLength(1)
+      expect(config.presets[0].name).toBe('valid')
+    })
   })
 })
