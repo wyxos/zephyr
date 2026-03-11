@@ -4,8 +4,8 @@ import process from 'node:process'
 
 import * as localRepo from '../../deploy/local-repo.mjs'
 import * as preflight from '../../deploy/preflight.mjs'
+import {getPhpVersionRequirement} from '../../infrastructure/php/version.mjs'
 import {commandExists} from '../../utils/command.mjs'
-import {getPhpVersionRequirement} from '../../utils/php-version.mjs'
 
 async function getGitStatus(rootDir, {runCommandCapture} = {}) {
     return await localRepo.getGitStatus(rootDir, {runCommandCapture})

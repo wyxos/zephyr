@@ -1,5 +1,5 @@
-import {findPhpBinary} from '../../utils/php-version.mjs'
-import {planLaravelDeploymentTasks} from '../../utils/task-planner.mjs'
+import {findPhpBinary} from '../../infrastructure/php/version.mjs'
+import {planLaravelDeploymentTasks} from './plan-laravel-deployment-tasks.mjs'
 
 async function detectRemoteLaravelProject(ssh, remoteCwd) {
     const laravelCheck = await ssh.execCommand(
