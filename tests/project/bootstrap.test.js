@@ -7,7 +7,7 @@ import {
     queueSpawnResponse,
     setupRuntimeTestEnv,
     teardownRuntimeTestEnv
-} from '../helpers/runtime-test-env.mjs'
+} from '#tests/helpers/runtime-test-env.mjs'
 
 describe('project/bootstrap', () => {
     beforeEach(() => {
@@ -32,9 +32,9 @@ describe('project/bootstrap', () => {
         queueSpawnResponse({}) // git add package.json
         queueSpawnResponse({}) // git commit
 
-        const {ensureProjectReleaseScript} = await import('../../src/project/bootstrap.mjs')
-        const {createLocalCommandRunners} = await import('../../src/runtime/local-command.mjs')
-        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('../../src/utils/command.mjs')
+        const {ensureProjectReleaseScript} = await import('#src/project/bootstrap.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
         const {runCommand} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
 
         await ensureProjectReleaseScript('/workspace/project', {
@@ -58,9 +58,9 @@ describe('project/bootstrap', () => {
         queueSpawnResponse({}) // git add .gitignore
         queueSpawnResponse({}) // git commit
 
-        const {ensureGitignoreEntry} = await import('../../src/project/bootstrap.mjs')
-        const {createLocalCommandRunners} = await import('../../src/runtime/local-command.mjs')
-        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('../../src/utils/command.mjs')
+        const {ensureGitignoreEntry} = await import('#src/project/bootstrap.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
         const {runCommand} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
 
         await ensureGitignoreEntry('/workspace/project', {

@@ -15,15 +15,15 @@ const {
     mockValidateReleaseDependencies: vi.fn()
 }))
 
-vi.mock('../../../src/release/shared.mjs', () => ({
+vi.mock('#src/release/shared.mjs', () => ({
     ensureCleanWorkingTree: mockEnsureCleanWorkingTree,
     ensureReleaseBranchReady: mockEnsureReleaseBranchReady,
     runReleaseCommand: mockRunReleaseCommand,
     validateReleaseDependencies: mockValidateReleaseDependencies
 }))
 
-import {releaseNodePackage} from '../../../src/application/release/release-node-package.mjs'
-import {releasePackagistPackage} from '../../../src/application/release/release-packagist-package.mjs'
+import {releaseNodePackage} from '#src/application/release/release-node-package.mjs'
+import {releasePackagistPackage} from '#src/application/release/release-packagist-package.mjs'
 
 describe('release application actions', () => {
     let rootDir

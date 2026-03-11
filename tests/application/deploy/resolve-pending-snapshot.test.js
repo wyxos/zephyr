@@ -3,7 +3,7 @@ import {beforeEach, describe, expect, it, vi} from 'vitest'
 const mockLoadPendingTasksSnapshot = vi.fn()
 const mockClearPendingTasksSnapshot = vi.fn()
 
-vi.mock('../../../src/deploy/snapshots.mjs', () => ({
+vi.mock('#src/deploy/snapshots.mjs', () => ({
     loadPendingTasksSnapshot: mockLoadPendingTasksSnapshot,
     clearPendingTasksSnapshot: mockClearPendingTasksSnapshot
 }))
@@ -26,7 +26,7 @@ describe('resolvePendingSnapshot', () => {
         const runPrompt = vi.fn().mockResolvedValue({resumePendingTasks: true})
         const logProcessing = vi.fn()
 
-        const {resolvePendingSnapshot} = await import('../../../src/application/deploy/resolve-pending-snapshot.mjs')
+        const {resolvePendingSnapshot} = await import('#src/application/deploy/resolve-pending-snapshot.mjs')
 
         const result = await resolvePendingSnapshot('/workspace/project', {
             serverName: 'production',
@@ -52,7 +52,7 @@ describe('resolvePendingSnapshot', () => {
         const runPrompt = vi.fn().mockResolvedValue({resumePendingTasks: false})
         const logWarning = vi.fn()
 
-        const {resolvePendingSnapshot} = await import('../../../src/application/deploy/resolve-pending-snapshot.mjs')
+        const {resolvePendingSnapshot} = await import('#src/application/deploy/resolve-pending-snapshot.mjs')
 
         const result = await resolvePendingSnapshot('/workspace/project', {
             serverName: 'production',

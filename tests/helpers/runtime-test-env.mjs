@@ -142,7 +142,7 @@ vi.mock('node:os', () => ({
     hostname: () => 'test-host'
 }))
 
-vi.mock('../../src/dependency-scanner.mjs', () => ({
+vi.mock('#src/dependency-scanner.mjs', () => ({
     validateLocalDependencies: mockValidateLocalDependencies
 }))
 

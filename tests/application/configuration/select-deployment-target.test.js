@@ -6,17 +6,17 @@ const mockRemovePreset = vi.fn()
 const mockSaveProjectConfig = vi.fn()
 const mockWriteStdoutLine = vi.fn()
 
-vi.mock('../../../src/config/servers.mjs', () => ({
+vi.mock('#src/config/servers.mjs', () => ({
   loadServers: mockLoadServers
 }))
 
-vi.mock('../../../src/config/project.mjs', () => ({
+vi.mock('#src/config/project.mjs', () => ({
   loadProjectConfig: mockLoadProjectConfig,
   removePreset: mockRemovePreset,
   saveProjectConfig: mockSaveProjectConfig
 }))
 
-vi.mock('../../../src/utils/output.mjs', () => ({
+vi.mock('#src/utils/output.mjs', () => ({
   writeStdoutLine: mockWriteStdoutLine
 }))
 
@@ -60,7 +60,7 @@ describe('selectDeploymentTarget', () => {
     const runPrompt = vi.fn().mockResolvedValue({ presetName: '' })
     const logProcessing = vi.fn()
 
-    const { selectDeploymentTarget } = await import('../../../src/application/configuration/select-deployment-target.mjs')
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
 
     const result = await selectDeploymentTarget('/workspace/project', {
       configurationService,
@@ -92,7 +92,7 @@ describe('selectDeploymentTarget', () => {
     const runPrompt = vi.fn().mockResolvedValue({ presetName: 'Production' })
     const logSuccess = vi.fn()
 
-    const { selectDeploymentTarget } = await import('../../../src/application/configuration/select-deployment-target.mjs')
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
 
     await selectDeploymentTarget('/workspace/project', {
       configurationService,
@@ -132,7 +132,7 @@ describe('selectDeploymentTarget', () => {
 
     const logWarning = vi.fn()
 
-    const { selectDeploymentTarget } = await import('../../../src/application/configuration/select-deployment-target.mjs')
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
 
     await selectDeploymentTarget('/workspace/project', {
       configurationService,

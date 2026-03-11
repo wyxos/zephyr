@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 
 describe('deploy/remote-exec', () => {
   it('logs stdout/stderr to log file and throws on non-zero exit by default', async () => {
-    const { createRemoteExecutor } = await import('../../src/deploy/remote-exec.mjs')
+    const { createRemoteExecutor } = await import('#src/deploy/remote-exec.mjs')
 
     const writeToLogFile = vi.fn().mockResolvedValue()
     const logProcessing = vi.fn()
@@ -35,7 +35,7 @@ describe('deploy/remote-exec', () => {
   })
 
   it('supports env injection when bootstrapEnv is false', async () => {
-    const { createRemoteExecutor } = await import('../../src/deploy/remote-exec.mjs')
+    const { createRemoteExecutor } = await import('#src/deploy/remote-exec.mjs')
 
     const ssh = {
       execCommand: vi.fn().mockResolvedValue({ code: 0, stdout: '', stderr: '' })

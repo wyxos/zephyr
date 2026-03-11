@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { planLaravelDeploymentTasks } from '../../../src/application/deploy/plan-laravel-deployment-tasks.mjs'
+import { planLaravelDeploymentTasks } from '#src/application/deploy/plan-laravel-deployment-tasks.mjs'
 
 describe('application/deploy/plan-laravel-deployment-tasks', () => {
   it('always includes git pull for the branch', () => {

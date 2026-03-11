@@ -8,15 +8,15 @@ const {
     mockPlanLaravelDeploymentTasks: vi.fn()
 }))
 
-vi.mock('../../../src/infrastructure/php/version.mjs', () => ({
+vi.mock('#src/infrastructure/php/version.mjs', () => ({
     findPhpBinary: mockFindPhpBinary
 }))
 
-vi.mock('../../../src/application/deploy/plan-laravel-deployment-tasks.mjs', () => ({
+vi.mock('#src/application/deploy/plan-laravel-deployment-tasks.mjs', () => ({
     planLaravelDeploymentTasks: mockPlanLaravelDeploymentTasks
 }))
 
-import {buildRemoteDeploymentPlan} from '../../../src/application/deploy/build-remote-deployment-plan.mjs'
+import {buildRemoteDeploymentPlan} from '#src/application/deploy/build-remote-deployment-plan.mjs'
 
 describe('application/deploy/build-remote-deployment-plan', () => {
     beforeEach(() => {

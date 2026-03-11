@@ -6,7 +6,7 @@ import {
     queueSpawnResponse,
     setupRuntimeTestEnv,
     teardownRuntimeTestEnv
-} from '../helpers/runtime-test-env.mjs'
+} from '#tests/helpers/runtime-test-env.mjs'
 
 describe('deploy/local-repo', () => {
     beforeEach(() => {
@@ -23,9 +23,9 @@ describe('deploy/local-repo', () => {
         queueSpawnResponse({})
         queueSpawnResponse({stdout: ''})
 
-        const {ensureLocalRepositoryState} = await import('../../src/deploy/local-repo.mjs')
-        const {createLocalCommandRunners} = await import('../../src/runtime/local-command.mjs')
-        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('../../src/utils/command.mjs')
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
         const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
 
         await expect(
@@ -53,9 +53,9 @@ describe('deploy/local-repo', () => {
         queueSpawnResponse({stdout: 'develop\n'})
         queueSpawnResponse({stdout: ' M file.txt\n'})
 
-        const {ensureLocalRepositoryState} = await import('../../src/deploy/local-repo.mjs')
-        const {createLocalCommandRunners} = await import('../../src/runtime/local-command.mjs')
-        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('../../src/utils/command.mjs')
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
         const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
 
         await expect(
@@ -83,9 +83,9 @@ describe('deploy/local-repo', () => {
 
         mockPrompt.mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
 
-        const {ensureLocalRepositoryState} = await import('../../src/deploy/local-repo.mjs')
-        const {createLocalCommandRunners} = await import('../../src/runtime/local-command.mjs')
-        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('../../src/utils/command.mjs')
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
         const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
 
         await expect(

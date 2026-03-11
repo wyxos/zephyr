@@ -8,12 +8,12 @@ const {
     mockSavePendingTasksSnapshot: vi.fn()
 }))
 
-vi.mock('../../../src/deploy/snapshots.mjs', () => ({
+vi.mock('#src/deploy/snapshots.mjs', () => ({
     clearPendingTasksSnapshot: mockClearPendingTasksSnapshot,
     savePendingTasksSnapshot: mockSavePendingTasksSnapshot
 }))
 
-import {executeRemoteDeploymentPlan} from '../../../src/application/deploy/execute-remote-deployment-plan.mjs'
+import {executeRemoteDeploymentPlan} from '#src/application/deploy/execute-remote-deployment-plan.mjs'
 
 describe('application/deploy/execute-remote-deployment-plan', () => {
     beforeEach(() => {

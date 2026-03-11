@@ -51,44 +51,44 @@ vi.mock('node:fs/promises', () => ({
     access: mockAccess
 }))
 
-vi.mock('../src/release-node.mjs', () => ({
+vi.mock('#src/release-node.mjs', () => ({
     releaseNode: mockReleaseNode
 }))
 
-vi.mock('../src/release-packagist.mjs', () => ({
+vi.mock('#src/release-packagist.mjs', () => ({
     releasePackagist: mockReleasePackagist
 }))
 
-vi.mock('../src/dependency-scanner.mjs', () => ({
+vi.mock('#src/dependency-scanner.mjs', () => ({
     validateLocalDependencies: mockValidateLocalDependencies
 }))
 
-vi.mock('../src/project/bootstrap.mjs', () => ({
+vi.mock('#src/project/bootstrap.mjs', () => ({
     ensureGitignoreEntry: mockEnsureGitignoreEntry,
     ensureProjectReleaseScript: mockEnsureProjectReleaseScript
 }))
 
-vi.mock('../src/utils/output.mjs', () => ({
+vi.mock('#src/utils/output.mjs', () => ({
     writeStderrLine: mockWriteStderrLine
 }))
 
-vi.mock('../src/runtime/app-context.mjs', () => ({
+vi.mock('#src/runtime/app-context.mjs', () => ({
     createAppContext: () => appContext
 }))
 
-vi.mock('../src/application/configuration/service.mjs', () => ({
+vi.mock('#src/application/configuration/service.mjs', () => ({
     createConfigurationService: mockCreateConfigurationService
 }))
 
-vi.mock('../src/application/configuration/select-deployment-target.mjs', () => ({
+vi.mock('#src/application/configuration/select-deployment-target.mjs', () => ({
     selectDeploymentTarget: mockSelectDeploymentTarget
 }))
 
-vi.mock('../src/application/deploy/resolve-pending-snapshot.mjs', () => ({
+vi.mock('#src/application/deploy/resolve-pending-snapshot.mjs', () => ({
     resolvePendingSnapshot: mockResolvePendingSnapshot
 }))
 
-vi.mock('../src/application/deploy/run-deployment.mjs', () => ({
+vi.mock('#src/application/deploy/run-deployment.mjs', () => ({
     runDeployment: mockRunDeployment
 }))
 
@@ -126,7 +126,7 @@ describe('main entrypoint', () => {
     })
 
     it('delegates node releases to the node release command', async () => {
-        const {main} = await import('../src/main.mjs')
+        const {main} = await import('#src/main.mjs')
 
         await main('node')
 
@@ -135,7 +135,7 @@ describe('main entrypoint', () => {
     })
 
     it('delegates Packagist releases to the Packagist release command', async () => {
-        const {main} = await import('../src/main.mjs')
+        const {main} = await import('#src/main.mjs')
 
         await main('packagist')
 
@@ -161,7 +161,7 @@ describe('main entrypoint', () => {
         mockSelectDeploymentTarget.mockResolvedValue({deploymentConfig})
         mockResolvePendingSnapshot.mockResolvedValue(snapshot)
 
-        const {main} = await import('../src/main.mjs')
+        const {main} = await import('#src/main.mjs')
 
         await main(null, 'minor')
 
