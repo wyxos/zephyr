@@ -24,9 +24,8 @@ describe('git utils', () => {
       }
     })
 
-    const { getUpstreamRef } = await import('../src/utils/git.mjs?' + Math.random())
+    const { getUpstreamRef } = await import('../../src/utils/git.mjs?' + Math.random())
     const upstream = await getUpstreamRef(process.cwd())
     expect(upstream).toBe(null)
   })
 })
-

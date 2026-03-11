@@ -10,11 +10,11 @@ const {
     mockRunCommandCapture: vi.fn()
 }))
 
-vi.mock('../src/dependency-scanner.mjs', () => ({
+vi.mock('../../src/dependency-scanner.mjs', () => ({
     validateLocalDependencies: mockValidateLocalDependencies
 }))
 
-vi.mock('../src/utils/command.mjs', () => ({
+vi.mock('../../src/utils/command.mjs', () => ({
     runCommand: mockRunCommand,
     runCommandCapture: mockRunCommandCapture
 }))
@@ -25,7 +25,7 @@ import {
     parseReleaseArgs,
     runReleaseCommand,
     validateReleaseDependencies
-} from '../src/release/shared.mjs'
+} from '../../src/release/shared.mjs'
 
 describe('release shared helpers', () => {
     beforeEach(() => {
