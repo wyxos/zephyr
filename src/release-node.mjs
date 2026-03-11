@@ -4,11 +4,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import chalk from 'chalk'
-import inquirer from 'inquirer'
-import { validateLocalDependencies } from './dependency-scanner.mjs'
 import { writeStderr, writeStderrLine, writeStdoutLine } from './utils/output.mjs'
-import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
-import { ensureUpToDateWithUpstream, getCurrentBranch, getUpstreamRef } from './utils/git.mjs'
+import {
+  ensureCleanWorkingTree,
+  ensureReleaseBranchReady,
+  parseReleaseArgs,
+  runReleaseCommand as runCommand,
+  validateReleaseDependencies
+} from './release/shared.mjs'
 
 function logStep(message) {
   writeStdoutLine(chalk.yellow(`→ ${message}`))
@@ -22,16 +25,6 @@ function logWarning(message) {
   writeStderrLine(chalk.yellow(`⚠ ${message}`))
 }
 
-async function runCommand(command, args, { cwd = process.cwd(), capture = false } = {}) {
-  if (capture) {
-    const { stdout, stderr } = await runCommandCaptureBase(command, args, { cwd })
-    return { stdout: stdout.trim(), stderr: stderr.trim() }
-  }
-
-  await runCommandBase(command, args, { cwd })
-  return undefined
-}
-
 async function readPackage(rootDir = process.cwd()) {
   const packagePath = join(rootDir, 'package.json')
   const raw = await readFile(packagePath, 'utf8')
@@ -40,48 +33,6 @@ async function readPackage(rootDir = process.cwd()) {
 
 function hasScript(pkg, scriptName) {
   return pkg?.scripts?.[scriptName] !== undefined
-}
-
-async function ensureCleanWorkingTree(rootDir = process.cwd()) {
-  const { stdout } = await runCommand('git', ['status', '--porcelain'], { capture: true, cwd: rootDir })
-
-  if (stdout.length > 0) {
-    throw new Error('Working tree has uncommitted changes. Commit or stash them before releasing.')
-  }
-}
-
-// Git helpers imported from src/utils/git.mjs
-
-function parseArgs() {
-  const args = process.argv.slice(2)
-  // Filter out --type flag as it's handled by zephyr CLI
-  const filteredArgs = args.filter((arg) => !arg.startsWith('--type='))
-  const positionals = filteredArgs.filter((arg) => !arg.startsWith('--'))
-  const flags = new Set(filteredArgs.filter((arg) => arg.startsWith('--')))
-
-  const releaseType = positionals[0] ?? 'patch'
-  const skipTests = flags.has('--skip-tests')
-  const skipLint = flags.has('--skip-lint')
-  const skipBuild = flags.has('--skip-build')
-  const skipDeploy = flags.has('--skip-deploy')
-
-  const allowedTypes = new Set([
-    'major',
-    'minor',
-    'patch',
-    'premajor',
-    'preminor',
-    'prepatch',
-    'prerelease'
-  ])
-
-  if (!allowedTypes.has(releaseType)) {
-    throw new Error(
-      `Invalid release type "${releaseType}". Use one of: ${Array.from(allowedTypes).join(', ')}.`
-    )
-  }
-
-  return { releaseType, skipTests, skipLint, skipBuild, skipDeploy }
 }
 
 async function runLint(skipLint, pkg, rootDir = process.cwd()) {
@@ -313,13 +264,10 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
 
   // Check if dist directory exists (indicates build output for deployment)
   const distPath = path.join(rootDir, 'dist')
-  let distExists = false
-  try {
-    const stats = await fs.promises.stat(distPath)
-    distExists = stats.isDirectory()
-  } catch {
-    distExists = false
-  }
+  const distExists = await fs.promises
+    .stat(distPath)
+    .then((stats) => stats.isDirectory())
+    .catch(() => false)
 
   if (!distExists) {
     logStep('Skipping GitHub Pages deployment (no dist directory found).')
@@ -330,9 +278,16 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
 
   // Write CNAME file to dist if homepage is set
   const cnamePath = path.join(distPath, 'CNAME')
+  const homepage =
+    pkg &&
+    typeof pkg === 'object' &&
+    'homepage' in pkg &&
+    typeof pkg.homepage === 'string'
+      ? pkg.homepage
+      : null
 
-  if (pkg.homepage) {
-    const domain = extractDomainFromHomepage(pkg.homepage)
+  if (homepage) {
+    const domain = extractDomainFromHomepage(homepage)
     if (domain) {
       try {
         await fs.promises.mkdir(distPath, { recursive: true })
@@ -389,26 +344,20 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd()) {
 
 export async function releaseNode() {
   try {
-    const { releaseType, skipTests, skipLint, skipBuild, skipDeploy } = parseArgs()
+    const { releaseType, skipTests, skipLint, skipBuild, skipDeploy } = parseReleaseArgs({
+      booleanFlags: ['--skip-tests', '--skip-lint', '--skip-build', '--skip-deploy']
+    })
     const rootDir = process.cwd()
 
     logStep('Reading package metadata...')
     const pkg = await readPackage(rootDir)
 
     logStep('Validating dependencies...')
-    await validateLocalDependencies(rootDir, (questions) => inquirer.prompt(questions), logSuccess)
+    await validateReleaseDependencies(rootDir, { logSuccess })
 
     logStep('Checking working tree status...')
-    await ensureCleanWorkingTree(rootDir)
-
-    const branch = await getCurrentBranch(rootDir, { method: 'show-current' })
-    if (!branch) {
-      throw new Error('Unable to determine current branch.')
-    }
-
-    logStep(`Current branch: ${branch}`)
-    const upstreamRef = await getUpstreamRef(rootDir)
-    await ensureUpToDateWithUpstream({ branch, upstreamRef, rootDir, logStep, logWarning })
+    await ensureCleanWorkingTree(rootDir, { runCommand })
+    await ensureReleaseBranchReady({ rootDir, branchMethod: 'show-current', logStep, logWarning })
 
     await runLint(skipLint, pkg, rootDir)
     await runTests(skipTests, pkg, rootDir)
@@ -428,4 +377,3 @@ export async function releaseNode() {
     throw error
   }
 }
-

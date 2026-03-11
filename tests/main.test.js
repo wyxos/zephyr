@@ -263,18 +263,19 @@ describe('zephyr deployment helpers', () => {
     it('registers a new server when none exist', async () => {
       mockPrompt.mockResolvedValueOnce({ serverName: 'production', serverIp: '203.0.113.10' })
 
-      const { selectServer, promptServerDetails } = await import('../src/utils/config-flow.mjs')
+      const { selectServer, promptServerDetails } = await import('../src/application/configuration/service.mjs')
       const { saveServers } = await import('../src/config/servers.mjs')
       const { generateId } = await import('../src/utils/id.mjs')
 
       const servers = []
-      const server = await selectServer(servers, {
+      const server = await selectServer({
+        servers,
         runPrompt: mockPrompt,
         logProcessing: () => {},
         logSuccess: () => {},
-        saveServers,
+        persistServers: saveServers,
         promptServerDetails: (existingServers = []) =>
-          promptServerDetails(existingServers, { runPrompt: mockPrompt, generateId })
+          promptServerDetails({ existingServers, runPrompt: mockPrompt, createId: generateId })
       })
 
       expect(server).toMatchObject({ serverName: 'production', serverIp: '203.0.113.10' })
@@ -294,7 +295,7 @@ describe('zephyr deployment helpers', () => {
         .mockResolvedValueOnce({ sshUser: 'forge', sshKeySelection: '/home/local/.ssh/id_rsa' })
       mockReaddir.mockResolvedValue([])
 
-      const { selectApp, promptAppDetails, listGitBranches, defaultProjectPath } = await import('../src/utils/config-flow.mjs')
+      const { selectApp, promptAppDetails, listGitBranches, defaultProjectPath } = await import('../src/application/configuration/service.mjs')
       const { saveProjectConfig } = await import('../src/config/project.mjs')
       const { generateId } = await import('../src/utils/id.mjs')
       const { promptSshDetails } = await import('../src/ssh/keys.mjs')
@@ -305,18 +306,23 @@ describe('zephyr deployment helpers', () => {
 
       const runCommandCapture = async (command, args, options) => (await runCommandCaptureBase(command, args, options)).stdout
 
-      const app = await selectApp(projectConfig, server, process.cwd(), {
+      const app = await selectApp({
+        projectConfig,
+        server,
+        currentDir: process.cwd(),
         runPrompt: mockPrompt,
         logWarning: () => {},
         logProcessing: () => {},
         logSuccess: () => {},
-        saveProjectConfig,
-        generateId,
+        persistProjectConfig: saveProjectConfig,
+        createId: generateId,
         promptAppDetails: (currentDir, existing = {}) =>
-          promptAppDetails(currentDir, existing, {
+          promptAppDetails({
+            currentDir,
+            existing,
             runPrompt: mockPrompt,
-            listGitBranches: (dir) => listGitBranches(dir, { runCommandCapture, logWarning: () => {} }),
-            defaultProjectPath,
+            listGitBranches: (dir) => listGitBranches({ currentDir: dir, runCommandCapture, logWarning: () => {} }),
+            resolveDefaultProjectPath: defaultProjectPath,
             promptSshDetails: (dir, existingSsh = {}) => promptSshDetails(dir, existingSsh, { runPrompt: mockPrompt })
           })
       })
@@ -338,7 +344,7 @@ describe('zephyr deployment helpers', () => {
     it('shows existing applications when apps exist for a server', async () => {
       mockPrompt.mockResolvedValueOnce({ selection: 0 })
 
-      const { selectApp } = await import('../src/utils/config-flow.mjs')
+      const { selectApp } = await import('../src/application/configuration/service.mjs')
       const { saveProjectConfig } = await import('../src/config/project.mjs')
       const { generateId } = await import('../src/utils/id.mjs')
 
@@ -369,13 +375,16 @@ describe('zephyr deployment helpers', () => {
       }
       const server = { serverName: 'production', serverIp: '203.0.113.10' }
 
-      const app = await selectApp(projectConfig, server, process.cwd(), {
+      const app = await selectApp({
+        projectConfig,
+        server,
+        currentDir: process.cwd(),
         runPrompt: mockPrompt,
         logWarning: () => {},
         logProcessing: () => {},
         logSuccess: () => {},
-        saveProjectConfig,
-        generateId,
+        persistProjectConfig: saveProjectConfig,
+        createId: generateId,
         promptAppDetails: vi.fn()
       })
 
