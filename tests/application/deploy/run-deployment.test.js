@@ -12,7 +12,7 @@ import {
     queueSpawnResponse,
     setupRuntimeTestEnv,
     teardownRuntimeTestEnv
-} from '../../helpers/runtime-test-env.mjs'
+} from '#tests/helpers/runtime-test-env.mjs'
 
 describe('application/deploy/run-deployment', () => {
     beforeEach(() => {
@@ -87,8 +87,8 @@ describe('application/deploy/run-deployment', () => {
             return response
         })
 
-        const {runDeployment} = await import('../../../src/application/deploy/run-deployment.mjs')
-        const {createAppContext} = await import('../../../src/runtime/app-context.mjs')
+        const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
+        const {createAppContext} = await import('#src/runtime/app-context.mjs')
 
         await runDeployment({
             serverIp: '127.0.0.1',
@@ -169,8 +169,8 @@ describe('application/deploy/run-deployment', () => {
             return response
         })
 
-        const {runDeployment} = await import('../../../src/application/deploy/run-deployment.mjs')
-        const {createAppContext} = await import('../../../src/runtime/app-context.mjs')
+        const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
+        const {createAppContext} = await import('#src/runtime/app-context.mjs')
 
         await runDeployment({
             serverIp: '127.0.0.1',
@@ -202,8 +202,8 @@ describe('application/deploy/run-deployment', () => {
             .mockResolvedValueOnce({stdout: 'no', stderr: '', code: 0})
             .mockResolvedValue({stdout: '', stderr: '', code: 0})
 
-        const {runDeployment} = await import('../../../src/application/deploy/run-deployment.mjs')
-        const {createAppContext} = await import('../../../src/runtime/app-context.mjs')
+        const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
+        const {createAppContext} = await import('#src/runtime/app-context.mjs')
 
         await runDeployment({
             serverIp: '127.0.0.1',

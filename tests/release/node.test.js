@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const mockValidateLocalDependencies = vi.fn().mockResolvedValue(undefined)
 
-vi.mock('../../src/dependency-scanner.mjs', () => ({
+vi.mock('#src/dependency-scanner.mjs', () => ({
   validateLocalDependencies: mockValidateLocalDependencies
 }))
 
@@ -13,7 +13,7 @@ describe('release-node module', () => {
   })
 
   it('loads without syntax errors and exports releaseNode', async () => {
-    const module = await import('../../src/release-node.mjs')
+    const module = await import('#src/release-node.mjs')
     expect(typeof module.releaseNode).toBe('function')
   }, 15000)
 })

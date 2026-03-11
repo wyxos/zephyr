@@ -1,6 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it} from 'vitest'
 
-import {setupRuntimeTestEnv, teardownRuntimeTestEnv} from '../helpers/runtime-test-env.mjs'
+import {setupRuntimeTestEnv, teardownRuntimeTestEnv} from '#tests/helpers/runtime-test-env.mjs'
 
 describe('utils/remote-path', () => {
     beforeEach(() => {
@@ -12,7 +12,7 @@ describe('utils/remote-path', () => {
     })
 
     it('resolves remote paths correctly', async () => {
-        const {resolveRemotePath} = await import('../../src/utils/remote-path.mjs')
+        const {resolveRemotePath} = await import('#src/utils/remote-path.mjs')
 
         expect(resolveRemotePath('~/webapps/app', '/home/runcloud')).toBe('/home/runcloud/webapps/app')
         expect(resolveRemotePath('app', '/home/runcloud')).toBe('/home/runcloud/app')

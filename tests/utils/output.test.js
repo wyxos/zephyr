@@ -1,6 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 
-import {createChalkLogger, formatLogMessage} from '../../src/utils/output.mjs'
+import {createChalkLogger, formatLogMessage} from '#src/utils/output.mjs'
 
 describe('output helpers', () => {
     let originalStdoutWrite

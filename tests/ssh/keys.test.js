@@ -5,7 +5,7 @@ import {
     mockReaddir,
     setupRuntimeTestEnv,
     teardownRuntimeTestEnv
-} from '../helpers/runtime-test-env.mjs'
+} from '#tests/helpers/runtime-test-env.mjs'
 
 describe('ssh/keys', () => {
     beforeEach(() => {
@@ -19,7 +19,7 @@ describe('ssh/keys', () => {
     it('detects private key files from contents', async () => {
         mockReadFile.mockResolvedValueOnce('-----BEGIN OPENSSH PRIVATE KEY-----')
 
-        const {isPrivateKeyFile} = await import('../../src/ssh/keys.mjs')
+        const {isPrivateKeyFile} = await import('#src/ssh/keys.mjs')
 
         await expect(isPrivateKeyFile('/home/local/.ssh/id_rsa')).resolves.toBe(true)
 
@@ -49,7 +49,7 @@ describe('ssh/keys', () => {
         })
 
         const path = await import('node:path')
-        const {listSshKeys} = await import('../../src/ssh/keys.mjs')
+        const {listSshKeys} = await import('#src/ssh/keys.mjs')
 
         const result = await listSshKeys()
 

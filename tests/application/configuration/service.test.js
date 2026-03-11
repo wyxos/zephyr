@@ -8,7 +8,7 @@ import {
     queueSpawnResponse,
     setupRuntimeTestEnv,
     teardownRuntimeTestEnv
-} from '../../helpers/runtime-test-env.mjs'
+} from '#tests/helpers/runtime-test-env.mjs'
 
 describe('application/configuration/service', () => {
     beforeEach(() => {
@@ -20,7 +20,7 @@ describe('application/configuration/service', () => {
     })
 
     it('requires prompt, command, and logger dependencies for the configuration service', async () => {
-        const {createConfigurationService} = await import('../../../src/application/configuration/service.mjs')
+        const {createConfigurationService} = await import('#src/application/configuration/service.mjs')
 
         expect(() => createConfigurationService({})).toThrow(
             'createConfigurationService requires prompt, command, and logger dependencies.'
@@ -30,9 +30,9 @@ describe('application/configuration/service', () => {
     it('registers a new server when none exist', async () => {
         mockPrompt.mockResolvedValueOnce({serverName: 'production', serverIp: '203.0.113.10'})
 
-        const {selectServer, promptServerDetails} = await import('../../../src/application/configuration/service.mjs')
-        const {saveServers} = await import('../../../src/config/servers.mjs')
-        const {generateId} = await import('../../../src/utils/id.mjs')
+        const {selectServer, promptServerDetails} = await import('#src/application/configuration/service.mjs')
+        const {saveServers} = await import('#src/config/servers.mjs')
+        const {generateId} = await import('#src/utils/id.mjs')
 
         const servers = []
         const server = await selectServer({
@@ -64,11 +64,11 @@ describe('application/configuration/service', () => {
             .mockResolvedValueOnce({sshUser: 'forge', sshKeySelection: '/home/local/.ssh/id_rsa'})
         mockReaddir.mockResolvedValue([])
 
-        const {selectApp, promptAppDetails, listGitBranches, defaultProjectPath} = await import('../../../src/application/configuration/service.mjs')
-        const {saveProjectConfig} = await import('../../../src/config/project.mjs')
-        const {generateId} = await import('../../../src/utils/id.mjs')
-        const {promptSshDetails} = await import('../../../src/ssh/keys.mjs')
-        const {runCommandCapture: runCommandCaptureBase} = await import('../../../src/utils/command.mjs')
+        const {selectApp, promptAppDetails, listGitBranches, defaultProjectPath} = await import('#src/application/configuration/service.mjs')
+        const {saveProjectConfig} = await import('#src/config/project.mjs')
+        const {generateId} = await import('#src/utils/id.mjs')
+        const {promptSshDetails} = await import('#src/ssh/keys.mjs')
+        const {runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
 
         const projectConfig = {apps: []}
         const server = {serverName: 'production', serverIp: '203.0.113.10'}
@@ -116,9 +116,9 @@ describe('application/configuration/service', () => {
     it('shows existing applications when apps exist for a server', async () => {
         mockPrompt.mockResolvedValueOnce({selection: 0})
 
-        const {selectApp} = await import('../../../src/application/configuration/service.mjs')
-        const {saveProjectConfig} = await import('../../../src/config/project.mjs')
-        const {generateId} = await import('../../../src/utils/id.mjs')
+        const {selectApp} = await import('#src/application/configuration/service.mjs')
+        const {saveProjectConfig} = await import('#src/config/project.mjs')
+        const {generateId} = await import('#src/utils/id.mjs')
 
         const projectConfig = {
             apps: [

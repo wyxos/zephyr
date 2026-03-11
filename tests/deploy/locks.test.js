@@ -27,7 +27,7 @@ describe('deploy/locks', () => {
   })
 
   it('readRemoteLock returns parsed JSON when lock exists', async () => {
-    const { readRemoteLock } = await import('../../src/deploy/locks.mjs')
+    const { readRemoteLock } = await import('#src/deploy/locks.mjs')
 
     const ssh = {
       execCommand: vi.fn().mockResolvedValue({ code: 0, stdout: '{"user":"alice"}', stderr: '' })
@@ -38,7 +38,7 @@ describe('deploy/locks', () => {
   })
 
   it('readRemoteLock returns null when lock not found marker is returned', async () => {
-    const { readRemoteLock } = await import('../../src/deploy/locks.mjs')
+    const { readRemoteLock } = await import('#src/deploy/locks.mjs')
 
     const ssh = {
       execCommand: vi.fn().mockResolvedValue({ code: 0, stdout: 'LOCK_NOT_FOUND', stderr: '' })
@@ -49,7 +49,7 @@ describe('deploy/locks', () => {
   })
 
   it('compareLocksAndPrompt removes stale remote lock when user confirms', async () => {
-    const { compareLocksAndPrompt } = await import('../../src/deploy/locks.mjs')
+    const { compareLocksAndPrompt } = await import('#src/deploy/locks.mjs')
 
     const lockPayload = {
       user: 'joey',

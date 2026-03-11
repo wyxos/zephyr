@@ -1,101 +1,56 @@
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
-import {tmpdir} from 'node:os'
-import {join} from 'node:path'
+import {beforeEach, describe, expect, it, vi} from 'vitest'
 
 const {
-    mockCommandExists,
-    mockCommitLintingChanges,
+    mockBumpLocalPackageVersion,
     mockEnsureLocalRepositoryState,
-    mockGetPhpVersionRequirement,
-    mockHasPrePushHook,
-    mockHasUncommittedChanges,
-    mockIsLocalLaravelProject,
-    mockRunLinting
+    mockResolveLocalDeploymentContext,
+    mockRunLocalDeploymentChecks
 } = vi.hoisted(() => ({
-    mockCommandExists: vi.fn(),
-    mockCommitLintingChanges: vi.fn(),
+    mockBumpLocalPackageVersion: vi.fn(),
     mockEnsureLocalRepositoryState: vi.fn(),
-    mockGetPhpVersionRequirement: vi.fn(),
-    mockHasPrePushHook: vi.fn(),
-    mockHasUncommittedChanges: vi.fn(),
-    mockIsLocalLaravelProject: vi.fn(),
-    mockRunLinting: vi.fn()
+    mockResolveLocalDeploymentContext: vi.fn(),
+    mockRunLocalDeploymentChecks: vi.fn()
 }))
 
-vi.mock('../../../src/deploy/local-repo.mjs', () => ({
-    ensureLocalRepositoryState: mockEnsureLocalRepositoryState,
-    hasUncommittedChanges: mockHasUncommittedChanges
+vi.mock('#src/deploy/local-repo.mjs', () => ({
+    ensureLocalRepositoryState: mockEnsureLocalRepositoryState
 }))
 
-vi.mock('../../../src/deploy/preflight.mjs', () => ({
-    commitLintingChanges: mockCommitLintingChanges,
-    hasPrePushHook: mockHasPrePushHook,
-    isLocalLaravelProject: mockIsLocalLaravelProject,
-    runLinting: mockRunLinting
+vi.mock('#src/application/deploy/bump-local-package-version.mjs', () => ({
+    bumpLocalPackageVersion: mockBumpLocalPackageVersion
 }))
 
-vi.mock('../../../src/infrastructure/php/version.mjs', () => ({
-    getPhpVersionRequirement: mockGetPhpVersionRequirement
+vi.mock('#src/application/deploy/resolve-local-deployment-context.mjs', () => ({
+    resolveLocalDeploymentContext: mockResolveLocalDeploymentContext
 }))
 
-vi.mock('../../../src/utils/command.mjs', () => ({
-    commandExists: mockCommandExists
+vi.mock('#src/application/deploy/run-local-deployment-checks.mjs', () => ({
+    runLocalDeploymentChecks: mockRunLocalDeploymentChecks
 }))
 
-import {prepareLocalDeployment} from '../../../src/application/deploy/prepare-local-deployment.mjs'
+import {prepareLocalDeployment} from '#src/application/deploy/prepare-local-deployment.mjs'
 
 describe('application/deploy/prepare-local-deployment', () => {
-    let rootDir
-
-    beforeEach(async () => {
-        rootDir = await mkdtemp(join(tmpdir(), 'zephyr-local-deploy-'))
-
-        mockCommandExists.mockReset()
-        mockCommitLintingChanges.mockReset()
+    beforeEach(() => {
+        mockBumpLocalPackageVersion.mockReset()
         mockEnsureLocalRepositoryState.mockReset()
-        mockGetPhpVersionRequirement.mockReset()
-        mockHasPrePushHook.mockReset()
-        mockHasUncommittedChanges.mockReset()
-        mockIsLocalLaravelProject.mockReset()
-        mockRunLinting.mockReset()
+        mockResolveLocalDeploymentContext.mockReset()
+        mockRunLocalDeploymentChecks.mockReset()
 
-        mockCommandExists.mockImplementation((command) => command === 'npm' || command === 'php')
-        mockCommitLintingChanges.mockResolvedValue(undefined)
+        mockBumpLocalPackageVersion.mockResolvedValue(undefined)
         mockEnsureLocalRepositoryState.mockResolvedValue(undefined)
-        mockGetPhpVersionRequirement.mockResolvedValue('8.4.0')
-        mockHasPrePushHook.mockResolvedValue(false)
-        mockHasUncommittedChanges.mockResolvedValue(false)
-        mockIsLocalLaravelProject.mockResolvedValue(true)
-        mockRunLinting.mockResolvedValue(false)
-    })
-
-    afterEach(async () => {
-        await rm(rootDir, {recursive: true, force: true})
-    })
-
-    it('bumps version and runs local checks when deploying a Laravel app without a pre-push hook', async () => {
-        await writeFile(join(rootDir, 'package.json'), JSON.stringify({
-            name: '@wyxos/demo-app',
-            version: '1.0.0'
-        }, null, 2) + '\n')
-
-        mockRunLinting.mockResolvedValue(true)
-        mockHasUncommittedChanges.mockResolvedValue(true)
-
-        const runCommand = vi.fn(async (command, args, options = {}) => {
-            if (command === 'git' && args[0] === 'check-ignore') {
-                throw new Error('not ignored')
-            }
-
-            if (command === 'npm' && args[0] === 'version') {
-                const packagePath = join(options.cwd, 'package.json')
-                const pkg = JSON.parse(await readFile(packagePath, 'utf8'))
-                pkg.version = '1.0.1'
-                await writeFile(packagePath, JSON.stringify(pkg, null, 2) + '\n')
-            }
+        mockResolveLocalDeploymentContext.mockResolvedValue({
+            requiredPhpVersion: '8.4.0',
+            isLaravel: true,
+            hasHook: false
         })
+        mockRunLocalDeploymentChecks.mockResolvedValue(undefined)
+    })
 
+    it('bumps version and delegates local checks for fresh Laravel deployments', async () => {
+        const runCommand = vi.fn()
+        const runCommandCapture = vi.fn()
+        const runPrompt = vi.fn()
         const logProcessing = vi.fn()
         const logSuccess = vi.fn()
         const logWarning = vi.fn()
@@ -103,10 +58,10 @@ describe('application/deploy/prepare-local-deployment', () => {
         const result = await prepareLocalDeployment({
             branch: 'main'
         }, {
-            rootDir,
-            runPrompt: vi.fn(),
+            rootDir: '/repo/demo',
+            runPrompt,
             runCommand,
-            runCommandCapture: vi.fn(),
+            runCommandCapture,
             logProcessing,
             logSuccess,
             logWarning
@@ -117,47 +72,47 @@ describe('application/deploy/prepare-local-deployment', () => {
             isLaravel: true,
             hasHook: false
         })
-        expect(mockEnsureLocalRepositoryState).toHaveBeenCalledWith('main', rootDir, expect.objectContaining({
+        expect(mockResolveLocalDeploymentContext).toHaveBeenCalledWith('/repo/demo')
+        expect(mockBumpLocalPackageVersion).toHaveBeenCalledWith('/repo/demo', {
+            versionArg: null,
             runCommand,
             logProcessing,
             logSuccess,
             logWarning
-        }))
-        expect(mockRunLinting).toHaveBeenCalledWith(rootDir, expect.objectContaining({
+        })
+        expect(mockEnsureLocalRepositoryState).toHaveBeenCalledWith('main', '/repo/demo', expect.objectContaining({
+            runPrompt,
             runCommand,
+            runCommandCapture,
             logProcessing,
             logSuccess,
-            logWarning,
-            commandExists: mockCommandExists
+            logWarning
         }))
-        expect(mockCommitLintingChanges).toHaveBeenCalled()
-        expect(runCommand).toHaveBeenCalledWith('npm', ['version', 'patch', '--no-git-tag-version', '--force'], {cwd: rootDir})
-        expect(runCommand).toHaveBeenCalledWith('git', ['add', 'package.json'], {cwd: rootDir})
-        expect(runCommand).toHaveBeenCalledWith(
-            'git',
-            ['commit', '-m', 'chore: bump version to 1.0.1', '--', 'package.json'],
-            {cwd: rootDir}
-        )
-        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: rootDir})
-        expect(logSuccess).toHaveBeenCalledWith('Version updated to 1.0.1.')
-        expect(logSuccess).toHaveBeenCalledWith('Local tests passed.')
+        expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            hasHook: false,
+            runCommand,
+            runCommandCapture,
+            logProcessing,
+            logSuccess,
+            logWarning
+        })
     })
 
-    it('skips version, lint, and local tests when resuming with a pre-push hook present', async () => {
-        mockHasPrePushHook.mockResolvedValue(true)
-
+    it('skips version bump when resuming from a snapshot', async () => {
         const runCommand = vi.fn()
-        const logProcessing = vi.fn()
+        const runCommandCapture = vi.fn()
 
         const result = await prepareLocalDeployment({
             branch: 'main'
         }, {
             snapshot: {changedFiles: ['composer.json']},
-            rootDir,
+            rootDir: '/repo/demo',
             runPrompt: vi.fn(),
             runCommand,
-            runCommandCapture: vi.fn(),
-            logProcessing,
+            runCommandCapture,
+            logProcessing: vi.fn(),
             logSuccess: vi.fn(),
             logWarning: vi.fn()
         })
@@ -165,11 +120,45 @@ describe('application/deploy/prepare-local-deployment', () => {
         expect(result).toEqual({
             requiredPhpVersion: '8.4.0',
             isLaravel: true,
-            hasHook: true
+            hasHook: false
         })
-        expect(runCommand).not.toHaveBeenCalled()
-        expect(mockRunLinting).not.toHaveBeenCalled()
-        expect(mockCommitLintingChanges).not.toHaveBeenCalled()
-        expect(logProcessing).toHaveBeenCalledWith('Pre-push git hook detected. Skipping local linting and test execution.')
+        expect(mockBumpLocalPackageVersion).not.toHaveBeenCalled()
+        expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            hasHook: false,
+            runCommand,
+            runCommandCapture
+        }))
+    })
+
+    it('skips version bump for non-Laravel projects', async () => {
+        mockResolveLocalDeploymentContext.mockResolvedValue({
+            requiredPhpVersion: null,
+            isLaravel: false,
+            hasHook: false
+        })
+
+        const result = await prepareLocalDeployment({
+            branch: 'main'
+        }, {
+            rootDir: '/repo/demo',
+            runPrompt: vi.fn(),
+            runCommand: vi.fn(),
+            runCommandCapture: vi.fn(),
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })
+
+        expect(result).toEqual({
+            requiredPhpVersion: null,
+            isLaravel: false,
+            hasHook: false
+        })
+        expect(mockBumpLocalPackageVersion).not.toHaveBeenCalled()
+        expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
+            isLaravel: false
+        }))
     })
 })

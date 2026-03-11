@@ -55,7 +55,7 @@ describe('command spawning behavior', () => {
 
     spawnCalls.length = 0
 
-    const { runCommand, runCommandCapture } = await import('../../src/utils/command.mjs')
+    const { runCommand, runCommandCapture } = await import('#src/utils/command.mjs')
 
     await runCommand('npm', ['--version'])
     await runCommandCapture('npm', ['--version'])
@@ -81,7 +81,7 @@ describe('command spawning behavior', () => {
   it('uses spawn(command, args, options) for non-shim commands (git)', async () => {
     spawnCalls.length = 0
 
-    const { runCommand, runCommandCapture } = await import('../../src/utils/command.mjs')
+    const { runCommand, runCommandCapture } = await import('#src/utils/command.mjs')
 
     await runCommand('git', ['--version'])
     await runCommandCapture('git', ['--version'])

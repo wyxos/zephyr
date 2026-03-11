@@ -5,7 +5,7 @@ import {
     mockWriteFile,
     setupRuntimeTestEnv,
     teardownRuntimeTestEnv
-} from '../helpers/runtime-test-env.mjs'
+} from '#tests/helpers/runtime-test-env.mjs'
 
 describe('config/project', () => {
     beforeEach(() => {
@@ -30,7 +30,7 @@ describe('config/project', () => {
             })
         )
 
-        const {loadProjectConfig} = await import('../../src/config/project.mjs')
+        const {loadProjectConfig} = await import('#src/config/project.mjs')
         const config = await loadProjectConfig(process.cwd())
 
         expect(config.presets).toHaveLength(1)
@@ -47,7 +47,7 @@ describe('config/project', () => {
             })
         )
 
-        const {loadProjectConfig, saveProjectConfig} = await import('../../src/config/project.mjs')
+        const {loadProjectConfig, saveProjectConfig} = await import('#src/config/project.mjs')
         const config = await loadProjectConfig(process.cwd())
         config.presets.push({
             name: 'staging',
@@ -69,7 +69,7 @@ describe('config/project', () => {
     })
 
     it('removes a preset from project config when requested', async () => {
-        const {removePreset} = await import('../../src/config/project.mjs')
+        const {removePreset} = await import('#src/config/project.mjs')
 
         const presetToRemove = {
             name: 'legacy-invalid',
