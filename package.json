@@ -6,6 +6,7 @@
   "main": "./src/index.mjs",
   "exports": {
     ".": "./src/index.mjs",
+    "./targets": "./src/targets/index.mjs",
     "./ssh": "./src/ssh/index.mjs"
   },
   "bin": {
