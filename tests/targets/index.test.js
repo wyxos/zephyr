@@ -10,15 +10,15 @@ const {
     mockSelectDeploymentTargetImpl: vi.fn()
 }))
 
-vi.mock('../src/runtime/app-context.mjs', () => ({
+vi.mock('../../src/runtime/app-context.mjs', () => ({
     createAppContext: mockCreateAppContext
 }))
 
-vi.mock('../src/application/configuration/service.mjs', () => ({
+vi.mock('../../src/application/configuration/service.mjs', () => ({
     createConfigurationService: mockCreateConfigurationService
 }))
 
-vi.mock('../src/application/configuration/select-deployment-target.mjs', () => ({
+vi.mock('../../src/application/configuration/select-deployment-target.mjs', () => ({
     selectDeploymentTarget: mockSelectDeploymentTargetImpl
 }))
 
@@ -54,7 +54,7 @@ describe('targets public API', () => {
 
         mockSelectDeploymentTargetImpl.mockResolvedValue(selection)
 
-        const {selectDeploymentTarget} = await import('../src/targets/index.mjs')
+        const {selectDeploymentTarget} = await import('../../src/targets/index.mjs')
         const result = await selectDeploymentTarget({rootDir: '/workspace/project'})
 
         expect(result).toBe(selection)

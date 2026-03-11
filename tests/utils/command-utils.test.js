@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveCommandForPlatform } from '../src/utils/command.mjs'
+import { resolveCommandForPlatform } from '../../src/utils/command.mjs'
 
 describe('command utils', () => {
   it('resolves npm/npx to .cmd on Windows', () => {
@@ -14,4 +14,3 @@ describe('command utils', () => {
     expect(resolveCommandForPlatform('php', { isWindows: false })).toBe('php')
   })
 })
-

@@ -5,7 +5,7 @@ describe('ssh remote path normalization', () => {
     const execCommand = vi.fn().mockResolvedValue({ code: 0, stdout: 'OK', stderr: '' })
     const ssh = { execCommand }
 
-    const { readRemoteFile } = await import('../src/ssh/ssh.mjs')
+    const { readRemoteFile } = await import('../../src/ssh/ssh.mjs')
 
     const out = await readRemoteFile(ssh, '\\home\\wyxos\\webapps\\atlas\\.env', '\\home\\wyxos\\webapps\\atlas')
 
@@ -20,7 +20,7 @@ describe('ssh remote path normalization', () => {
     const execCommand = vi.fn().mockResolvedValue({ code: 0, stdout: '', stderr: '' })
     const ssh = { execCommand }
 
-    const { deleteRemoteFile } = await import('../src/ssh/ssh.mjs')
+    const { deleteRemoteFile } = await import('../../src/ssh/ssh.mjs')
 
     await deleteRemoteFile(ssh, '\\home\\wyxos\\webapps\\atlas\\dump.sql', '\\home\\wyxos\\webapps\\atlas')
 
@@ -34,7 +34,7 @@ describe('ssh remote path normalization', () => {
     const getFile = vi.fn().mockResolvedValue(undefined)
     const ssh = { getFile }
 
-    const { downloadRemoteFile } = await import('../src/ssh/ssh.mjs')
+    const { downloadRemoteFile } = await import('../../src/ssh/ssh.mjs')
 
     const originalWrite = process.stdout.write
     process.stdout.write = vi.fn()
@@ -55,4 +55,3 @@ describe('ssh remote path normalization', () => {
     expect(remotePath).toBe('/home/wyxos/webapps/atlas/storage/app/temporary/dump.sql')
   }, 15000)
 })
-
