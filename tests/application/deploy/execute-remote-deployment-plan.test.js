@@ -25,6 +25,7 @@ describe('application/deploy/execute-remote-deployment-plan', () => {
 
     it('persists and clears pending snapshots around a useful remote plan', async () => {
         const executeRemote = vi.fn(async () => ({stdout: ''}))
+        const logProcessing = vi.fn()
         const pendingSnapshot = {
             serverName: 'production',
             branch: 'main',
@@ -42,10 +43,13 @@ describe('application/deploy/execute-remote-deployment-plan', () => {
             ],
             usefulSteps: true,
             pendingSnapshot,
-            logProcessing: vi.fn()
+            logProcessing
         })
 
         expect(mockSavePendingTasksSnapshot).toHaveBeenCalledWith('/workspace/demo', pendingSnapshot)
+        expect(logProcessing).toHaveBeenCalledWith(
+            'Additional tasks scheduled:\n - Install Composer dependencies'
+        )
         expect(executeRemote.mock.calls[0][0]).toBe('Record pending deployment tasks')
         expect(executeRemote.mock.calls[1]).toEqual(['Pull latest changes for main', 'git pull origin main'])
         expect(executeRemote.mock.calls[2]).toEqual(['Install Composer dependencies', 'composer install'])

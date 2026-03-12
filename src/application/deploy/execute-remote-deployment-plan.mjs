@@ -20,10 +20,10 @@ function logScheduledTasks(steps, {logProcessing} = {}) {
 
     const extraTasks = steps
         .slice(1)
-        .map((step) => step.label)
-        .join(', ')
+        .map((step) => ` - ${step.label}`)
+        .join('\n')
 
-    logProcessing?.(`Additional tasks scheduled: ${extraTasks}`)
+    logProcessing?.(`Additional tasks scheduled:\n${extraTasks}`)
 }
 
 export async function executeRemoteDeploymentPlan({
