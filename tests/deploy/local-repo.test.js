@@ -17,6 +17,19 @@ describe('deploy/local-repo', () => {
         teardownRuntimeTestEnv()
     })
 
+    it('preserves leading spaces in porcelain output so unstaged changes stay unstaged', async () => {
+        queueSpawnResponse({stdout: ' M file.php\n'})
+
+        const {getGitStatus} = await import('#src/deploy/local-repo.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
+        const {runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
+
+        const status = await getGitStatus(process.cwd(), {runCommandCapture})
+
+        expect(status).toBe(' M file.php')
+    })
+
     it('switches to the target branch when clean', async () => {
         queueSpawnResponse({stdout: 'develop\n'})
         queueSpawnResponse({stdout: ''})
@@ -85,9 +98,49 @@ describe('deploy/local-repo', () => {
         }).rejects.toThrow(/uncommitted changes/)
     })
 
-    it('commits and pushes pending changes on the target branch', async () => {
+    it('ignores unstaged-only changes on the target branch', async () => {
         queueSpawnResponse({stdout: 'main\n'})
         queueSpawnResponse({stdout: ' M file.php\n'})
+
+        const ensureCommittedChangesPushed = async () => ({pushed: false, upstreamRef: 'origin/main'})
+
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
+        const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
+
+        await ensureLocalRepositoryState('main', process.cwd(), {
+            runPrompt: mockPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing: () => {
+            },
+            logSuccess: () => {
+            },
+            logWarning: () => {
+            },
+            readUpstreamSyncState: async () => ({
+                upstreamRef: 'origin/main',
+                remoteName: 'origin',
+                upstreamBranch: 'main',
+                remoteExists: true,
+                aheadCount: 0,
+                behindCount: 0
+            }),
+            ensureCommittedChangesPushed
+        })
+
+        expect(mockPrompt).not.toHaveBeenCalled()
+        expect(
+            mockSpawn.mock.calls.some(
+                ([command, args]) => command === 'git' && args[0] === 'commit'
+            )
+        ).toBe(false)
+    })
+
+    it('commits and pushes staged changes on the target branch', async () => {
+        queueSpawnResponse({stdout: 'main\n'})
+        queueSpawnResponse({stdout: 'M  file.php\n'})
         queueSpawnResponse({})
         queueSpawnResponse({})
 
@@ -119,11 +172,6 @@ describe('deploy/local-repo', () => {
         })
 
         expect(mockPrompt).toHaveBeenCalledTimes(1)
-        expect(
-            mockSpawn.mock.calls.some(
-                ([command, args]) => command === 'git' && args[0] === 'commit'
-            )
-        ).toBe(true)
         expect(
             mockSpawn.mock.calls.some(
                 ([command, args]) => command === 'git' && args[0] === 'push' && args.includes('main')

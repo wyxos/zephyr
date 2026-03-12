@@ -12,8 +12,11 @@ const program = new Command()
 program
   .name('zephyr')
   .description('A streamlined deployment tool for web applications with intelligent Laravel project detection')
-  .option('--type <type>', 'Release type (node|vue|packagist)')
-  .argument('[version]', 'Version or npm bump type (e.g. 1.2.3, patch, minor, major)')
+  .option('--type <type>', 'Workflow type (node|vue|packagist). Omit for normal app deployments.')
+  .argument(
+    '[version]',
+    'Version or npm bump type for deployments (e.g. 1.2.3, patch, minor, major). --type node/vue/packagist workflows accept bump types only and default to patch.'
+  )
 
 program.parse(process.argv)
 const options = program.opts()
