@@ -112,6 +112,7 @@ describe('release application actions', () => {
             ['git', 'status', '--porcelain'],
             ['npm', 'version', 'patch'],
             ['git', 'commit', '--amend', '-m', 'chore: release 1.0.1'],
+            ['git', 'tag', '-fa', 'v1.0.1', '-m', 'v1.0.1'],
             ['git', 'push', '--follow-tags']
         ])
 
@@ -242,6 +243,7 @@ describe('release application actions', () => {
             {command: 'git', args: ['stash', 'push', '-u', '-m', 'temp: lib build artifacts', 'lib/'], options: {capture: true, cwd: rootDir}},
             {command: 'git', args: ['stash', 'pop'], options: {capture: true, cwd: rootDir}},
             {command: 'git', args: ['commit', '--amend', '--no-edit'], options: {capture: true, cwd: rootDir}},
+            {command: 'git', args: ['tag', '-fa', 'v1.0.1', '-m', 'v1.0.1'], options: {capture: true, cwd: rootDir}},
             {command: 'npm', args: ['run', 'build'], options: {cwd: rootDir}},
             {command: 'git', args: ['push', '--follow-tags'], options: {capture: true, cwd: rootDir}},
             {command: 'git', args: ['worktree', 'remove', worktreeDir, '-f'], options: {capture: true, cwd: rootDir}},
