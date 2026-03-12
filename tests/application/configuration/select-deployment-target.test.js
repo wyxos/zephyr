@@ -146,7 +146,9 @@ describe('selectDeploymentTarget', () => {
     expect(mockSaveProjectConfig).toHaveBeenCalledWith('/workspace/project', projectConfig)
     expect(configurationService.selectServer).toHaveBeenCalledWith([server])
     expect(configurationService.selectApp).toHaveBeenCalledWith(projectConfig, server, '/workspace/project')
-    expect(logWarning).toHaveBeenCalledWith('Preset references app configuration that no longer exists. Creating new configuration.')
+    expect(logWarning).toHaveBeenCalledWith(
+      'Preset references an application that no longer exists. Creating a new configuration instead.'
+    )
     expect(logWarning).toHaveBeenCalledWith('Removed "Broken preset" from .zephyr/config.json because it is invalid.')
   })
 })

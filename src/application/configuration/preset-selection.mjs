@@ -40,7 +40,7 @@ export async function selectPreset({
     choices.push(
         new inquirer.Separator(),
         {
-            name: '➕ Create new preset',
+            name: '➕ Create a new preset',
             value: 'create'
         }
     )
@@ -49,7 +49,7 @@ export async function selectPreset({
         {
             type: 'list',
             name: 'selection',
-            message: 'Select preset or create new',
+            message: 'Select a preset',
             choices,
             default: 0
         }

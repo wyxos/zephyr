@@ -32,6 +32,163 @@ export async function getUpstreamRef(rootDir) {
   return await getUpstreamRefImpl(rootDir)
 }
 
+function parseUpstreamRef(upstreamRef) {
+  const [remoteName, ...upstreamParts] = upstreamRef.split('/')
+  const upstreamBranch = upstreamParts.join('/')
+
+  return { remoteName, upstreamBranch }
+}
+
+async function fetchRemote(remoteName, rootDir, { runCommand, logWarning } = {}) {
+  try {
+    await runCommand('git', ['fetch', remoteName], { cwd: rootDir, silent: true })
+  } catch (error) {
+    logWarning?.(`Unable to fetch from ${remoteName} before comparing branch state: ${error.message}`)
+  }
+}
+
+async function remoteRefExists(upstreamRef, rootDir, { runCommand } = {}) {
+  try {
+    await runCommand('git', ['show-ref', '--verify', '--quiet', `refs/remotes/${upstreamRef}`], {
+      cwd: rootDir,
+      silent: true
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function readRelativeCommitCounts(upstreamRef, rootDir, { runCommandCapture } = {}) {
+  const aheadOutput = await runCommandCapture('git', ['rev-list', '--count', `${upstreamRef}..HEAD`], { cwd: rootDir })
+  const behindOutput = await runCommandCapture('git', ['rev-list', '--count', `HEAD..${upstreamRef}`], { cwd: rootDir })
+
+  return {
+    aheadCount: parseInt(aheadOutput.trim() || '0', 10),
+    behindCount: parseInt(behindOutput.trim() || '0', 10)
+  }
+}
+
+async function readUpstreamSyncState(targetBranch, rootDir, {
+  runCommand,
+  runCommandCapture,
+  logWarning,
+  getUpstreamRef: getUpstreamRefFn = getUpstreamRef
+} = {}) {
+  const upstreamRef = await getUpstreamRefFn(rootDir)
+
+  if (!upstreamRef) {
+    logWarning?.(`Branch ${targetBranch} does not track a remote upstream; skipping automatic push of committed changes.`)
+    return {
+      upstreamRef: null,
+      remoteName: null,
+      upstreamBranch: null,
+      remoteExists: false,
+      aheadCount: 0,
+      behindCount: 0
+    }
+  }
+
+  const { remoteName, upstreamBranch } = parseUpstreamRef(upstreamRef)
+
+  if (!remoteName || !upstreamBranch) {
+    logWarning?.(`Unable to determine remote destination for ${targetBranch}. Skipping automatic push.`)
+    return {
+      upstreamRef,
+      remoteName: null,
+      upstreamBranch: null,
+      remoteExists: false,
+      aheadCount: 0,
+      behindCount: 0
+    }
+  }
+
+  await fetchRemote(remoteName, rootDir, { runCommand, logWarning })
+
+  const exists = await remoteRefExists(upstreamRef, rootDir, { runCommand })
+
+  if (!exists) {
+    return {
+      upstreamRef,
+      remoteName,
+      upstreamBranch,
+      remoteExists: false,
+      aheadCount: 0,
+      behindCount: 0
+    }
+  }
+
+  const { aheadCount, behindCount } = await readRelativeCommitCounts(upstreamRef, rootDir, { runCommandCapture })
+
+  return {
+    upstreamRef,
+    remoteName,
+    upstreamBranch,
+    remoteExists: true,
+    aheadCount,
+    behindCount
+  }
+}
+
+async function checkoutTargetBranch(targetBranch, currentBranch, rootDir, {
+  hasPendingChanges,
+  runCommand,
+  logProcessing,
+  logSuccess
+} = {}) {
+  if (currentBranch === targetBranch) {
+    return
+  }
+
+  if (hasPendingChanges) {
+    throw new Error(
+      `Local repository has uncommitted changes on ${currentBranch}. Commit or stash them before switching to ${targetBranch}.`
+    )
+  }
+
+  logProcessing?.(`Switching local repository from ${currentBranch} to ${targetBranch}...`)
+
+  try {
+    await runCommand('git', ['checkout', targetBranch], { cwd: rootDir })
+  } catch (error) {
+    throw new Error(
+      `Unable to check out ${targetBranch}. Make sure the branch exists locally or fetch it before deploying.\n${error.message}`
+    )
+  }
+
+  logSuccess?.(`Checked out ${targetBranch} locally.`)
+}
+
+async function commitAndPushStagedChanges(targetBranch, rootDir, {
+  runPrompt,
+  runCommand,
+  getGitStatus,
+  logProcessing,
+  logSuccess
+} = {}) {
+  const { commitMessage } = await runPrompt([
+    {
+      type: 'input',
+      name: 'commitMessage',
+      message: 'Enter a commit message for pending changes before deployment',
+      validate: (value) => (value && value.trim().length > 0 ? true : 'Commit message cannot be empty.')
+    }
+  ])
+
+  const message = commitMessage.trim()
+
+  logProcessing?.('Committing staged changes before deployment...')
+  await runCommand('git', ['commit', '-m', message], { cwd: rootDir })
+  await runCommand('git', ['push', 'origin', targetBranch], { cwd: rootDir })
+  logSuccess?.(`Committed and pushed changes to origin/${targetBranch}.`)
+
+  const finalStatus = await getGitStatus(rootDir)
+
+  if (finalStatus.length > 0) {
+    throw new Error('Local repository still has uncommitted changes after commit. Aborting deployment.')
+  }
+}
+
 export async function ensureCommittedChangesPushed(targetBranch, rootDir, {
   runCommand,
   runCommandCapture,
@@ -40,50 +197,30 @@ export async function ensureCommittedChangesPushed(targetBranch, rootDir, {
   logWarning,
   getUpstreamRef: getUpstreamRefFn = getUpstreamRef
 } = {}) {
-  const upstreamRef = await getUpstreamRefFn(rootDir)
+  const syncState = await readUpstreamSyncState(targetBranch, rootDir, {
+    runCommand,
+    runCommandCapture,
+    logWarning,
+    getUpstreamRef: getUpstreamRefFn
+  })
+
+  const {
+    upstreamRef,
+    remoteName,
+    upstreamBranch,
+    remoteExists,
+    behindCount
+  } = syncState
 
   if (!upstreamRef) {
-    logWarning?.(`Branch ${targetBranch} does not track a remote upstream; skipping automatic push of committed changes.`)
     return { pushed: false, upstreamRef: null }
   }
 
-  const [remoteName, ...upstreamParts] = upstreamRef.split('/')
-  const upstreamBranch = upstreamParts.join('/')
-
   if (!remoteName || !upstreamBranch) {
-    logWarning?.(`Unable to determine remote destination for ${targetBranch}. Skipping automatic push.`)
     return { pushed: false, upstreamRef }
   }
 
-  try {
-    await runCommand('git', ['fetch', remoteName], { cwd: rootDir, silent: true })
-  } catch (error) {
-    logWarning?.(`Unable to fetch from ${remoteName} before push: ${error.message}`)
-  }
-
-  let remoteExists = true
-
-  try {
-    await runCommand('git', ['show-ref', '--verify', '--quiet', `refs/remotes/${upstreamRef}`], {
-      cwd: rootDir,
-      silent: true
-    })
-  } catch {
-    remoteExists = false
-  }
-
-  let aheadCount = 0
-  let behindCount = 0
-
-  if (remoteExists) {
-    const aheadOutput = await runCommandCapture('git', ['rev-list', '--count', `${upstreamRef}..HEAD`], { cwd: rootDir })
-    aheadCount = parseInt(aheadOutput.trim() || '0', 10)
-
-    const behindOutput = await runCommandCapture('git', ['rev-list', '--count', `HEAD..${upstreamRef}`], { cwd: rootDir })
-    behindCount = parseInt(behindOutput.trim() || '0', 10)
-  } else {
-    aheadCount = 1
-  }
+  const aheadCount = remoteExists ? syncState.aheadCount : 1
 
   if (Number.isFinite(behindCount) && behindCount > 0) {
     throw new Error(
@@ -113,6 +250,12 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
   logWarning,
   getCurrentBranch: getCurrentBranchFn = getCurrentBranch,
   getGitStatus: getGitStatusFn = (dir) => getGitStatus(dir, { runCommandCapture }),
+  readUpstreamSyncState: readUpstreamSyncStateFn = (branch, dir) =>
+    readUpstreamSyncState(branch, dir, {
+      runCommand,
+      runCommandCapture,
+      logWarning
+    }),
   ensureCommittedChangesPushed: ensureCommittedChangesPushedFn = (branch, dir) =>
     ensureCommittedChangesPushed(branch, dir, {
       runCommand,
@@ -132,16 +275,14 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
     throw new Error('Unable to determine the current git branch. Ensure this is a git repository.')
   }
 
+  if (currentBranch === 'HEAD') {
+    throw new Error('Local repository is in detached HEAD state. Check out the deployment branch before deploying.')
+  }
+
   const initialStatus = await getGitStatusFn(rootDir)
   const hasPendingChanges = initialStatus.length > 0
 
-  const statusReport = await runCommandCapture('git', ['status', '--short', '--branch'], { cwd: rootDir })
-  const lines = statusReport.split(/\r?\n/)
-  const branchLine = lines[0] || ''
-  const aheadMatch = branchLine.match(/ahead (\d+)/)
-  const behindMatch = branchLine.match(/behind (\d+)/)
-  const aheadCount = aheadMatch ? parseInt(aheadMatch[1], 10) : 0
-  const behindCount = behindMatch ? parseInt(behindMatch[1], 10) : 0
+  const { aheadCount, behindCount } = await readUpstreamSyncStateFn(currentBranch, rootDir)
 
   if (aheadCount > 0) {
     logWarning?.(`Local branch ${currentBranch} is ahead of upstream by ${aheadCount} commit${aheadCount === 1 ? '' : 's'}.`)
@@ -159,17 +300,12 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
     }
   }
 
-  if (currentBranch !== targetBranch) {
-    if (hasPendingChanges) {
-      throw new Error(
-        `Local repository has uncommitted changes on ${currentBranch}. Commit or stash them before switching to ${targetBranch}.`
-      )
-    }
-
-    logProcessing?.(`Switching local repository from ${currentBranch} to ${targetBranch}...`)
-    await runCommand('git', ['checkout', targetBranch], { cwd: rootDir })
-    logSuccess?.(`Checked out ${targetBranch} locally.`)
-  }
+  await checkoutTargetBranch(targetBranch, currentBranch, rootDir, {
+    hasPendingChanges,
+    runCommand,
+    logProcessing,
+    logSuccess
+  })
 
   const statusAfterCheckout = currentBranch === targetBranch ? initialStatus : await getGitStatusFn(rootDir)
 
@@ -186,30 +322,14 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
   }
 
   logWarning?.(`Staged changes detected on ${targetBranch}. A commit is required before deployment.`)
-
-  const { commitMessage } = await runPrompt([
-    {
-      type: 'input',
-      name: 'commitMessage',
-      message: 'Enter a commit message for pending changes before deployment',
-      validate: (value) => (value && value.trim().length > 0 ? true : 'Commit message cannot be empty.')
-    }
-  ])
-
-  const message = commitMessage.trim()
-
-  logProcessing?.('Committing staged changes before deployment...')
-  await runCommand('git', ['commit', '-m', message], { cwd: rootDir })
-  await runCommand('git', ['push', 'origin', targetBranch], { cwd: rootDir })
-  logSuccess?.(`Committed and pushed changes to origin/${targetBranch}.`)
-
-  const finalStatus = await getGitStatusFn(rootDir)
-
-  if (finalStatus.length > 0) {
-    throw new Error('Local repository still has uncommitted changes after commit. Aborting deployment.')
-  }
+  await commitAndPushStagedChanges(targetBranch, rootDir, {
+    runPrompt,
+    runCommand,
+    getGitStatus: getGitStatusFn,
+    logProcessing,
+    logSuccess
+  })
 
   await ensureCommittedChangesPushedFn(targetBranch, rootDir)
   logProcessing?.('Local repository is clean after committing pending changes.')
 }
-

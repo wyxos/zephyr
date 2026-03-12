@@ -171,7 +171,7 @@ describe('application/configuration/service', () => {
         expect(mockPrompt).toHaveBeenCalledWith(
             expect.arrayContaining([
                 expect.objectContaining({
-                    message: 'Select application for production',
+                    message: 'Select an application for production',
                     choices: expect.arrayContaining([
                         expect.objectContaining({name: '~/webapps/app1 (main)'}),
                         expect.objectContaining({name: '~/webapps/app2 (develop)'})

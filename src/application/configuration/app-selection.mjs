@@ -30,7 +30,7 @@ export async function selectApp({
             }
         }
 
-        logProcessing?.(`No applications configured for ${server.serverName}. Let's create one.`)
+        logProcessing?.(`No applications are configured for ${server.serverName}. Creating one now.`)
         const appDetails = await promptAppDetails(currentDir)
         const appConfig = {
             id: createId(),
@@ -53,7 +53,7 @@ export async function selectApp({
     choices.push(
         new inquirer.Separator(),
         {
-            name: '➕ Configure new application for this server',
+            name: '➕ Create a new application for this server',
             value: 'create'
         }
     )
@@ -62,7 +62,7 @@ export async function selectApp({
         {
             type: 'list',
             name: 'selection',
-            message: `Select application for ${server.serverName}`,
+            message: `Select an application for ${server.serverName}`,
             choices,
             default: 0
         }
