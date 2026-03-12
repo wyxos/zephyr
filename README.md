@@ -19,6 +19,12 @@ npx @wyxos/zephyr
 Navigate to your project directory and run:
 
 ```bash
+npm run release
+```
+
+Or invoke Zephyr directly:
+
+```bash
 zephyr
 ```
 
@@ -35,6 +41,11 @@ Common flags:
 zephyr --type node
 ```
 
+On a first run inside a project with `package.json`, Zephyr can:
+- add `.zephyr/` to `.gitignore`
+- add a `release` script that runs `npx @wyxos/zephyr@latest`
+- create global server config and per-project deployment config interactively
+
 Follow the interactive prompts to configure your deployment target:
 - Server name and IP address
 - Project path on the remote server
@@ -42,6 +53,48 @@ Follow the interactive prompts to configure your deployment target:
 - SSH user and private key
 
 Configuration is saved automatically for future deployments.
+
+## Scripts
+
+Zephyr exposes the following common project workflow:
+
+```bash
+npm run lint
+npm test
+npm run release
+```
+
+- `npm run lint` runs `eslint . --fix`, so it can rewrite tracked files when auto-fixes are available.
+- `npm test` runs the Vitest suite.
+- `npm run release` is the recommended project entrypoint once the release script has been installed.
+
+## Package API
+
+The package surface is intentionally small:
+
+```js
+import {
+  logProcessing,
+  logSuccess,
+  logWarning,
+  logError,
+  runCommand,
+  runCommandCapture,
+  writeToLogFile
+} from '@wyxos/zephyr'
+
+import {selectDeploymentTarget} from '@wyxos/zephyr/targets'
+
+import {
+  connectToServer,
+  executeRemoteCommand,
+  readRemoteFile,
+  downloadRemoteFile,
+  deleteRemoteFile
+} from '@wyxos/zephyr/ssh'
+```
+
+The root package does not expose the old interactive configuration helper bag; target selection now lives under `@wyxos/zephyr/targets`.
 
 ## Features
 
