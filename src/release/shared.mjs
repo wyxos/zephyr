@@ -29,7 +29,23 @@ export function parseReleaseArgs({
   args = process.argv.slice(2),
   booleanFlags = []
 } = {}) {
-  const filteredArgs = args.filter((arg) => !arg.startsWith('--type='))
+  const filteredArgs = []
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+
+    if (arg === '--type') {
+      index += 1
+      continue
+    }
+
+    if (arg.startsWith('--type=')) {
+      continue
+    }
+
+    filteredArgs.push(arg)
+  }
+
   const positionals = filteredArgs.filter((arg) => !arg.startsWith('--'))
   const presentFlags = new Set(filteredArgs.filter((arg) => arg.startsWith('--')))
   const releaseType = positionals[0] ?? 'patch'

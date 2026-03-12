@@ -16,7 +16,7 @@ npx @wyxos/zephyr
 
 ## Usage
 
-Navigate to your project directory and run:
+Navigate to your app or package directory and run:
 
 ```bash
 npm run release
@@ -34,12 +34,26 @@ See all flags:
 zephyr --help
 ```
 
-Common flags:
+Common workflows:
 
 ```bash
-# Run a release workflow
+# Deploy an app using the saved preset or the interactive prompts
+zephyr
+
+# Deploy an app and bump the local npm package version first
+zephyr minor
+
+# Release a Node/Vue package (defaults to a patch bump)
 zephyr --type node
+
+# Release a Node/Vue package with an explicit bump
+zephyr --type node minor
+
+# Release a Packagist package
+zephyr --type packagist patch
 ```
+
+When `--type node` or `--type vue` is used without a bump argument, Zephyr defaults to `patch`.
 
 On a first run inside a project with `package.json`, Zephyr can:
 - add `.zephyr/` to `.gitignore`
@@ -54,47 +68,17 @@ Follow the interactive prompts to configure your deployment target:
 
 Configuration is saved automatically for future deployments.
 
-## Scripts
+## Project Scripts
 
-Zephyr exposes the following common project workflow:
+The recommended entrypoint in consumer projects is:
 
 ```bash
-npm run lint
-npm test
 npm run release
 ```
 
-- `npm run lint` runs `eslint . --fix`, so it can rewrite tracked files when auto-fixes are available.
-- `npm test` runs the Vitest suite.
-- `npm run release` is the recommended project entrypoint once the release script has been installed.
-
-## Package API
-
-The package surface is intentionally small:
-
-```js
-import {
-  logProcessing,
-  logSuccess,
-  logWarning,
-  logError,
-  runCommand,
-  runCommandCapture,
-  writeToLogFile
-} from '@wyxos/zephyr'
-
-import {selectDeploymentTarget} from '@wyxos/zephyr/targets'
-
-import {
-  connectToServer,
-  executeRemoteCommand,
-  readRemoteFile,
-  downloadRemoteFile,
-  deleteRemoteFile
-} from '@wyxos/zephyr/ssh'
-```
-
-The root package does not expose the old interactive configuration helper bag; target selection now lives under `@wyxos/zephyr/targets`.
+- `npm run release` is the recommended app/package entrypoint once the release script has been installed.
+- For `--type node` workflows, Zephyr runs your project's `lint` script when present.
+- For `--type node` workflows, Zephyr runs `test:run` or `test` when present.
 
 ## Features
 

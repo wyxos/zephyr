@@ -7,7 +7,7 @@ export async function getCurrentBranch(rootDir) {
 
 export async function getGitStatus(rootDir, { runCommandCapture } = {}) {
   const output = await runCommandCapture('git', ['status', '--porcelain'], { cwd: rootDir })
-  return output.trim()
+  return output.trimEnd()
 }
 
 export function hasStagedChanges(statusOutput) {

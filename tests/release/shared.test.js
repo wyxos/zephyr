@@ -48,6 +48,20 @@ describe('release shared helpers', () => {
         })
     })
 
+    it('ignores both equals and spaced --type forms before reading the release bump', () => {
+        expect(parseReleaseArgs({
+            args: ['--type=node', 'minor']
+        })).toEqual({releaseType: 'minor'})
+
+        expect(parseReleaseArgs({
+            args: ['--type', 'node', 'minor']
+        })).toEqual({releaseType: 'minor'})
+
+        expect(parseReleaseArgs({
+            args: ['--type', 'packagist']
+        })).toEqual({releaseType: 'patch'})
+    })
+
     it('throws for invalid release types', () => {
         expect(() => parseReleaseArgs({args: ['banana']})).toThrow(/Invalid release type/)
     })
