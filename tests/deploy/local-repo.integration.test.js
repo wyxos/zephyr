@@ -169,4 +169,35 @@ describe('deploy/local-repo integration', () => {
             })
         }).rejects.toThrow(/Unable to fast-forward main with upstream changes/)
     }, 30000)
+
+    it('commits and pushes staged tracked changes to the remote branch', async () => {
+        const {localDir, remoteDir} = await createTrackedRemoteScenario(rootDir)
+
+        await writeFile(join(localDir, 'README.md'), '# zephyr\nupdated locally\n')
+        await git(['add', 'README.md'], localDir)
+
+        const runPrompt = vi.fn().mockResolvedValue({commitMessage: 'Prepare deployment'})
+        const logSuccess = vi.fn()
+
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+
+        await ensureLocalRepositoryState('main', localDir, {
+            runPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing: vi.fn(),
+            logSuccess,
+            logWarning: vi.fn()
+        })
+
+        const {stdout: localStatus} = await git(['status', '--porcelain'], localDir)
+        const {stdout: remoteReadme} = await git(['show', 'main:README.md'], remoteDir)
+        const {stdout: remoteMessage} = await git(['log', '-1', '--pretty=%s', 'main'], remoteDir)
+
+        expect(runPrompt).toHaveBeenCalledTimes(1)
+        expect(localStatus).toBe('')
+        expect(remoteReadme).toContain('updated locally')
+        expect(remoteMessage).toBe('Prepare deployment')
+        expect(logSuccess).toHaveBeenCalledWith('Committed and pushed changes to origin/main.')
+    }, 30000)
 })

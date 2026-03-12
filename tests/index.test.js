@@ -11,6 +11,7 @@ describe('public API', () => {
             './targets': './src/targets/index.mjs',
             './ssh': './src/ssh/index.mjs'
         })
+        expect(packageJson.scripts.lint).toBe('eslint . --fix')
     })
 
     it('exports the runtime helpers Flux relies on from the root package', async () => {

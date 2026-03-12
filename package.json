@@ -18,7 +18,7 @@
   },
   "scripts": {
     "test": "vitest run",
-    "lint": "eslint .",
+    "lint": "eslint . --fix",
     "release": "node bin/zephyr.mjs --type=node"
   },
   "keywords": [
