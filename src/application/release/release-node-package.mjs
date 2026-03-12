@@ -191,6 +191,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd(), {logStep, logSu
     const pkg = await readPackage(rootDir)
     const commitMessage = `chore: release ${pkg.version}`
     await runCommand('git', ['commit', '--amend', '-m', commitMessage], {capture: true, cwd: rootDir})
+    await runCommand('git', ['tag', '-fa', `v${pkg.version}`, '-m', `v${pkg.version}`], {capture: true, cwd: rootDir})
 
     logSuccess?.(`Version updated to ${pkg.version}.`)
     return pkg
