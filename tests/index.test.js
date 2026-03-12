@@ -1,6 +1,18 @@
+import {readFile} from 'node:fs/promises'
+
 import {describe, it, expect} from 'vitest'
 
 describe('public API', () => {
+    it('declares only the intended public package exports', async () => {
+        const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+
+        expect(packageJson.exports).toEqual({
+            '.': './src/index.mjs',
+            './targets': './src/targets/index.mjs',
+            './ssh': './src/ssh/index.mjs'
+        })
+    })
+
     it('exports the runtime helpers Flux relies on from the root package', async () => {
         const api = await import('@wyxos/zephyr')
 
@@ -25,5 +37,15 @@ describe('public API', () => {
 
         expect(typeof api.selectDeploymentTarget).toBe('function')
         expect(api.loadDeploymentContext).toBeUndefined()
+    }, 15000)
+
+    it('exports SSH helpers from the ssh subpath', async () => {
+        const api = await import('@wyxos/zephyr/ssh')
+
+        expect(typeof api.connectToServer).toBe('function')
+        expect(typeof api.executeRemoteCommand).toBe('function')
+        expect(typeof api.readRemoteFile).toBe('function')
+        expect(typeof api.downloadRemoteFile).toBe('function')
+        expect(typeof api.deleteRemoteFile).toBe('function')
     }, 15000)
 })

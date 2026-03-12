@@ -20,27 +20,31 @@ describe('deploy/local-repo', () => {
     it('switches to the target branch when clean', async () => {
         queueSpawnResponse({stdout: 'develop\n'})
         queueSpawnResponse({stdout: ''})
-        queueSpawnResponse({})
-        queueSpawnResponse({stdout: ''})
 
         const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
         const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
         const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
         const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
 
-        await expect(
-            ensureLocalRepositoryState('main', process.cwd(), {
-                runPrompt: mockPrompt,
-                runCommand,
-                runCommandCapture,
-                logProcessing: () => {
-                },
-                logSuccess: () => {
-                },
-                logWarning: () => {
-                }
+        await ensureLocalRepositoryState('main', process.cwd(), {
+            runPrompt: mockPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing: () => {
+            },
+            logSuccess: () => {
+            },
+            logWarning: () => {
+            },
+            readUpstreamSyncState: async () => ({
+                upstreamRef: 'origin/develop',
+                remoteName: 'origin',
+                upstreamBranch: 'develop',
+                remoteExists: true,
+                aheadCount: 0,
+                behindCount: 0
             })
-        ).resolves.toBeUndefined()
+        })
 
         expect(
             mockSpawn.mock.calls.some(
@@ -58,8 +62,8 @@ describe('deploy/local-repo', () => {
         const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
         const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
 
-        await expect(
-            ensureLocalRepositoryState('main', process.cwd(), {
+        await expect(async () => {
+            await ensureLocalRepositoryState('main', process.cwd(), {
                 runPrompt: mockPrompt,
                 runCommand,
                 runCommandCapture,
@@ -68,9 +72,17 @@ describe('deploy/local-repo', () => {
                 logSuccess: () => {
                 },
                 logWarning: () => {
-                }
+                },
+                readUpstreamSyncState: async () => ({
+                    upstreamRef: 'origin/develop',
+                    remoteName: 'origin',
+                    upstreamBranch: 'develop',
+                    remoteExists: true,
+                    aheadCount: 0,
+                    behindCount: 0
+                })
             })
-        ).rejects.toThrow(/uncommitted changes/)
+        }).rejects.toThrow(/uncommitted changes/)
     })
 
     it('commits and pushes pending changes on the target branch', async () => {
@@ -78,8 +90,6 @@ describe('deploy/local-repo', () => {
         queueSpawnResponse({stdout: ' M file.php\n'})
         queueSpawnResponse({})
         queueSpawnResponse({})
-        queueSpawnResponse({})
-        queueSpawnResponse({stdout: ''})
 
         mockPrompt.mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
 
@@ -88,19 +98,25 @@ describe('deploy/local-repo', () => {
         const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
         const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
 
-        await expect(
-            ensureLocalRepositoryState('main', process.cwd(), {
-                runPrompt: mockPrompt,
-                runCommand,
-                runCommandCapture,
-                logProcessing: () => {
-                },
-                logSuccess: () => {
-                },
-                logWarning: () => {
-                }
+        await ensureLocalRepositoryState('main', process.cwd(), {
+            runPrompt: mockPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing: () => {
+            },
+            logSuccess: () => {
+            },
+            logWarning: () => {
+            },
+            readUpstreamSyncState: async () => ({
+                upstreamRef: 'origin/main',
+                remoteName: 'origin',
+                upstreamBranch: 'main',
+                remoteExists: true,
+                aheadCount: 0,
+                behindCount: 0
             })
-        ).resolves.toBeUndefined()
+        })
 
         expect(mockPrompt).toHaveBeenCalledTimes(1)
         expect(

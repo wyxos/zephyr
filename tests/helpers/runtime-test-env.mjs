@@ -43,12 +43,29 @@ export function queueSpawnResponse(response = {}) {
     spawnQueue.push(response)
 }
 
+function createBufferedPipe() {
+    const handlers = []
+
+    return {
+        emit(chunk) {
+            handlers.forEach((handler) => handler(Buffer.from(chunk)))
+        },
+        stream: {
+            on: (event, handler) => {
+                if (event === 'data') {
+                    handlers.push(handler)
+                }
+            }
+        }
+    }
+}
+
 export const mockSpawn = vi.fn((_command, _args) => {
     const {stdout = '', stderr = '', exitCode = 0, error} =
         spawnQueue.length > 0 ? spawnQueue.shift() : {}
 
-    const stdoutHandlers = []
-    const stderrHandlers = []
+    const stdoutPipe = createBufferedPipe()
+    const stderrPipe = createBufferedPipe()
     const closeHandlers = []
     const errorHandlers = []
 
@@ -59,33 +76,19 @@ export const mockSpawn = vi.fn((_command, _args) => {
         }
 
         if (stdout) {
-            const chunk = Buffer.from(stdout)
-            stdoutHandlers.forEach((handler) => handler(chunk))
+            stdoutPipe.emit(stdout)
         }
 
         if (stderr) {
-            const chunk = Buffer.from(stderr)
-            stderrHandlers.forEach((handler) => handler(chunk))
+            stderrPipe.emit(stderr)
         }
 
         closeHandlers.forEach((handler) => handler(exitCode))
     })
 
     return {
-        stdout: {
-            on: (event, handler) => {
-                if (event === 'data') {
-                    stdoutHandlers.push(handler)
-                }
-            }
-        },
-        stderr: {
-            on: (event, handler) => {
-                if (event === 'data') {
-                    stderrHandlers.push(handler)
-                }
-            }
-        },
+        stdout: stdoutPipe.stream,
+        stderr: stderrPipe.stream,
         on: (event, handler) => {
             if (event === 'close') {
                 closeHandlers.push(handler)
@@ -149,13 +152,7 @@ vi.mock('#src/dependency-scanner.mjs', () => ({
 let originalStdoutWrite
 let originalStderrWrite
 
-export function setupRuntimeTestEnv() {
-    originalStdoutWrite = process.stdout.write
-    originalStderrWrite = process.stderr.write
-    process.stdout.write = vi.fn()
-    process.stderr.write = vi.fn()
-
-    vi.resetModules()
+function resetRuntimeMocks() {
     spawnQueue.length = 0
     mockSpawn.mockClear()
     mockSpawnSync.mockClear()
@@ -172,6 +169,16 @@ export function setupRuntimeTestEnv() {
     mockDispose.mockReset()
     mockPrompt.mockReset()
     mockValidateLocalDependencies.mockReset()
+}
+
+export function setupRuntimeTestEnv() {
+    originalStdoutWrite = process.stdout.write
+    originalStderrWrite = process.stderr.write
+    process.stdout.write = vi.fn()
+    process.stderr.write = vi.fn()
+
+    vi.resetModules()
+    resetRuntimeMocks()
 
     mockMkdir.mockResolvedValue(undefined)
     mockValidateLocalDependencies.mockResolvedValue(undefined)

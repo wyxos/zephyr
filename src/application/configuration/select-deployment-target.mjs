@@ -43,7 +43,7 @@ export async function selectDeploymentTarget(rootDir, {
             appConfig = projectConfig.apps?.find((app) => app.id === preset.appId)
 
             if (!appConfig) {
-                logWarning?.('Preset references app configuration that no longer exists. Creating new configuration.')
+                logWarning?.('Preset references an application that no longer exists. Creating a new configuration instead.')
                 await removeInvalidPreset()
                 server = await configurationService.selectServer(servers)
                 appConfig = await configurationService.selectApp(projectConfig, server, rootDir)
@@ -51,7 +51,7 @@ export async function selectDeploymentTarget(rootDir, {
                 server = servers.find((entry) => entry.id === appConfig.serverId || entry.serverName === appConfig.serverName)
 
                 if (!server) {
-                    logWarning?.('Preset references server that no longer exists. Creating new configuration.')
+                    logWarning?.('Preset references a server that no longer exists. Creating a new configuration instead.')
                     await removeInvalidPreset()
                     server = await configurationService.selectServer(servers)
                     appConfig = await configurationService.selectApp(projectConfig, server, rootDir)
@@ -70,7 +70,7 @@ export async function selectDeploymentTarget(rootDir, {
             server = servers.find((entry) => entry.serverName === serverName)
 
             if (!server) {
-                logWarning?.(`Preset references server "${serverName}" which no longer exists. Creating new configuration.`)
+                logWarning?.(`Preset references server "${serverName}" which no longer exists. Creating a new configuration instead.`)
                 await removeInvalidPreset()
                 server = await configurationService.selectServer(servers)
                 appConfig = await configurationService.selectApp(projectConfig, server, rootDir)
@@ -80,7 +80,7 @@ export async function selectDeploymentTarget(rootDir, {
                 )
 
                 if (!appConfig) {
-                    logWarning?.('Preset references app configuration that no longer exists. Creating new configuration.')
+                    logWarning?.('Preset references an application that no longer exists. Creating a new configuration instead.')
                     await removeInvalidPreset()
                     appConfig = await configurationService.selectApp(projectConfig, server, rootDir)
                 } else {
@@ -93,7 +93,7 @@ export async function selectDeploymentTarget(rootDir, {
                 }
             }
         } else {
-            logWarning?.('Preset format is invalid. Creating new configuration.')
+            logWarning?.('Preset format is invalid. Creating a new configuration instead.')
             await removeInvalidPreset()
             server = await configurationService.selectServer(servers)
             appConfig = await configurationService.selectApp(projectConfig, server, rootDir)

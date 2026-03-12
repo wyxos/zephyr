@@ -17,13 +17,13 @@ export async function promptServerDetails({
         {
             type: 'input',
             name: 'serverName',
-            message: 'Server name',
+            message: 'Enter a server name',
             default: defaults.serverName
         },
         {
             type: 'input',
             name: 'serverIp',
-            message: 'Server IP address',
+            message: 'Enter the server IP address',
             default: defaults.serverIp
         }
     ])
@@ -44,7 +44,7 @@ export async function selectServer({
                                        promptServerDetails
                                    } = {}) {
     if (servers.length === 0) {
-        logProcessing?.("No servers configured. Let's create one.")
+        logProcessing?.('No servers are configured yet. Creating one now.')
         const server = await promptServerDetails()
         servers.push(server)
         await persistServers(servers)
@@ -60,7 +60,7 @@ export async function selectServer({
     choices.push(
         new inquirer.Separator(),
         {
-            name: '➕ Register a new server',
+            name: '➕ Create a new server',
             value: 'create'
         }
     )
@@ -69,7 +69,7 @@ export async function selectServer({
         {
             type: 'list',
             name: 'selection',
-            message: 'Select server or register new',
+            message: 'Select a server',
             choices,
             default: 0
         }
