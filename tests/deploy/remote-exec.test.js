@@ -29,7 +29,7 @@ describe('deploy/remote-exec', () => {
 
     await expect(executeRemote('Test', 'do-thing')).rejects.toThrow('Command failed: do-thing')
     expect(writeToLogFile).toHaveBeenCalledTimes(2)
-    expect(logProcessing).toHaveBeenCalled()
+    expect(logProcessing).toHaveBeenCalledWith('\nTest')
     expect(logError).toHaveBeenCalled()
     expect(logSuccess).not.toHaveBeenCalled()
   })
@@ -56,5 +56,29 @@ describe('deploy/remote-exec', () => {
     const calledCommand = ssh.execCommand.mock.calls[0][0]
     expect(calledCommand).toContain("FOO='bar'\\''baz'")
     expect(calledCommand).toContain('echo ok')
+  })
+
+  it('passes plain labels to the shared logger so prefixes are not duplicated', async () => {
+    const { createRemoteExecutor } = await import('#src/deploy/remote-exec.mjs')
+
+    const logProcessing = vi.fn()
+    const logSuccess = vi.fn()
+
+    const executeRemote = createRemoteExecutor({
+      ssh: {
+        execCommand: vi.fn().mockResolvedValue({ code: 0, stdout: '', stderr: '' })
+      },
+      rootDir: '/tmp/proj',
+      remoteCwd: '/srv/app',
+      writeToLogFile: vi.fn().mockResolvedValue(),
+      logProcessing,
+      logSuccess,
+      logError: vi.fn()
+    })
+
+    await executeRemote('Fetch latest changes for main', 'git fetch origin main')
+
+    expect(logProcessing).toHaveBeenCalledWith('\nFetch latest changes for main')
+    expect(logSuccess).toHaveBeenCalledWith('Fetch latest changes for main')
   })
 })

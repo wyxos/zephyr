@@ -38,7 +38,7 @@ export function createRemoteExecutor({ ssh, rootDir, remoteCwd, writeToLogFile, 
       // printStdout: legacy option, intentionally ignored (we log to file)
     } = options
 
-    logProcessing?.(`\n→ ${label}`)
+    logProcessing?.(`\n${label}`)
 
     let wrappedCommand = command
     let execOptions = { cwd }
@@ -90,10 +90,9 @@ export function createRemoteExecutor({ ssh, rootDir, remoteCwd, writeToLogFile, 
     }
 
     if (result.code === 0) {
-      logSuccess?.(`✓ ${label}`)
+      logSuccess?.(label)
     }
 
     return result
   }
 }
-
