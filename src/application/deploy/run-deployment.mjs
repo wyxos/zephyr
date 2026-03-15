@@ -21,6 +21,52 @@ async function resolveRemoteHome(ssh, sshUser) {
     return remoteHomeResult.stdout.trim() || `/home/${sshUser}`
 }
 
+async function maybeRecoverLaravelMaintenanceMode({
+    remotePlan,
+    executionState,
+    executeRemote,
+    runPrompt,
+    logWarning
+} = {}) {
+    if (!remotePlan?.remoteIsLaravel || !remotePlan?.maintenanceModeEnabled) {
+        return
+    }
+
+    if (!executionState?.enteredMaintenanceMode || executionState.exitedMaintenanceMode) {
+        return
+    }
+
+    if (typeof runPrompt !== 'function' || typeof executeRemote !== 'function') {
+        logWarning?.('Deployment failed while Laravel maintenance mode may still be enabled.')
+        return
+    }
+
+    try {
+        const answers = await runPrompt([
+            {
+                type: 'confirm',
+                name: 'disableMaintenanceMode',
+                message: 'Deployment failed after Laravel maintenance mode was enabled. Run `artisan up` now?',
+                default: true
+            }
+        ])
+        const disableMaintenanceMode = answers?.disableMaintenanceMode === true
+
+        if (!disableMaintenanceMode) {
+            logWarning?.('Laravel maintenance mode remains enabled because recovery was not confirmed.')
+            return
+        }
+
+        await executeRemote(
+            'Disable Laravel maintenance mode',
+            remotePlan.maintenanceUpCommand ?? `${remotePlan.phpCommand} artisan up`
+        )
+        executionState.exitedMaintenanceMode = true
+    } catch (error) {
+        logWarning?.(`Failed to disable Laravel maintenance mode after deployment error: ${error.message}`)
+    }
+}
+
 export async function runDeployment(config, options = {}) {
     const {
         snapshot = null,
@@ -58,6 +104,12 @@ export async function runDeployment(config, options = {}) {
     const privateKeyPath = await resolveSshKeyPath(config.sshKey)
     const privateKey = await fs.readFile(privateKeyPath, 'utf8')
     let remoteCwd = null
+    let executeRemote = null
+    let remotePlan = null
+    const executionState = {
+        enteredMaintenanceMode: false,
+        exitedMaintenanceMode: false
+    }
 
     logProcessing(`\nConnecting to ${config.serverIp} as ${sshUser}...`)
 
@@ -78,7 +130,7 @@ export async function runDeployment(config, options = {}) {
         lockAcquired = true
         logProcessing(`Lock acquired. Running deployment commands in ${remoteCwd}...`)
 
-        const executeRemote = createRemoteExecutor({
+        executeRemote = createRemoteExecutor({
             ssh,
             rootDir,
             remoteCwd,
@@ -88,7 +140,7 @@ export async function runDeployment(config, options = {}) {
             logError
         })
 
-        const remotePlan = await buildRemoteDeploymentPlan({
+        remotePlan = await buildRemoteDeploymentPlan({
             config,
             snapshot,
             rootDir,
@@ -96,6 +148,7 @@ export async function runDeployment(config, options = {}) {
             ssh,
             remoteCwd,
             executeRemote,
+            runPrompt,
             logProcessing,
             logSuccess,
             logWarning
@@ -107,7 +160,8 @@ export async function runDeployment(config, options = {}) {
             steps: remotePlan.steps,
             usefulSteps: remotePlan.usefulSteps,
             pendingSnapshot: remotePlan.pendingSnapshot,
-            logProcessing
+            logProcessing,
+            executionState
         })
 
         logSuccess('\nDeployment commands completed successfully.')
@@ -119,6 +173,14 @@ export async function runDeployment(config, options = {}) {
         if (logPath) {
             logError(`\nTask output has been logged to: ${logPath}`)
         }
+
+        await maybeRecoverLaravelMaintenanceMode({
+            remotePlan,
+            executionState,
+            executeRemote,
+            runPrompt,
+            logWarning
+        })
 
         if (lockAcquired && ssh && remoteCwd) {
             try {

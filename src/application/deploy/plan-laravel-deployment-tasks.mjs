@@ -3,7 +3,10 @@ export function planLaravelDeploymentTasks({
   isLaravel,
   changedFiles,
   horizonConfigured = false,
-  phpCommand = 'php'
+  phpCommand = 'php',
+  maintenanceMode = false,
+  maintenanceDownCommand = null,
+  maintenanceUpCommand = null
 }) {
   const safeChangedFiles = Array.isArray(changedFiles) ? changedFiles : []
 
@@ -43,12 +46,20 @@ export function planLaravelDeploymentTasks({
   const shouldClearCaches = hasPhpChanges
   const shouldRestartQueues = hasPhpChanges
 
-  const steps = [
-    {
-      label: `Pull latest changes for ${branch}`,
-      command: `git pull origin ${branch}`
-    }
-  ]
+  const steps = []
+
+  if (maintenanceMode && isLaravel) {
+    steps.push({
+      label: 'Enable Laravel maintenance mode',
+      command: maintenanceDownCommand ?? `${phpCommand} artisan down`,
+      kind: 'maintenance-down'
+    })
+  }
+
+  steps.push({
+    label: `Pull latest changes for ${branch}`,
+    command: `git pull origin ${branch}`
+  })
 
   if (shouldRunComposer) {
     // Composer is a PHP script, so we need to run it with the correct PHP version
@@ -93,6 +104,14 @@ export function planLaravelDeploymentTasks({
     steps.push({
       label: horizonConfigured ? 'Restart Horizon workers' : 'Restart queue workers',
       command: horizonConfigured ? `${phpCommand} artisan horizon:terminate` : `${phpCommand} artisan queue:restart`
+    })
+  }
+
+  if (maintenanceMode && isLaravel) {
+    steps.push({
+      label: 'Disable Laravel maintenance mode',
+      command: maintenanceUpCommand ?? `${phpCommand} artisan up`,
+      kind: 'maintenance-up'
     })
   }
 

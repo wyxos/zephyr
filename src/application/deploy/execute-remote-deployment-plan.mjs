@@ -13,17 +13,30 @@ async function persistPendingSnapshot(rootDir, pendingSnapshot, executeRemote) {
 }
 
 function logScheduledTasks(steps, {logProcessing} = {}) {
-    if (steps.length === 1) {
+    const extraTasks = steps
+        .filter((step) => !step.command.startsWith('git pull '))
+        .map((step) => ` - ${step.label}`)
+
+    if (extraTasks.length === 0) {
         logProcessing?.('No additional maintenance tasks scheduled beyond git pull.')
         return
     }
 
-    const extraTasks = steps
-        .slice(1)
-        .map((step) => ` - ${step.label}`)
-        .join('\n')
+    logProcessing?.(`Additional tasks scheduled:\n${extraTasks.join('\n')}`)
+}
 
-    logProcessing?.(`Additional tasks scheduled:\n${extraTasks}`)
+function trackExecutionState(step, executionState) {
+    if (!executionState || !step?.kind) {
+        return
+    }
+
+    if (step.kind === 'maintenance-down') {
+        executionState.enteredMaintenanceMode = true
+    }
+
+    if (step.kind === 'maintenance-up') {
+        executionState.exitedMaintenanceMode = true
+    }
 }
 
 export async function executeRemoteDeploymentPlan({
@@ -32,7 +45,8 @@ export async function executeRemoteDeploymentPlan({
                                                       steps,
                                                       usefulSteps,
                                                       pendingSnapshot = null,
-                                                      logProcessing
+                                                      logProcessing,
+                                                      executionState = null
                                                   } = {}) {
     if (usefulSteps && pendingSnapshot) {
         await persistPendingSnapshot(rootDir, pendingSnapshot, executeRemote)
@@ -45,6 +59,7 @@ export async function executeRemoteDeploymentPlan({
     try {
         for (const step of steps) {
             await executeRemote(step.label, step.command)
+            trackExecutionState(step, executionState)
         }
 
         completed = true
