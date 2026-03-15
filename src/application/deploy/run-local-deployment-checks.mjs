@@ -12,20 +12,62 @@ async function hasUncommittedChanges(rootDir, {runCommandCapture} = {}) {
     })
 }
 
-async function runLocalLaravelTests(rootDir, {runCommand, logProcessing, logSuccess, logWarning} = {}) {
+function supportsArtisanTestCommand(listOutput = '') {
+    return /(?:^|\n)\s*test(?:\s|$)/m.test(listOutput)
+}
+
+async function resolveSupportedLaravelTestCommand(rootDir, {runCommandCapture} = {}) {
     if (!commandExists('php')) {
-        logWarning?.(
-            'PHP is not available in PATH. Skipping local Laravel tests.\n' +
-            '  To run tests locally, ensure PHP is installed and added to your PATH.\n' +
-            '  On Windows with Laravel Herd, you may need to add Herd\'s PHP to your system PATH.'
+        throw new Error(
+            'Release cannot run because PHP is not available in PATH.\n' +
+            'Zephyr requires `php artisan test --compact` for Laravel projects before deployment.'
         )
-        return
     }
 
+    let artisanCommands
+    try {
+        artisanCommands = await runCommandCapture('php', ['artisan', 'list'], {cwd: rootDir})
+    } catch (error) {
+        throw new Error(
+            'Release cannot run because Zephyr could not verify support for `php artisan test`.\n' +
+            `Ensure the project can run \`php artisan list\` locally before deployment.\n${error.message}`
+        )
+    }
+
+    if (!supportsArtisanTestCommand(artisanCommands)) {
+        throw new Error(
+            'Release cannot run because this Laravel project does not support `php artisan test`.\n' +
+            'Zephyr requires Laravel\'s built-in test command before deployment. PHPUnit-only test setups are not supported.'
+        )
+    }
+
+    return {
+        command: 'php',
+        args: ['artisan', 'test', '--compact']
+    }
+}
+
+export async function resolveLocalDeploymentCheckSupport({
+    rootDir,
+    isLaravel,
+    runCommandCapture
+} = {}) {
+    const lintCommand = await preflight.resolveSupportedLintCommand(rootDir, {commandExists})
+    const testCommand = isLaravel
+        ? await resolveSupportedLaravelTestCommand(rootDir, {runCommandCapture})
+        : null
+
+    return {
+        lintCommand,
+        testCommand
+    }
+}
+
+async function runLocalLaravelTests(rootDir, {runCommand, logProcessing, logSuccess, testCommand} = {}) {
     logProcessing?.('Running Laravel tests locally...')
 
     try {
-        await runCommand('php', ['artisan', 'test', '--compact'], {cwd: rootDir})
+        await runCommand(testCommand.command, testCommand.args, {cwd: rootDir})
         logSuccess?.('Local tests passed.')
     } catch (error) {
         if (error.code === 'ENOENT') {
@@ -47,10 +89,22 @@ export async function runLocalDeploymentChecks({
     runCommandCapture,
     logProcessing,
     logSuccess,
-    logWarning
+    logWarning,
+    lintCommand = undefined,
+    testCommand = undefined
 } = {}) {
+    const support = lintCommand !== undefined || testCommand !== undefined
+        ? {lintCommand, testCommand}
+        : await resolveLocalDeploymentCheckSupport({
+            rootDir,
+            isLaravel,
+            runCommandCapture
+        })
+
     if (hasHook) {
-        logProcessing?.('Pre-push git hook detected. Skipping local linting and test execution.')
+        logProcessing?.(
+            'Pre-push git hook detected. Built-in release checks are supported, but Zephyr will skip executing them here. If Zephyr pushes local commits during this release, the hook will run during git push.'
+        )
         return
     }
 
@@ -59,7 +113,8 @@ export async function runLocalDeploymentChecks({
         logProcessing,
         logSuccess,
         logWarning,
-        commandExists
+        commandExists,
+        lintCommand: support.lintCommand
     })
 
     if (lintRan) {
@@ -75,6 +130,11 @@ export async function runLocalDeploymentChecks({
     }
 
     if (isLaravel) {
-        await runLocalLaravelTests(rootDir, {runCommand, logProcessing, logSuccess, logWarning})
+        await runLocalLaravelTests(rootDir, {
+            runCommand,
+            logProcessing,
+            logSuccess,
+            testCommand: support.testCommand
+        })
     }
 }

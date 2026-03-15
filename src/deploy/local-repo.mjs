@@ -1,4 +1,5 @@
 import { getCurrentBranch as getCurrentBranchImpl, getUpstreamRef as getUpstreamRefImpl } from '../utils/git.mjs'
+import {hasPrePushHook} from './preflight.mjs'
 
 export async function getCurrentBranch(rootDir) {
   const branch = await getCurrentBranchImpl(rootDir)
@@ -179,7 +180,22 @@ async function commitAndPushStagedChanges(targetBranch, rootDir, {
 
   logProcessing?.('Committing staged changes before deployment...')
   await runCommand('git', ['commit', '-m', message], { cwd: rootDir })
-  await runCommand('git', ['push', 'origin', targetBranch], { cwd: rootDir })
+
+  const prePushHookPresent = await hasPrePushHook(rootDir)
+  if (prePushHookPresent) {
+    logProcessing?.('Pre-push git hook detected. Running hook during git push...')
+  }
+
+  try {
+    await runCommand('git', ['push', 'origin', targetBranch], { cwd: rootDir })
+  } catch (error) {
+    if (prePushHookPresent) {
+      throw new Error(`Git push failed while the pre-push hook was running. See hook output above.\n${error.message}`)
+    }
+
+    throw error
+  }
+
   logSuccess?.(`Committed and pushed changes to origin/${targetBranch}.`)
 
   const finalStatus = await getGitStatus(rootDir)
@@ -195,14 +211,17 @@ export async function ensureCommittedChangesPushed(targetBranch, rootDir, {
   logProcessing,
   logSuccess,
   logWarning,
-  getUpstreamRef: getUpstreamRefFn = getUpstreamRef
+  getUpstreamRef: getUpstreamRefFn = getUpstreamRef,
+  readUpstreamSyncState: readUpstreamSyncStateFn = (branch, dir) =>
+    readUpstreamSyncState(branch, dir, {
+      runCommand,
+      runCommandCapture,
+      logWarning,
+      getUpstreamRef: getUpstreamRefFn
+    }),
+  hasPrePushHook: hasPrePushHookFn = hasPrePushHook
 } = {}) {
-  const syncState = await readUpstreamSyncState(targetBranch, rootDir, {
-    runCommand,
-    runCommandCapture,
-    logWarning,
-    getUpstreamRef: getUpstreamRefFn
-  })
+  const syncState = await readUpstreamSyncStateFn(targetBranch, rootDir)
 
   const {
     upstreamRef,
@@ -234,8 +253,31 @@ export async function ensureCommittedChangesPushed(targetBranch, rootDir, {
 
   const commitLabel = aheadCount === 1 ? 'commit' : 'commits'
   logProcessing?.(`Found ${aheadCount} ${commitLabel} not yet pushed to ${upstreamRef}. Pushing before deployment...`)
+  const prePushHookPresent = await hasPrePushHookFn(rootDir)
 
-  await runCommandCapture('git', ['push', remoteName, `${targetBranch}:${upstreamBranch}`], { cwd: rootDir })
+  if (prePushHookPresent) {
+    logProcessing?.('Pre-push git hook detected. Running hook during git push...')
+  }
+
+  try {
+    await runCommandCapture('git', ['push', remoteName, `${targetBranch}:${upstreamBranch}`], { cwd: rootDir })
+  } catch (error) {
+    if (prePushHookPresent) {
+      const hookOutput = [error.stdout, error.stderr]
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter(Boolean)
+        .join('\n')
+
+      throw new Error(
+        hookOutput
+          ? `Git push failed while the pre-push hook was running.\n${hookOutput}`
+          : `Git push failed while the pre-push hook was running.\n${error.message}`
+      )
+    }
+
+    throw error
+  }
+
   logSuccess?.(`Pushed committed changes to ${upstreamRef}.`)
 
   return { pushed: true, upstreamRef }

@@ -1,4 +1,4 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest'
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 
 import {
     mockConnect,
@@ -14,9 +14,25 @@ import {
     teardownRuntimeTestEnv
 } from '#tests/helpers/runtime-test-env.mjs'
 
+const {
+    mockPrepareLocalDeployment
+} = vi.hoisted(() => ({
+    mockPrepareLocalDeployment: vi.fn()
+}))
+
+vi.mock('#src/application/deploy/prepare-local-deployment.mjs', () => ({
+    prepareLocalDeployment: mockPrepareLocalDeployment
+}))
+
 describe('application/deploy/run-deployment', () => {
     beforeEach(() => {
         setupRuntimeTestEnv()
+        mockPrepareLocalDeployment.mockReset()
+        mockPrepareLocalDeployment.mockResolvedValue({
+            requiredPhpVersion: '8.4.0',
+            isLaravel: true,
+            hasHook: false
+        })
     })
 
     afterEach(() => {
@@ -24,27 +40,11 @@ describe('application/deploy/run-deployment', () => {
     })
 
     it('schedules Laravel tasks based on diff', async () => {
-        mockReadFile
-            .mockResolvedValueOnce('{"require":{"laravel/framework":"^10.0"}}')
-            .mockResolvedValueOnce('{"require":{"laravel/framework":"^10.0","php":"^8.4"}}')
-            .mockResolvedValueOnce('{"scripts":{}}')
-            .mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----')
+        mockReadFile.mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----')
         mockAccess.mockImplementation(async (filePath) => {
-            if (filePath.includes('artisan')) {
-                return undefined
-            }
-            if (filePath.includes('pre-push')) {
-                throw new Error('ENOENT')
-            }
-            if (filePath.includes('vendor/bin/pint')) {
-                throw new Error('ENOENT')
-            }
             return undefined
         })
         mockReaddir.mockResolvedValueOnce([])
-        queueSpawnResponse({stdout: 'main\n'})
-        queueSpawnResponse({stdout: ''})
-        queueSpawnResponse({})
 
         mockConnect.mockResolvedValue()
         mockDispose.mockResolvedValue()
@@ -100,6 +100,12 @@ describe('application/deploy/run-deployment', () => {
             context: createAppContext()
         })
 
+        expect(mockPrepareLocalDeployment).toHaveBeenCalledWith(expect.objectContaining({
+            branch: 'main'
+        }), expect.objectContaining({
+            rootDir: process.cwd()
+        }))
+
         const executedCommands = mockExecCommand.mock.calls.map(([cmd]) => cmd)
         expect(executedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
         expect(executedCommands.some((cmd) => cmd.includes('composer install'))).toBe(true)
@@ -113,34 +119,17 @@ describe('application/deploy/run-deployment', () => {
             filePath.includes('deploy.lock')
         )
         expect(lockFileWrites.length).toBeGreaterThan(0)
-
-        const phpTestCalls = mockSpawn.mock.calls.filter(([cmd, args]) => {
-            if (typeof cmd === 'string' && cmd.startsWith('php') && cmd.includes('artisan') && cmd.includes('test') && cmd.includes('--compact')) {
-                return true
-            }
-
-            return cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test') && args.includes('--compact')
-        })
-
-        expect(phpTestCalls.length).toBeGreaterThan(0)
     })
 
     it('skips Laravel tests when pre-push hook exists', async () => {
-        mockReadFile.mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----')
-        mockAccess.mockImplementation(async (filePath) => {
-            if (filePath.includes('pre-push')) {
-                return undefined
-            }
-
-            if (filePath.includes('.ssh') || filePath.includes('id_rsa')) {
-                return undefined
-            }
-
-            throw new Error('ENOENT')
+        mockPrepareLocalDeployment.mockResolvedValue({
+            requiredPhpVersion: '8.4.0',
+            isLaravel: true,
+            hasHook: true
         })
+        mockReadFile.mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----')
+        mockAccess.mockResolvedValue(undefined)
         mockReaddir.mockResolvedValueOnce([])
-        queueSpawnResponse({stdout: 'main\n'})
-        queueSpawnResponse({stdout: ''})
 
         mockConnect.mockResolvedValue()
         mockDispose.mockResolvedValue()
@@ -182,17 +171,12 @@ describe('application/deploy/run-deployment', () => {
             context: createAppContext()
         })
 
-        const phpTestCalls = mockSpawn.mock.calls.filter(
-            ([cmd, args]) => cmd === 'php' && Array.isArray(args) && args.includes('artisan') && args.includes('test')
-        )
-        expect(phpTestCalls.length).toBe(0)
+        expect(mockPrepareLocalDeployment).toHaveBeenCalled()
     })
 
     it('skips Laravel tasks when framework is not detected remotely', async () => {
         mockReadFile.mockResolvedValue('-----BEGIN RSA PRIVATE KEY-----')
         mockReaddir.mockResolvedValueOnce([])
-        queueSpawnResponse({stdout: 'main\n'})
-        queueSpawnResponse({stdout: ''})
 
         mockConnect.mockResolvedValue()
         mockDispose.mockResolvedValue()

@@ -45,29 +45,67 @@ export async function hasLaravelPint(rootDir) {
   }
 }
 
-export async function runLinting(rootDir, { runCommand, logProcessing, logSuccess, logWarning, commandExists } = {}) {
+export async function resolveSupportedLintCommand(rootDir, {commandExists} = {}) {
   const hasNpmLint = await hasLintScript(rootDir)
   const hasPint = await hasLaravelPint(rootDir)
 
   if (hasNpmLint) {
+    if (commandExists && !commandExists('npm')) {
+      throw new Error(
+        'Release cannot run because `npm run lint` is configured but npm is not available in PATH.\n' +
+        'Install npm or fix your PATH before releasing.'
+      )
+    }
+
+    return {
+      type: 'npm',
+      command: 'npm',
+      args: ['run', 'lint'],
+      label: 'npm lint'
+    }
+  }
+
+  if (hasPint) {
+    if (commandExists && !commandExists('php')) {
+      throw new Error(
+        'Release cannot run because Laravel Pint is present but PHP is not available in PATH.\n' +
+        'Zephyr requires `php vendor/bin/pint` to run successfully before deployment.'
+      )
+    }
+
+    return {
+      type: 'pint',
+      command: 'php',
+      args: ['vendor/bin/pint'],
+      label: 'Laravel Pint'
+    }
+  }
+
+  throw new Error(
+    'Release cannot run because no supported lint command was found.\n' +
+    'Zephyr requires either `npm run lint` or Laravel Pint (`vendor/bin/pint`) before deployment.'
+  )
+}
+
+export async function runLinting(rootDir, {
+  runCommand,
+  logProcessing,
+  logSuccess,
+  commandExists,
+  lintCommand = null
+} = {}) {
+  const selectedLintCommand = lintCommand ?? await resolveSupportedLintCommand(rootDir, {commandExists})
+
+  if (selectedLintCommand.type === 'npm') {
     logProcessing?.('Running npm lint...')
-    await runCommand('npm', ['run', 'lint'], { cwd: rootDir })
+    await runCommand(selectedLintCommand.command, selectedLintCommand.args, { cwd: rootDir })
     logSuccess?.('Linting completed.')
     return true
   }
 
-  if (hasPint) {
-    // Check if PHP is available before trying to run Pint
-    if (commandExists && !commandExists('php')) {
-      logWarning?.(
-        'PHP is not available in PATH. Skipping Laravel Pint.\n' +
-        '  To run Pint locally, ensure PHP is installed and added to your PATH.'
-      )
-      return false
-    }
-
+  if (selectedLintCommand.type === 'pint') {
     logProcessing?.('Running Laravel Pint...')
-    await runCommand('php', ['vendor/bin/pint'], { cwd: rootDir })
+    await runCommand(selectedLintCommand.command, selectedLintCommand.args, { cwd: rootDir })
     logSuccess?.('Linting completed.')
     return true
   }
@@ -123,4 +161,3 @@ export async function isLocalLaravelProject(rootDir) {
     return false
   }
 }
-

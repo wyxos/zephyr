@@ -3,11 +3,13 @@ import {beforeEach, describe, expect, it, vi} from 'vitest'
 const {
     mockBumpLocalPackageVersion,
     mockEnsureLocalRepositoryState,
+    mockResolveLocalDeploymentCheckSupport,
     mockResolveLocalDeploymentContext,
     mockRunLocalDeploymentChecks
 } = vi.hoisted(() => ({
     mockBumpLocalPackageVersion: vi.fn(),
     mockEnsureLocalRepositoryState: vi.fn(),
+    mockResolveLocalDeploymentCheckSupport: vi.fn(),
     mockResolveLocalDeploymentContext: vi.fn(),
     mockRunLocalDeploymentChecks: vi.fn()
 }))
@@ -25,6 +27,7 @@ vi.mock('#src/application/deploy/resolve-local-deployment-context.mjs', () => ({
 }))
 
 vi.mock('#src/application/deploy/run-local-deployment-checks.mjs', () => ({
+    resolveLocalDeploymentCheckSupport: mockResolveLocalDeploymentCheckSupport,
     runLocalDeploymentChecks: mockRunLocalDeploymentChecks
 }))
 
@@ -34,11 +37,24 @@ describe('application/deploy/prepare-local-deployment', () => {
     beforeEach(() => {
         mockBumpLocalPackageVersion.mockReset()
         mockEnsureLocalRepositoryState.mockReset()
+        mockResolveLocalDeploymentCheckSupport.mockReset()
         mockResolveLocalDeploymentContext.mockReset()
         mockRunLocalDeploymentChecks.mockReset()
 
         mockBumpLocalPackageVersion.mockResolvedValue(undefined)
         mockEnsureLocalRepositoryState.mockResolvedValue(undefined)
+        mockResolveLocalDeploymentCheckSupport.mockResolvedValue({
+            lintCommand: {
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'lint'],
+                label: 'npm lint'
+            },
+            testCommand: {
+                command: 'php',
+                args: ['artisan', 'test', '--compact']
+            }
+        })
         mockResolveLocalDeploymentContext.mockResolvedValue({
             requiredPhpVersion: '8.4.0',
             isLaravel: true,
@@ -73,6 +89,11 @@ describe('application/deploy/prepare-local-deployment', () => {
             hasHook: false
         })
         expect(mockResolveLocalDeploymentContext).toHaveBeenCalledWith('/repo/demo')
+        expect(mockResolveLocalDeploymentCheckSupport).toHaveBeenCalledWith({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            runCommandCapture
+        })
         expect(mockBumpLocalPackageVersion).toHaveBeenCalledWith('/repo/demo', {
             versionArg: null,
             runCommand,
@@ -96,7 +117,16 @@ describe('application/deploy/prepare-local-deployment', () => {
             runCommandCapture,
             logProcessing,
             logSuccess,
-            logWarning
+            logWarning,
+            lintCommand: expect.objectContaining({
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'lint']
+            }),
+            testCommand: expect.objectContaining({
+                command: 'php',
+                args: ['artisan', 'test', '--compact']
+            })
         })
     })
 
@@ -123,6 +153,7 @@ describe('application/deploy/prepare-local-deployment', () => {
             hasHook: false
         })
         expect(mockBumpLocalPackageVersion).not.toHaveBeenCalled()
+        expect(mockResolveLocalDeploymentCheckSupport).toHaveBeenCalled()
         expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
             rootDir: '/repo/demo',
             isLaravel: true,
@@ -160,5 +191,27 @@ describe('application/deploy/prepare-local-deployment', () => {
         expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
             isLaravel: false
         }))
+    })
+
+    it('halts before bumping or syncing when local check support is missing', async () => {
+        mockResolveLocalDeploymentCheckSupport.mockRejectedValue(
+            new Error('Release cannot run because no supported lint command was found.')
+        )
+
+        await expect(prepareLocalDeployment({
+            branch: 'main'
+        }, {
+            rootDir: '/repo/demo',
+            runPrompt: vi.fn(),
+            runCommand: vi.fn(),
+            runCommandCapture: vi.fn(),
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })).rejects.toThrow('Release cannot run because no supported lint command was found.')
+
+        expect(mockBumpLocalPackageVersion).not.toHaveBeenCalled()
+        expect(mockEnsureLocalRepositoryState).not.toHaveBeenCalled()
+        expect(mockRunLocalDeploymentChecks).not.toHaveBeenCalled()
     })
 })
