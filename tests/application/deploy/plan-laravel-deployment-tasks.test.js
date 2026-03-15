@@ -97,8 +97,34 @@ describe('application/deploy/plan-laravel-deployment-tasks', () => {
       changedFiles: ['composer.json', 'package.json', 'database/migrations/2025_01_01_000000_test.php']
     })
 
-    // Should still pull
     expect(steps).toHaveLength(1)
     expect(steps[0].command).toBe('git pull origin main')
+  })
+
+  it('uses provided maintenance mode commands when enabled', () => {
+    const steps = planLaravelDeploymentTasks({
+      branch: 'main',
+      isLaravel: true,
+      changedFiles: ['composer.json'],
+      phpCommand: 'php8.4',
+      maintenanceMode: true,
+      maintenanceDownCommand: 'php8.4 artisan down --render="errors::503"',
+      maintenanceUpCommand: 'php8.4 artisan up'
+    })
+
+    expect(steps[0]).toMatchObject({
+      label: 'Enable Laravel maintenance mode',
+      command: 'php8.4 artisan down --render="errors::503"',
+      kind: 'maintenance-down'
+    })
+    expect(steps[1]).toMatchObject({
+      label: 'Pull latest changes for main',
+      command: 'git pull origin main'
+    })
+    expect(steps.at(-1)).toMatchObject({
+      label: 'Disable Laravel maintenance mode',
+      command: 'php8.4 artisan up',
+      kind: 'maintenance-up'
+    })
   })
 })

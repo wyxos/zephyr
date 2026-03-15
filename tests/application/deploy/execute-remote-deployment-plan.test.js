@@ -80,4 +80,35 @@ describe('application/deploy/execute-remote-deployment-plan', () => {
         expect(executeRemote).toHaveBeenCalledTimes(1)
         expect(executeRemote).toHaveBeenCalledWith('Pull latest changes for main', 'git pull origin main')
     })
+
+    it('tracks Laravel maintenance mode transitions while executing steps', async () => {
+        const executeRemote = vi.fn(async () => ({stdout: ''}))
+        const executionState = {
+            enteredMaintenanceMode: false,
+            exitedMaintenanceMode: false
+        }
+        const logProcessing = vi.fn()
+
+        await executeRemoteDeploymentPlan({
+            rootDir: '/workspace/demo',
+            executeRemote,
+            steps: [
+                {label: 'Enable Laravel maintenance mode', command: 'php artisan down', kind: 'maintenance-down'},
+                {label: 'Pull latest changes for main', command: 'git pull origin main'},
+                {label: 'Disable Laravel maintenance mode', command: 'php artisan up', kind: 'maintenance-up'}
+            ],
+            usefulSteps: true,
+            pendingSnapshot: {taskLabels: []},
+            logProcessing,
+            executionState
+        })
+
+        expect(logProcessing).toHaveBeenCalledWith(
+            'Additional tasks scheduled:\n - Enable Laravel maintenance mode\n - Disable Laravel maintenance mode'
+        )
+        expect(executionState).toEqual({
+            enteredMaintenanceMode: true,
+            exitedMaintenanceMode: true
+        })
+    })
 })
