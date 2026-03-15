@@ -1,8 +1,25 @@
-import {describe, expect, it, vi} from 'vitest'
+import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
 
-import {commitLintingChanges, hasStagedChanges} from '#src/deploy/preflight.mjs'
+import {afterEach, describe, expect, it, vi} from 'vitest'
+
+import {
+    commitLintingChanges,
+    hasStagedChanges,
+    resolveSupportedLintCommand
+} from '#src/deploy/preflight.mjs'
 
 describe('deploy/preflight', () => {
+    let rootDir
+
+    afterEach(async () => {
+        if (rootDir) {
+            await rm(rootDir, {recursive: true, force: true})
+            rootDir = null
+        }
+    })
+
     it('does not treat unstaged-only porcelain output as staged changes', () => {
         expect(hasStagedChanges(' M tests/Browser/AirConJourneyFlowTest.php')).toBe(false)
         expect(hasStagedChanges('M  tests/Browser/AirConJourneyFlowTest.php')).toBe(true)
@@ -30,5 +47,49 @@ describe('deploy/preflight', () => {
         })
         expect(logProcessing).toHaveBeenCalledWith('Committing linting changes...')
         expect(logSuccess).toHaveBeenCalledWith('Linting changes committed.')
+    })
+
+    it('prefers package.json lint when available', async () => {
+        rootDir = await mkdtemp(join(tmpdir(), 'zephyr-preflight-'))
+        await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+            scripts: {
+                lint: 'eslint .'
+            }
+        }, null, 2))
+
+        await expect(resolveSupportedLintCommand(rootDir, {
+            commandExists: vi.fn().mockReturnValue(true)
+        })).resolves.toEqual({
+            type: 'npm',
+            command: 'npm',
+            args: ['run', 'lint'],
+            label: 'npm lint'
+        })
+    })
+
+    it('supports Laravel Pint when npm lint is absent', async () => {
+        rootDir = await mkdtemp(join(tmpdir(), 'zephyr-preflight-'))
+        await mkdir(join(rootDir, 'vendor', 'bin'), {recursive: true})
+        await writeFile(join(rootDir, 'vendor', 'bin', 'pint'), '')
+
+        await expect(resolveSupportedLintCommand(rootDir, {
+            commandExists: vi.fn().mockImplementation((command) => command === 'php')
+        })).resolves.toEqual({
+            type: 'pint',
+            command: 'php',
+            args: ['vendor/bin/pint'],
+            label: 'Laravel Pint'
+        })
+    })
+
+    it('fails when no supported lint command is configured', async () => {
+        rootDir = await mkdtemp(join(tmpdir(), 'zephyr-preflight-'))
+
+        await expect(resolveSupportedLintCommand(rootDir, {
+            commandExists: vi.fn().mockReturnValue(true)
+        })).rejects.toThrow(
+            'Release cannot run because no supported lint command was found.\n' +
+            'Zephyr requires either `npm run lint` or Laravel Pint (`vendor/bin/pint`) before deployment.'
+        )
     })
 })

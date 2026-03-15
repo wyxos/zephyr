@@ -1,4 +1,4 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest'
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 
 import {
     mockPrompt,
@@ -177,5 +177,56 @@ describe('deploy/local-repo', () => {
                 ([command, args]) => command === 'git' && args[0] === 'push' && args.includes('main')
             )
         ).toBe(true)
+    })
+
+    it('announces the pre-push hook before pushing committed changes', async () => {
+        const {ensureCommittedChangesPushed} = await import('#src/deploy/local-repo.mjs')
+        const logProcessing = vi.fn()
+        const logSuccess = vi.fn()
+
+        const result = await ensureCommittedChangesPushed('main', '/repo/demo', {
+            runCommand: vi.fn(),
+            runCommandCapture: vi.fn().mockResolvedValue(''),
+            logProcessing,
+            logSuccess,
+            logWarning: vi.fn(),
+            readUpstreamSyncState: vi.fn().mockResolvedValue({
+                upstreamRef: 'origin/main',
+                remoteName: 'origin',
+                upstreamBranch: 'main',
+                remoteExists: true,
+                aheadCount: 1,
+                behindCount: 0
+            }),
+            hasPrePushHook: vi.fn().mockResolvedValue(true)
+        })
+
+        expect(result).toEqual({pushed: true, upstreamRef: 'origin/main'})
+        expect(logProcessing).toHaveBeenCalledWith('Pre-push git hook detected. Running hook during git push...')
+        expect(logSuccess).toHaveBeenCalledWith('Pushed committed changes to origin/main.')
+    })
+
+    it('surfaces hook output when the pre-push hook fails during automatic push', async () => {
+        const {ensureCommittedChangesPushed} = await import('#src/deploy/local-repo.mjs')
+        const pushError = new Error('git push failed')
+        pushError.stdout = 'hook stdout'
+        pushError.stderr = 'hook stderr'
+
+        await expect(ensureCommittedChangesPushed('main', '/repo/demo', {
+            runCommand: vi.fn(),
+            runCommandCapture: vi.fn().mockRejectedValue(pushError),
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn(),
+            readUpstreamSyncState: vi.fn().mockResolvedValue({
+                upstreamRef: 'origin/main',
+                remoteName: 'origin',
+                upstreamBranch: 'main',
+                remoteExists: true,
+                aheadCount: 1,
+                behindCount: 0
+            }),
+            hasPrePushHook: vi.fn().mockResolvedValue(true)
+        })).rejects.toThrow('Git push failed while the pre-push hook was running.\nhook stdout\nhook stderr')
     })
 })

@@ -130,6 +130,7 @@ describe('main entrypoint', () => {
 
         await main('node')
 
+        expect(appContext.logProcessing).toHaveBeenNthCalledWith(1, expect.stringMatching(/^Zephyr v\d+\.\d+\.\d+/))
         expect(mockReleaseNode).toHaveBeenCalledTimes(1)
         expect(mockReleasePackagist).not.toHaveBeenCalled()
     })
@@ -139,6 +140,7 @@ describe('main entrypoint', () => {
 
         await main('packagist')
 
+        expect(appContext.logProcessing).toHaveBeenNthCalledWith(1, expect.stringMatching(/^Zephyr v\d+\.\d+\.\d+/))
         expect(mockReleasePackagist).toHaveBeenCalledTimes(1)
         expect(mockReleaseNode).not.toHaveBeenCalled()
     })
@@ -165,6 +167,7 @@ describe('main entrypoint', () => {
 
         await main(null, 'minor')
 
+        expect(appContext.logProcessing).toHaveBeenNthCalledWith(1, expect.stringMatching(/^Zephyr v\d+\.\d+\.\d+/))
         expect(mockCreateConfigurationService).toHaveBeenCalledWith(appContext)
         expect(mockEnsureGitignoreEntry).toHaveBeenCalledWith(process.cwd(), expect.objectContaining({
             runCommand: appContext.runCommand,

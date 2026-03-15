@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import {createRequire} from 'node:module'
 import path from 'node:path'
 import process from 'node:process'
 
@@ -16,6 +17,8 @@ import {runDeployment} from './application/deploy/run-deployment.mjs'
 
 const RELEASE_SCRIPT_NAME = 'release'
 const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@latest'
+const require = createRequire(import.meta.url)
+const {version: ZEPHYR_VERSION} = require('../package.json')
 
 const appContext = createAppContext()
 const {
@@ -36,6 +39,8 @@ async function runRemoteTasks(config, options = {}) {
 }
 
 async function main(releaseType = null, versionArg = null) {
+    logProcessing(`Zephyr v${ZEPHYR_VERSION}`)
+
     if (releaseType === 'node' || releaseType === 'vue') {
         try {
             await releaseNode()
