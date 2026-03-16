@@ -254,4 +254,136 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             'Laravel supports prerendered maintenance mode, but resources/views/errors/503.blade.php is missing; using standard maintenance mode.'
         )
     })
+
+    it('fails early when the deploy user cannot write to Laravel cache directories', async () => {
+        mockFindPhpBinary.mockResolvedValue('php')
+        mockPlanLaravelDeploymentTasks.mockReturnValue([
+            {label: 'Pull latest changes for main', command: 'git pull origin main'},
+            {label: 'Clear Laravel caches', command: 'php artisan cache:clear && php artisan config:clear && php artisan view:clear'}
+        ])
+
+        const ssh = {
+            execCommand: vi.fn(async (command) => {
+                if (command.includes('grep -q "laravel/framework"')) {
+                    return {stdout: 'yes', code: 0}
+                }
+
+                if (command.includes('config/horizon.php')) {
+                    return {stdout: 'no', code: 0}
+                }
+
+                if (command.includes('bootstrap/cache')) {
+                    return {stdout: 'no|forge|www-data|755', code: 0}
+                }
+
+                if (command.includes('storage/framework/cache')) {
+                    return {stdout: 'yes|forge|www-data|775', code: 0}
+                }
+
+                if (command.includes('storage/framework/views')) {
+                    return {stdout: 'yes|forge|www-data|775', code: 0}
+                }
+
+                if (command.includes('storage/framework/sessions')) {
+                    return {stdout: 'yes|forge|www-data|775', code: 0}
+                }
+
+                return {stdout: '', code: 0}
+            })
+        }
+
+        const executeRemote = vi.fn(async (label) => {
+            if (label === 'Inspect pending changes') {
+                return {stdout: 'app/Console/Kernel.php\n', code: 0}
+            }
+
+            return {stdout: '', stderr: '', code: 0}
+        })
+
+        await expect(buildRemoteDeploymentPlan({
+            config: {
+                branch: 'main',
+                serverName: 'production',
+                projectPath: '~/webapps/demo',
+                sshUser: 'forge'
+            },
+            ssh,
+            remoteCwd: '/home/forge/webapps/demo',
+            executeRemote,
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })).rejects.toThrow(
+            'Laravel cache-related deployment tasks cannot run because the SSH deploy user cannot write to required directories:\n' +
+            ' - bootstrap/cache (owner forge:www-data, mode 755)'
+        )
+    })
+
+    it('warns when Laravel cache directories are writable but not group-writable', async () => {
+        mockFindPhpBinary.mockResolvedValue('php')
+        mockPlanLaravelDeploymentTasks.mockReturnValue([
+            {label: 'Pull latest changes for main', command: 'git pull origin main'},
+            {label: 'Clear Laravel caches', command: 'php artisan cache:clear && php artisan config:clear && php artisan view:clear'}
+        ])
+
+        const logProcessing = vi.fn()
+        const logWarning = vi.fn()
+        const ssh = {
+            execCommand: vi.fn(async (command) => {
+                if (command.includes('grep -q "laravel/framework"')) {
+                    return {stdout: 'yes', code: 0}
+                }
+
+                if (command.includes('config/horizon.php')) {
+                    return {stdout: 'no', code: 0}
+                }
+
+                if (command.includes('bootstrap/cache')) {
+                    return {stdout: 'yes|forge|www-data|755', code: 0}
+                }
+
+                if (command.includes('storage/framework/cache')) {
+                    return {stdout: 'yes|forge|www-data|775', code: 0}
+                }
+
+                if (command.includes('storage/framework/views')) {
+                    return {stdout: 'yes|forge|www-data|775', code: 0}
+                }
+
+                if (command.includes('storage/framework/sessions')) {
+                    return {stdout: 'yes|forge|www-data|775', code: 0}
+                }
+
+                return {stdout: '', code: 0}
+            })
+        }
+
+        const executeRemote = vi.fn(async (label) => {
+            if (label === 'Inspect pending changes') {
+                return {stdout: 'app/Console/Kernel.php\n', code: 0}
+            }
+
+            return {stdout: '', stderr: '', code: 0}
+        })
+
+        await buildRemoteDeploymentPlan({
+            config: {
+                branch: 'main',
+                serverName: 'production',
+                projectPath: '~/webapps/demo',
+                sshUser: 'forge'
+            },
+            ssh,
+            remoteCwd: '/home/forge/webapps/demo',
+            executeRemote,
+            logProcessing,
+            logSuccess: vi.fn(),
+            logWarning
+        })
+
+        expect(logProcessing).toHaveBeenCalledWith('Checking Laravel writable directories for deploy user forge...')
+        expect(logWarning).toHaveBeenCalledWith(
+            'bootstrap/cache is writable by the deploy user (forge:www-data, mode 755), but it is not group-writable. Web-created cache files may cause later permission drift.'
+        )
+    })
 })
