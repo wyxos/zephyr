@@ -84,6 +84,22 @@ describe('application/deploy/run-deployment', () => {
                 return {...response, stdout: 'yes'}
             }
 
+            if (command.includes('bootstrap/cache')) {
+                return {...response, stdout: 'yes|forge|www-data|775'}
+            }
+
+            if (command.includes('storage/framework/cache')) {
+                return {...response, stdout: 'yes|forge|www-data|775'}
+            }
+
+            if (command.includes('storage/framework/views')) {
+                return {...response, stdout: 'yes|forge|www-data|775'}
+            }
+
+            if (command.includes('storage/framework/sessions')) {
+                return {...response, stdout: 'yes|forge|www-data|775'}
+            }
+
             return response
         })
 
