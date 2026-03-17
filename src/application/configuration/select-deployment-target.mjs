@@ -1,22 +1,82 @@
 import {writeStdoutLine} from '../../utils/output.mjs'
 import {loadServers} from '../../config/servers.mjs'
 import {loadProjectConfig, removePreset, saveProjectConfig} from '../../config/project.mjs'
+import {ZephyrError} from '../../runtime/errors.mjs'
+
+function findPresetByName(projectConfig, presetName) {
+    const presets = projectConfig?.presets ?? []
+    return presets.find((entry) => entry?.name === presetName) ?? null
+}
+
+function resolvePresetNonInteractive(projectConfig, servers, preset, presetName) {
+    if (!preset) {
+        throw new ZephyrError(
+            `Zephyr cannot run non-interactively because preset "${presetName}" was not found in .zephyr/config.json.`,
+            {code: 'ZEPHYR_PRESET_NOT_FOUND'}
+        )
+    }
+
+    if (!preset.appId) {
+        throw new ZephyrError(
+            `Zephyr cannot run non-interactively because preset "${preset.name || presetName}" uses a legacy or invalid format. Rerun interactively once to repair .zephyr/config.json.`,
+            {code: 'ZEPHYR_PRESET_REPAIR_REQUIRED'}
+        )
+    }
+
+    const apps = projectConfig?.apps ?? []
+    const appConfig = apps.find((app) => app.id === preset.appId)
+    if (!appConfig) {
+        throw new ZephyrError(
+            `Zephyr cannot run non-interactively because preset "${preset.name || presetName}" references an application that no longer exists.`,
+            {code: 'ZEPHYR_PRESET_INVALID'}
+        )
+    }
+
+    const server = servers.find((entry) => entry.id === appConfig.serverId || entry.serverName === appConfig.serverName)
+    if (!server) {
+        throw new ZephyrError(
+            `Zephyr cannot run non-interactively because preset "${preset.name || presetName}" references a server that no longer exists.`,
+            {code: 'ZEPHYR_PRESET_INVALID'}
+        )
+    }
+
+    return {
+        server,
+        appConfig,
+        branch: preset.branch || appConfig.branch
+    }
+}
 
 export async function selectDeploymentTarget(rootDir, {
     configurationService,
     runPrompt,
     logProcessing,
     logSuccess,
-    logWarning
+    logWarning,
+    emitEvent,
+    executionMode = {}
 } = {}) {
-    const servers = await loadServers({logSuccess, logWarning})
-    const projectConfig = await loadProjectConfig(rootDir, servers, {logSuccess, logWarning})
+    const nonInteractive = executionMode?.interactive === false
+    const servers = await loadServers({
+        logSuccess,
+        logWarning,
+        strict: nonInteractive,
+        allowMigration: !nonInteractive
+    })
+    const projectConfig = await loadProjectConfig(rootDir, servers, {
+        logSuccess,
+        logWarning,
+        strict: nonInteractive,
+        allowMigration: !nonInteractive
+    })
 
     let server = null
     let appConfig = null
     let isCreatingNewPreset = false
 
-    const preset = await configurationService.selectPreset(projectConfig, servers)
+    const preset = nonInteractive
+        ? findPresetByName(projectConfig, executionMode.presetName)
+        : await configurationService.selectPreset(projectConfig, servers)
 
     const removeInvalidPreset = async () => {
         if (!preset || preset === 'create') {
@@ -34,7 +94,15 @@ export async function selectDeploymentTarget(rootDir, {
         isCreatingNewPreset = true
     }
 
-    if (preset === 'create') {
+    if (nonInteractive) {
+        const resolved = resolvePresetNonInteractive(projectConfig, servers, preset, executionMode.presetName)
+        server = resolved.server
+        appConfig = resolved.appConfig
+        appConfig = {
+            ...appConfig,
+            branch: resolved.branch
+        }
+    } else if (preset === 'create') {
         isCreatingNewPreset = true
         server = await configurationService.selectServer(servers)
         appConfig = await configurationService.selectApp(projectConfig, server, rootDir)
@@ -103,7 +171,16 @@ export async function selectDeploymentTarget(rootDir, {
         appConfig = await configurationService.selectApp(projectConfig, server, rootDir)
     }
 
-    const updated = await configurationService.ensureSshDetails(appConfig, rootDir)
+    if (nonInteractive && (!appConfig?.sshUser || !appConfig?.sshKey)) {
+        throw new ZephyrError(
+            `Zephyr cannot run non-interactively because preset "${preset?.name || executionMode.presetName}" is missing SSH details.`,
+            {code: 'ZEPHYR_SSH_DETAILS_REQUIRED'}
+        )
+    }
+
+    const updated = nonInteractive
+        ? false
+        : await configurationService.ensureSshDetails(appConfig, rootDir)
 
     if (updated) {
         await saveProjectConfig(rootDir, projectConfig)
@@ -119,10 +196,18 @@ export async function selectDeploymentTarget(rootDir, {
         sshKey: appConfig.sshKey
     }
 
-    logProcessing?.('\nSelected deployment target:')
-    writeStdoutLine(JSON.stringify(deploymentConfig, null, 2))
+    if (typeof emitEvent === 'function' && executionMode?.json) {
+        emitEvent('log', {
+            level: 'processing',
+            message: 'Selected deployment target.',
+            data: {deploymentConfig}
+        })
+    } else {
+        logProcessing?.('\nSelected deployment target:')
+        writeStdoutLine(JSON.stringify(deploymentConfig, null, 2))
+    }
 
-    if (isCreatingNewPreset || !preset) {
+    if (!nonInteractive && (isCreatingNewPreset || !preset)) {
         const {presetName} = await runPrompt([
             {
                 type: 'input',

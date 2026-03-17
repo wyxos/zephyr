@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import chalk from 'chalk'
+import {ZephyrError} from './runtime/errors.mjs'
 import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
 
 function isLocalPathOutsideRepo(depPath, rootDir) {
@@ -262,7 +263,9 @@ async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn) {
   return true
 }
 
-async function validateLocalDependencies(rootDir, promptFn, logFn = null) {
+async function validateLocalDependencies(rootDir, promptFn, logFn = null, {
+  interactive = true
+} = {}) {
   const packageDeps = await scanPackageJsonDependencies(rootDir)
   const composerDeps = await scanComposerJsonDependencies(rootDir)
 
@@ -307,6 +310,13 @@ async function validateLocalDependencies(rootDir, promptFn, logFn = null) {
   const countColored = chalk.red(allDeps.length)
   const countText = allDeps.length === 1 ? 'dependency' : 'dependencies'
   const promptMessage = `Found ${countColored} local file ${countText} pointing outside the repository:\n\n${messages.join('\n\n')}\n\nUpdate to latest version?`
+
+  if (!interactive) {
+    throw new ZephyrError(
+      'Zephyr cannot run non-interactively because local file dependencies point outside the repository and require confirmation to update.',
+      {code: 'ZEPHYR_DEPENDENCY_UPDATE_REQUIRED'}
+    )
+  }
 
   // Prompt user
   const { shouldUpdate } = await promptFn([

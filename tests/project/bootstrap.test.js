@@ -1,4 +1,4 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest'
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 
 import {
     mockPrompt,
@@ -75,5 +75,30 @@ describe('project/bootstrap', () => {
             '/workspace/project/.gitignore',
             'node_modules/\n.zephyr/\n'
         )
+    })
+
+    it('fails in non-interactive mode when the release script is missing', async () => {
+        mockReadFile.mockResolvedValueOnce(
+            JSON.stringify({
+                name: 'demo-app',
+                scripts: {
+                    test: 'vitest'
+                }
+            })
+        )
+
+        const {ensureProjectReleaseScript} = await import('#src/project/bootstrap.mjs')
+
+        await expect(ensureProjectReleaseScript('/workspace/project', {
+            runPrompt: mockPrompt,
+            runCommand: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn(),
+            interactive: false
+        })).rejects.toMatchObject({
+            code: 'ZEPHYR_RELEASE_SCRIPT_REQUIRED'
+        })
+
+        expect(mockPrompt).not.toHaveBeenCalled()
     })
 })

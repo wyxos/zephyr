@@ -26,7 +26,9 @@ async function maybeRecoverLaravelMaintenanceMode({
     executionState,
     executeRemote,
     runPrompt,
-    logWarning
+    logProcessing,
+    logWarning,
+    executionMode = {}
 } = {}) {
     if (!remotePlan?.remoteIsLaravel || !remotePlan?.maintenanceModeEnabled) {
         return
@@ -36,12 +38,27 @@ async function maybeRecoverLaravelMaintenanceMode({
         return
     }
 
-    if (typeof runPrompt !== 'function' || typeof executeRemote !== 'function') {
+    if (typeof executeRemote !== 'function') {
         logWarning?.('Deployment failed while Laravel maintenance mode may still be enabled.')
         return
     }
 
     try {
+        if (executionMode?.interactive === false) {
+            logProcessing?.('Deployment failed after Laravel maintenance mode was enabled. Running `artisan up` automatically...')
+            await executeRemote(
+                'Disable Laravel maintenance mode',
+                remotePlan.maintenanceUpCommand ?? `${remotePlan.phpCommand} artisan up`
+            )
+            executionState.exitedMaintenanceMode = true
+            return
+        }
+
+        if (typeof runPrompt !== 'function') {
+            logWarning?.('Deployment failed while Laravel maintenance mode may still be enabled.')
+            return
+        }
+
         const answers = await runPrompt([
             {
                 type: 'confirm',
@@ -82,7 +99,8 @@ export async function runDeployment(config, options = {}) {
         logError,
         runPrompt,
         createSshClient,
-        runCommand
+        runCommand,
+        executionMode
     } = context
 
     await cleanupOldLogs(rootDir)
@@ -126,7 +144,11 @@ export async function runDeployment(config, options = {}) {
         remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
 
         logProcessing('Connection established. Acquiring deployment lock on server...')
-        await acquireRemoteLock(ssh, remoteCwd, rootDir, {runPrompt, logWarning})
+        await acquireRemoteLock(ssh, remoteCwd, rootDir, {
+            runPrompt,
+            logWarning,
+            interactive: executionMode?.interactive !== false
+        })
         lockAcquired = true
         logProcessing(`Lock acquired. Running deployment commands in ${remoteCwd}...`)
 
@@ -145,6 +167,7 @@ export async function runDeployment(config, options = {}) {
             snapshot,
             rootDir,
             requiredPhpVersion,
+            executionMode,
             ssh,
             remoteCwd,
             executeRemote,
@@ -179,12 +202,18 @@ export async function runDeployment(config, options = {}) {
             executionState,
             executeRemote,
             runPrompt,
-            logWarning
+            logProcessing,
+            logWarning,
+            executionMode
         })
 
         if (lockAcquired && ssh && remoteCwd) {
             try {
-                await compareLocksAndPrompt(rootDir, ssh, remoteCwd, {runPrompt, logWarning})
+                await compareLocksAndPrompt(rootDir, ssh, remoteCwd, {
+                    runPrompt,
+                    logWarning,
+                    interactive: executionMode?.interactive !== false
+                })
             } catch {
                 // Ignore lock comparison errors during error handling
             }

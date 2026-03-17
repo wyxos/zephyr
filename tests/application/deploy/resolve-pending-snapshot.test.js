@@ -122,4 +122,60 @@ describe('resolvePendingSnapshot', () => {
             })
         ])
     })
+
+    it('requires an explicit pending snapshot decision in non-interactive mode', async () => {
+        mockLoadPendingTasksSnapshot.mockResolvedValue({
+            serverName: 'production',
+            branch: 'main',
+            taskLabels: ['Pull latest changes for main']
+        })
+
+        const {resolvePendingSnapshot} = await import('#src/application/deploy/resolve-pending-snapshot.mjs')
+
+        await expect(resolvePendingSnapshot('/workspace/project', {
+            serverName: 'production',
+            branch: 'main'
+        }, {
+            runPrompt: vi.fn(),
+            logProcessing: vi.fn(),
+            logWarning: vi.fn(),
+            executionMode: {
+                interactive: false,
+                resumePending: false,
+                discardPending: false
+            }
+        })).rejects.toMatchObject({
+            code: 'ZEPHYR_PENDING_SNAPSHOT_ACTION_REQUIRED'
+        })
+    })
+
+    it('resumes a pending snapshot without prompting in non-interactive mode when explicitly requested', async () => {
+        const snapshot = {
+            serverName: 'production',
+            branch: 'main',
+            taskLabels: ['Pull latest changes for main']
+        }
+        mockLoadPendingTasksSnapshot.mockResolvedValue(snapshot)
+
+        const logProcessing = vi.fn()
+
+        const {resolvePendingSnapshot} = await import('#src/application/deploy/resolve-pending-snapshot.mjs')
+
+        const result = await resolvePendingSnapshot('/workspace/project', {
+            serverName: 'production',
+            branch: 'main'
+        }, {
+            runPrompt: vi.fn(),
+            logProcessing,
+            logWarning: vi.fn(),
+            executionMode: {
+                interactive: false,
+                resumePending: true,
+                discardPending: false
+            }
+        })
+
+        expect(result).toBe(snapshot)
+        expect(logProcessing).toHaveBeenCalledWith('Resuming deployment using saved task snapshot...')
+    })
 })

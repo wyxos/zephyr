@@ -386,4 +386,52 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             'bootstrap/cache is writable by the deploy user (forge:www-data, mode 755), but it is not group-writable. Web-created cache files may cause later permission drift.'
         )
     })
+
+    it('requires an explicit maintenance-mode flag for non-interactive Laravel deploys', async () => {
+        mockFindPhpBinary.mockResolvedValue('php')
+
+        const ssh = {
+            execCommand: vi.fn(async (command) => {
+                if (command.includes('grep -q "laravel/framework"')) {
+                    return {stdout: 'yes', code: 0}
+                }
+
+                if (command.includes('config/horizon.php')) {
+                    return {stdout: 'no', code: 0}
+                }
+
+                return {stdout: '', code: 0}
+            })
+        }
+
+        const executeRemote = vi.fn(async (label) => {
+            if (label === 'Inspect pending changes') {
+                return {stdout: 'composer.json\n', code: 0}
+            }
+
+            return {stdout: '', stderr: '', code: 0}
+        })
+
+        await expect(buildRemoteDeploymentPlan({
+            config: {
+                branch: 'main',
+                serverName: 'production',
+                projectPath: '~/webapps/demo',
+                sshUser: 'forge'
+            },
+            ssh,
+            remoteCwd: '/home/forge/webapps/demo',
+            executeRemote,
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn(),
+            runPrompt: vi.fn(),
+            executionMode: {
+                interactive: false,
+                maintenanceMode: null
+            }
+        })).rejects.toMatchObject({
+            code: 'ZEPHYR_MAINTENANCE_FLAG_REQUIRED'
+        })
+    })
 })

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
+import {ZephyrError} from '../runtime/errors.mjs'
 import { ensureDirectory } from '../utils/paths.mjs'
 import { generateId } from '../utils/id.mjs'
 
@@ -25,7 +26,12 @@ export function migrateServers(servers) {
   return { servers: migrated, needsMigration }
 }
 
-export async function loadServers({ logSuccess, logWarning } = {}) {
+export async function loadServers({
+  logSuccess,
+  logWarning,
+  strict = false,
+  allowMigration = true
+} = {}) {
   try {
     const raw = await fs.readFile(SERVERS_FILE, 'utf8')
     const data = JSON.parse(raw)
@@ -34,6 +40,13 @@ export async function loadServers({ logSuccess, logWarning } = {}) {
     const { servers: migrated, needsMigration } = migrateServers(servers)
 
     if (needsMigration) {
+      if (!allowMigration) {
+        throw new ZephyrError(
+          'Zephyr cannot run non-interactively because ~/.config/zephyr/servers.json needs migration. Rerun interactively once to update the config.',
+          {code: 'ZEPHYR_SERVERS_CONFIG_MIGRATION_REQUIRED'}
+        )
+      }
+
       await saveServers(migrated)
       logSuccess?.('Migrated servers configuration to use unique IDs.')
     }
@@ -41,7 +54,25 @@ export async function loadServers({ logSuccess, logWarning } = {}) {
     return migrated
   } catch (error) {
     if (error.code === 'ENOENT') {
+      if (strict) {
+        throw new ZephyrError(
+          'Zephyr cannot run non-interactively because ~/.config/zephyr/servers.json does not exist. Run an interactive deployment first to create it.',
+          {code: 'ZEPHYR_SERVERS_CONFIG_MISSING'}
+        )
+      }
+
       return []
+    }
+
+    if (error instanceof ZephyrError) {
+      throw error
+    }
+
+    if (strict) {
+      throw new ZephyrError(
+        'Zephyr cannot run non-interactively because ~/.config/zephyr/servers.json could not be read.',
+        {code: 'ZEPHYR_SERVERS_CONFIG_INVALID', cause: error}
+      )
     }
 
     logWarning?.('Failed to read servers.json, starting with an empty list.')
@@ -54,4 +85,3 @@ export async function saveServers(servers) {
   const payload = JSON.stringify(servers, null, 2)
   await fs.writeFile(SERVERS_FILE, `${payload}\n`)
 }
-

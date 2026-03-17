@@ -23,7 +23,17 @@ const {
         runPrompt: vi.fn(),
         runCommand: vi.fn(),
         runCommandCapture: vi.fn(),
-        createSshClient: vi.fn()
+        createSshClient: vi.fn(),
+        emitEvent: vi.fn(),
+        executionMode: {
+            interactive: true,
+            json: false,
+            workflow: 'deploy',
+            presetName: null,
+            maintenanceMode: null,
+            resumePending: false,
+            discardPending: false
+        }
     },
     configurationService: {
         selectServer: vi.fn(),
@@ -116,6 +126,16 @@ describe('main entrypoint', () => {
         appContext.runCommand.mockReset()
         appContext.runCommandCapture.mockReset()
         appContext.createSshClient.mockReset()
+        appContext.emitEvent.mockReset()
+        appContext.executionMode = {
+            interactive: true,
+            json: false,
+            workflow: 'deploy',
+            presetName: null,
+            maintenanceMode: null,
+            resumePending: false,
+            discardPending: false
+        }
 
         mockCreateConfigurationService.mockReturnValue(configurationService)
         mockResolvePendingSnapshot.mockResolvedValue(null)
@@ -178,7 +198,12 @@ describe('main entrypoint', () => {
             runPrompt: appContext.runPrompt,
             runCommand: appContext.runCommand
         }))
-        expect(mockValidateLocalDependencies).toHaveBeenCalledWith(process.cwd(), appContext.runPrompt, appContext.logSuccess)
+        expect(mockValidateLocalDependencies).toHaveBeenCalledWith(
+            process.cwd(),
+            appContext.runPrompt,
+            appContext.logSuccess,
+            {interactive: true}
+        )
         expect(mockSelectDeploymentTarget).toHaveBeenCalledWith(process.cwd(), expect.objectContaining({
             configurationService,
             runPrompt: appContext.runPrompt,
@@ -197,5 +222,88 @@ describe('main entrypoint', () => {
             versionArg: 'minor',
             context: appContext
         })
+    })
+
+    it('emits JSON lifecycle events for a successful non-interactive deployment', async () => {
+        const deploymentConfig = {
+            serverName: 'production',
+            serverIp: '203.0.113.10',
+            projectPath: '~/webapps/demo',
+            branch: 'main',
+            sshUser: 'forge',
+            sshKey: '~/.ssh/id_rsa'
+        }
+
+        mockAccess.mockImplementation(async () => {
+            throw new Error('ENOENT')
+        })
+        mockSelectDeploymentTarget.mockResolvedValue({deploymentConfig})
+        appContext.executionMode = {
+            interactive: false,
+            json: true,
+            workflow: 'deploy',
+            presetName: 'production',
+            maintenanceMode: false,
+            resumePending: false,
+            discardPending: false
+        }
+
+        const {main} = await import('#src/main.mjs')
+
+        await main({
+            nonInteractive: true,
+            json: true,
+            presetName: 'production',
+            maintenanceMode: false,
+            context: appContext
+        })
+
+        expect(appContext.runPrompt).not.toHaveBeenCalled()
+        expect(appContext.emitEvent).toHaveBeenNthCalledWith(1, 'run_started', expect.objectContaining({
+            message: expect.stringMatching(/^Zephyr v\d+\.\d+\.\d+ starting$/)
+        }))
+        expect(appContext.emitEvent).toHaveBeenLastCalledWith('run_completed', expect.objectContaining({
+            message: 'Zephyr workflow completed successfully.'
+        }))
+        expect(appContext.emitEvent.mock.calls.filter(([event]) => event === 'run_completed')).toHaveLength(1)
+        expect(appContext.emitEvent.mock.calls.filter(([event]) => event === 'run_failed')).toHaveLength(0)
+    })
+
+    it('emits a JSON failure event for invalid options before running a workflow', async () => {
+        appContext.executionMode = {
+            interactive: false,
+            json: true,
+            workflow: 'release-packagist',
+            presetName: null,
+            maintenanceMode: null,
+            resumePending: false,
+            discardPending: false
+        }
+
+        const {main} = await import('#src/main.mjs')
+        const result = main({
+            workflowType: 'packagist',
+            nonInteractive: true,
+            json: true,
+            presetName: 'production',
+            context: appContext
+        })
+        let failure = null
+
+        try {
+            await result
+        } catch (error) {
+            failure = error
+        }
+
+        expect(failure).toMatchObject({
+            code: 'ZEPHYR_INVALID_OPTIONS'
+        })
+
+        expect(appContext.emitEvent).toHaveBeenCalledTimes(1)
+        expect(appContext.emitEvent).toHaveBeenCalledWith('run_failed', expect.objectContaining({
+            code: 'ZEPHYR_INVALID_OPTIONS',
+            message: '--preset is only valid for app deployments.'
+        }))
     })
 })

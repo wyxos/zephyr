@@ -43,6 +43,15 @@ zephyr
 # Deploy an app and bump the local npm package version first
 zephyr minor
 
+# Deploy a configured app non-interactively
+zephyr --non-interactive --preset wyxos-release --maintenance off
+
+# Resume a pending non-interactive deployment
+zephyr --non-interactive --preset wyxos-release --resume-pending --maintenance off
+
+# Emit NDJSON events for automation or agent tooling
+zephyr --non-interactive --json --preset wyxos-release --maintenance on
+
 # Release a Node/Vue package (defaults to a patch bump)
 zephyr --type node
 
@@ -54,6 +63,67 @@ zephyr --type packagist patch
 ```
 
 When `--type node` or `--type vue` is used without a bump argument, Zephyr defaults to `patch`.
+
+## Interactive and Non-Interactive Modes
+
+Interactive mode remains the default and is the best fit for first-time setup, config repair, and one-off deployments.
+
+Non-interactive mode is strict and is intended for already-configured projects:
+
+- `--non-interactive` fails instead of prompting
+- app deployments require `--preset <name>`
+- Laravel app deployments require `--maintenance on|off` unless resuming a saved snapshot that already contains the choice
+- pending deployment snapshots require either `--resume-pending` or `--discard-pending`
+- stale remote locks are never auto-removed in non-interactive mode
+- `--json` is only supported together with `--non-interactive`
+
+If Zephyr would normally prompt to:
+
+- create or repair config
+- save a preset
+- install the `release` script
+- confirm local path dependency updates
+- resolve a stale remote lock
+
+then non-interactive mode stops immediately with a clear error instead.
+
+## AI Agents and Automation
+
+Zephyr can be used safely by Codex, CI jobs, or other automation once configuration is already in place.
+
+Recommended pattern for app deployments:
+
+```bash
+zephyr --non-interactive --json --preset wyxos-release --maintenance off
+```
+
+Recommended pattern for package releases:
+
+```bash
+zephyr --type node --non-interactive --json minor
+zephyr --type packagist --non-interactive --json patch
+```
+
+In `--json` mode Zephyr emits NDJSON events on `stdout` with a stable shape:
+
+- `run_started`
+- `log`
+- `prompt_required`
+- `run_completed`
+- `run_failed`
+
+Each event includes:
+
+- `event`
+- `timestamp`
+- `workflow`
+- `message`
+- `level` where relevant
+- `data`
+
+`run_failed` also includes a stable `code` field for automation checks.
+
+In `--json` mode, Zephyr reserves `stdout` for NDJSON events and routes inherited local command output to `stderr` so agent parsers do not get corrupted.
 
 On a first run inside a project with `package.json`, Zephyr can:
 - add `.zephyr/` to `.gitignore`
@@ -79,6 +149,7 @@ npm run release
 - `npm run release` is the recommended app/package entrypoint once the release script has been installed.
 - For `--type node` workflows, Zephyr runs your project's `lint` script when present.
 - For `--type node` workflows, Zephyr runs `test:run` or `test` when present.
+- For non-interactive app deploys, use a saved preset name instead of relying on prompt fallback.
 
 ## Features
 

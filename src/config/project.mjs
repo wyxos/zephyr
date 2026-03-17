@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 
+import {ZephyrError} from '../runtime/errors.mjs'
 import { ensureDirectory, getProjectConfigDir, getProjectConfigPath } from '../utils/paths.mjs'
 import { generateId } from '../utils/id.mjs'
 
@@ -69,7 +70,12 @@ export function migratePresets(presets, apps) {
   return { presets: migrated, needsMigration }
 }
 
-export async function loadProjectConfig(rootDir, servers = [], { logSuccess, logWarning } = {}) {
+export async function loadProjectConfig(rootDir, servers = [], {
+  logSuccess,
+  logWarning,
+  strict = false,
+  allowMigration = true
+} = {}) {
   const configPath = getProjectConfigPath(rootDir)
 
   try {
@@ -82,6 +88,13 @@ export async function loadProjectConfig(rootDir, servers = [], { logSuccess, log
     const { presets: migratedPresets, needsMigration: presetsNeedMigration } = migratePresets(presets, migratedApps)
 
     if (appsNeedMigration || presetsNeedMigration) {
+      if (!allowMigration) {
+        throw new ZephyrError(
+          'Zephyr cannot run non-interactively because .zephyr/config.json needs migration. Rerun interactively once to update the config.',
+          {code: 'ZEPHYR_PROJECT_CONFIG_MIGRATION_REQUIRED'}
+        )
+      }
+
       await saveProjectConfig(rootDir, {
         apps: migratedApps,
         presets: migratedPresets
@@ -92,7 +105,25 @@ export async function loadProjectConfig(rootDir, servers = [], { logSuccess, log
     return { apps: migratedApps, presets: migratedPresets }
   } catch (error) {
     if (error.code === 'ENOENT') {
+      if (strict) {
+        throw new ZephyrError(
+          'Zephyr cannot run non-interactively because .zephyr/config.json does not exist. Run an interactive deployment first to create it.',
+          {code: 'ZEPHYR_PROJECT_CONFIG_MISSING'}
+        )
+      }
+
       return { apps: [], presets: [] }
+    }
+
+    if (error instanceof ZephyrError) {
+      throw error
+    }
+
+    if (strict) {
+      throw new ZephyrError(
+        'Zephyr cannot run non-interactively because .zephyr/config.json could not be read.',
+        {code: 'ZEPHYR_PROJECT_CONFIG_INVALID', cause: error}
+      )
     }
 
     logWarning?.('Failed to read .zephyr/config.json, starting with an empty list of apps.')

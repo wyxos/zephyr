@@ -1,27 +1,37 @@
 import process from 'node:process'
-import chalk from 'chalk'
-import {createChalkLogger} from './utils/output.mjs'
-import {
-    parseReleaseArgs,
-} from './release/shared.mjs'
+import {createAppContext} from './runtime/app-context.mjs'
+import {parseReleaseArgs} from './release/shared.mjs'
 import {releaseNodePackage} from './application/release/release-node-package.mjs'
 
-const {logProcessing: logStep, logSuccess, logWarning} = createChalkLogger(chalk)
-
-export async function releaseNode() {
-    const {releaseType, skipTests, skipLint, skipBuild, skipDeploy} = parseReleaseArgs({
-        booleanFlags: ['--skip-tests', '--skip-lint', '--skip-build', '--skip-deploy']
+export async function releaseNode(options = {}) {
+    const parsed = options.releaseType
+        ? options
+        : parseReleaseArgs({
+            booleanFlags: ['--skip-tests', '--skip-lint', '--skip-build', '--skip-deploy']
+        })
+    const rootDir = options.rootDir ?? process.cwd()
+    const context = options.context ?? createAppContext({
+        executionMode: {
+            interactive: true,
+            json: false,
+            workflow: 'release-node'
+        }
     })
-    const rootDir = process.cwd()
+    const {logProcessing: logStep, logSuccess, logWarning, runPrompt, runCommand, runCommandCapture, executionMode} = context
+
     await releaseNodePackage({
-        releaseType,
-        skipTests,
-        skipLint,
-        skipBuild,
-        skipDeploy,
+        releaseType: parsed.releaseType,
+        skipTests: parsed.skipTests === true,
+        skipLint: parsed.skipLint === true,
+        skipBuild: parsed.skipBuild === true,
+        skipDeploy: parsed.skipDeploy === true,
         rootDir,
         logStep,
         logSuccess,
-        logWarning
+        logWarning,
+        runPrompt,
+        runCommandImpl: runCommand,
+        runCommandCaptureImpl: runCommandCapture,
+        interactive: executionMode?.interactive !== false
     })
 }
