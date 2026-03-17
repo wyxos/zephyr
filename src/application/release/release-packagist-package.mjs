@@ -8,7 +8,7 @@ import {writeStderr} from '../../utils/output.mjs'
 import {
     ensureCleanWorkingTree,
     ensureReleaseBranchReady,
-    runReleaseCommand as runCommand,
+    runReleaseCommand,
     validateReleaseDependencies
 } from '../../release/shared.mjs'
 
@@ -50,7 +50,13 @@ async function hasArtisan(rootDir = process.cwd()) {
     }
 }
 
-async function runLint(skipLint, rootDir = process.cwd(), {logStep, logSuccess, logWarning} = {}) {
+async function runLint(skipLint, rootDir = process.cwd(), {
+    logStep,
+    logSuccess,
+    logWarning,
+    runCommand = runReleaseCommand,
+    progressWriter = process.stdout
+} = {}) {
     if (skipLint) {
         logWarning?.('Skipping lint because --skip-lint flag was provided.')
         return
@@ -67,9 +73,9 @@ async function runLint(skipLint, rootDir = process.cwd(), {logStep, logSuccess, 
 
     let dotInterval = null
     try {
-        process.stdout.write('  ')
+        progressWriter.write('  ')
         dotInterval = setInterval(() => {
-            process.stdout.write('.')
+            progressWriter.write('.')
         }, 200)
 
         await runCommand('php', [pintPath], {capture: true, cwd: rootDir})
@@ -78,14 +84,14 @@ async function runLint(skipLint, rootDir = process.cwd(), {logStep, logSuccess, 
             clearInterval(dotInterval)
             dotInterval = null
         }
-        process.stdout.write('\n')
+        progressWriter.write('\n')
         logSuccess?.('Lint passed.')
     } catch (error) {
         if (dotInterval) {
             clearInterval(dotInterval)
             dotInterval = null
         }
-        process.stdout.write('\n')
+        progressWriter.write('\n')
         if (error.stdout) {
             writeStderr(error.stdout)
         }
@@ -96,7 +102,13 @@ async function runLint(skipLint, rootDir = process.cwd(), {logStep, logSuccess, 
     }
 }
 
-async function runTests(skipTests, composer, rootDir = process.cwd(), {logStep, logSuccess, logWarning} = {}) {
+async function runTests(skipTests, composer, rootDir = process.cwd(), {
+    logStep,
+    logSuccess,
+    logWarning,
+    runCommand = runReleaseCommand,
+    progressWriter = process.stdout
+} = {}) {
     if (skipTests) {
         logWarning?.('Skipping tests because --skip-tests flag was provided.')
         return
@@ -114,9 +126,9 @@ async function runTests(skipTests, composer, rootDir = process.cwd(), {logStep, 
 
     let dotInterval = null
     try {
-        process.stdout.write('  ')
+        progressWriter.write('  ')
         dotInterval = setInterval(() => {
-            process.stdout.write('.')
+            progressWriter.write('.')
         }, 200)
 
         if (hasArtisanFile) {
@@ -129,14 +141,14 @@ async function runTests(skipTests, composer, rootDir = process.cwd(), {logStep, 
             clearInterval(dotInterval)
             dotInterval = null
         }
-        process.stdout.write('\n')
+        progressWriter.write('\n')
         logSuccess?.('Tests passed.')
     } catch (error) {
         if (dotInterval) {
             clearInterval(dotInterval)
             dotInterval = null
         }
-        process.stdout.write('\n')
+        progressWriter.write('\n')
         if (error.stdout) {
             writeStderr(error.stdout)
         }
@@ -147,7 +159,11 @@ async function runTests(skipTests, composer, rootDir = process.cwd(), {logStep, 
     }
 }
 
-async function bumpVersion(releaseType, rootDir = process.cwd(), {logStep, logSuccess} = {}) {
+async function bumpVersion(releaseType, rootDir = process.cwd(), {
+    logStep,
+    logSuccess,
+    runCommand = runReleaseCommand
+} = {}) {
     logStep?.('Bumping composer version...')
 
     const composer = await readComposer(rootDir)
@@ -179,7 +195,11 @@ async function bumpVersion(releaseType, rootDir = process.cwd(), {logStep, logSu
     return {...composer, version: newVersion}
 }
 
-async function pushChanges(rootDir = process.cwd(), {logStep, logSuccess} = {}) {
+async function pushChanges(rootDir = process.cwd(), {
+    logStep,
+    logSuccess,
+    runCommand = runReleaseCommand
+} = {}) {
     logStep?.('Pushing commits to origin...')
     await runCommand('git', ['push'], {cwd: rootDir})
 
@@ -196,8 +216,19 @@ export async function releasePackagistPackage({
                                                   rootDir = process.cwd(),
                                                   logStep,
                                                   logSuccess,
-                                                  logWarning
+                                                  logWarning,
+                                                  runPrompt,
+                                                  runCommandImpl,
+                                                  runCommandCaptureImpl,
+                                                  interactive = true,
+                                                  progressWriter = process.stdout
                                               } = {}) {
+    const runCommand = (command, args, options = {}) => runReleaseCommand(command, args, {
+        ...options,
+        runCommandImpl,
+        runCommandCaptureImpl
+    })
+
     logStep?.('Reading composer metadata...')
     const composer = await readComposer(rootDir)
 
@@ -206,17 +237,21 @@ export async function releasePackagistPackage({
     }
 
     logStep?.('Validating dependencies...')
-    await validateReleaseDependencies(rootDir, {logSuccess})
+    await validateReleaseDependencies(rootDir, {
+        prompt: runPrompt,
+        logSuccess,
+        interactive
+    })
 
     logStep?.('Checking working tree status...')
     await ensureCleanWorkingTree(rootDir, {runCommand})
     await ensureReleaseBranchReady({rootDir, branchMethod: 'show-current', logStep, logWarning})
 
-    await runLint(skipLint, rootDir, {logStep, logSuccess, logWarning})
-    await runTests(skipTests, composer, rootDir, {logStep, logSuccess, logWarning})
+    await runLint(skipLint, rootDir, {logStep, logSuccess, logWarning, runCommand, progressWriter})
+    await runTests(skipTests, composer, rootDir, {logStep, logSuccess, logWarning, runCommand, progressWriter})
 
-    const updatedComposer = await bumpVersion(releaseType, rootDir, {logStep, logSuccess})
-    await pushChanges(rootDir, {logStep, logSuccess})
+    const updatedComposer = await bumpVersion(releaseType, rootDir, {logStep, logSuccess, runCommand})
+    await pushChanges(rootDir, {logStep, logSuccess, runCommand})
 
     logSuccess?.(`Release workflow completed for ${composer.name}@${updatedComposer.version}.`)
     logStep?.('Note: Packagist will automatically detect the new git tag and update the package.')

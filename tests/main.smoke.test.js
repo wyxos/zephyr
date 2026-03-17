@@ -133,7 +133,17 @@ describe('main smoke', () => {
             }),
             createSshClient: vi.fn(),
             runCommand,
-            runCommandCapture
+            runCommandCapture,
+            emitEvent: vi.fn(),
+            executionMode: {
+                interactive: true,
+                json: false,
+                workflow: 'deploy',
+                presetName: null,
+                maintenanceMode: null,
+                resumePending: false,
+                discardPending: false
+            }
         }
 
         globalThis.__zephyrSmokeContext = smokeContext
@@ -162,7 +172,8 @@ describe('main smoke', () => {
         expect(mockValidateLocalDependencies).toHaveBeenCalledWith(
             effectiveProjectDir,
             smokeContext.runPrompt,
-            smokeContext.logSuccess
+            smokeContext.logSuccess,
+            {interactive: true}
         )
         expect(mockRunDeployment).toHaveBeenCalledWith({
             serverName: 'production',

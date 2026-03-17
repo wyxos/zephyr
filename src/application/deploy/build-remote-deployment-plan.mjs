@@ -1,4 +1,5 @@
 import {findPhpBinary} from '../../infrastructure/php/version.mjs'
+import {ZephyrError} from '../../runtime/errors.mjs'
 import {planLaravelDeploymentTasks} from './plan-laravel-deployment-tasks.mjs'
 
 const PRERENDERED_MAINTENANCE_VIEW = 'errors::503'
@@ -241,7 +242,8 @@ function createMaintenanceModePlan({
 async function resolveMaintenanceMode({
                                          snapshot,
                                          remoteIsLaravel,
-                                         runPrompt
+                                         runPrompt,
+                                         executionMode = {}
                                      } = {}) {
     if (!remoteIsLaravel) {
         return false
@@ -249,6 +251,17 @@ async function resolveMaintenanceMode({
 
     if (typeof snapshot?.maintenanceModeEnabled === 'boolean') {
         return snapshot.maintenanceModeEnabled
+    }
+
+    if (executionMode?.interactive === false) {
+        if (typeof executionMode.maintenanceMode !== 'boolean') {
+            throw new ZephyrError(
+                'Zephyr cannot run this Laravel deployment non-interactively without an explicit maintenance-mode decision. Pass --maintenance on or --maintenance off.',
+                {code: 'ZEPHYR_MAINTENANCE_FLAG_REQUIRED'}
+            )
+        }
+
+        return executionMode.maintenanceMode
     }
 
     if (typeof runPrompt !== 'function') {
@@ -329,6 +342,7 @@ export async function buildRemoteDeploymentPlan({
                                                     config,
                                                     snapshot = null,
                                                     requiredPhpVersion = null,
+                                                    executionMode = {},
                                                     ssh,
                                                     remoteCwd,
                                                     executeRemote,
@@ -371,7 +385,8 @@ export async function buildRemoteDeploymentPlan({
     const maintenanceModeEnabled = await resolveMaintenanceMode({
         snapshot,
         remoteIsLaravel,
-        runPrompt
+        runPrompt,
+        executionMode
     })
 
     const maintenanceModePlan = await resolveMaintenanceModePlan({

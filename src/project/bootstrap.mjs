@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
+import {ZephyrError} from '../runtime/errors.mjs'
+
 export async function ensureGitignoreEntry(rootDir, {
   projectConfigDir = '.zephyr',
   runCommand,
@@ -66,6 +68,7 @@ export async function ensureProjectReleaseScript(rootDir, {
   runCommand,
   logSuccess,
   logWarning,
+  interactive = true,
   releaseScriptName = 'release',
   releaseScriptCommand = 'npx @wyxos/zephyr@latest'
 } = {}) {
@@ -94,6 +97,13 @@ export async function ensureProjectReleaseScript(rootDir, {
 
   if (currentCommand && currentCommand.includes('@wyxos/zephyr')) {
     return false
+  }
+
+  if (!interactive) {
+    throw new ZephyrError(
+      'Zephyr cannot run non-interactively because package.json is missing the Zephyr release script. Add `"release": "npx @wyxos/zephyr@latest"` and rerun.',
+      {code: 'ZEPHYR_RELEASE_SCRIPT_REQUIRED'}
+    )
   }
 
   const { installReleaseScript } = await runPrompt([
@@ -144,4 +154,3 @@ export async function ensureProjectReleaseScript(rootDir, {
 
   return true
 }
-

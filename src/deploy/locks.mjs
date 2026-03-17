@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import process from 'node:process'
 
+import {ZephyrError} from '../runtime/errors.mjs'
 import { PROJECT_LOCK_FILE, ensureDirectory, getLockFilePath, getProjectConfigDir } from '../utils/paths.mjs'
 
 function createLockPayload() {
@@ -67,7 +68,26 @@ export async function readRemoteLock(ssh, remoteCwd) {
   return null
 }
 
-export async function compareLocksAndPrompt(rootDir, ssh, remoteCwd, { runPrompt, logWarning } = {}) {
+function parseLockDetails(rawContent = '') {
+  try {
+    return JSON.parse(rawContent.trim())
+  } catch (_error) {
+    return { raw: rawContent.trim() }
+  }
+}
+
+function formatLockHolder(details = {}) {
+  const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
+  const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
+
+  return { startedBy, startedAt }
+}
+
+export async function compareLocksAndPrompt(rootDir, ssh, remoteCwd, {
+  runPrompt,
+  logWarning,
+  interactive = true
+} = {}) {
   const localLock = await readLocalLock(rootDir)
   const remoteLock = await readRemoteLock(ssh, remoteCwd)
 
@@ -79,8 +99,15 @@ export async function compareLocksAndPrompt(rootDir, ssh, remoteCwd, { runPrompt
   const remoteKey = `${remoteLock.user}@${remoteLock.hostname}:${remoteLock.pid}:${remoteLock.startedAt}`
 
   if (localKey === remoteKey) {
-    const startedBy = remoteLock.user ? `${remoteLock.user}@${remoteLock.hostname ?? 'unknown'}` : 'unknown user'
-    const startedAt = remoteLock.startedAt ? ` at ${remoteLock.startedAt}` : ''
+    const { startedBy, startedAt } = formatLockHolder(remoteLock)
+
+    if (!interactive) {
+      throw new ZephyrError(
+        `Stale deployment lock detected on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/.zephyr/${PROJECT_LOCK_FILE} manually before rerunning with --non-interactive.`,
+        {code: 'ZEPHYR_STALE_REMOTE_LOCK'}
+      )
+    }
+
     const { shouldRemove } = await runPrompt([
       {
         type: 'confirm',
@@ -103,7 +130,11 @@ export async function compareLocksAndPrompt(rootDir, ssh, remoteCwd, { runPrompt
   return false
 }
 
-export async function acquireRemoteLock(ssh, remoteCwd, rootDir, { runPrompt, logWarning } = {}) {
+export async function acquireRemoteLock(ssh, remoteCwd, rootDir, {
+  runPrompt,
+  logWarning,
+  interactive = true
+} = {}) {
   const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
   const escapedLockPath = lockPath.replace(/'/g, "'\\''")
   const checkCommand = `mkdir -p .zephyr && if [ -f '${escapedLockPath}' ]; then cat '${escapedLockPath}'; else echo "LOCK_NOT_FOUND"; fi`
@@ -113,31 +144,17 @@ export async function acquireRemoteLock(ssh, remoteCwd, rootDir, { runPrompt, lo
   if (checkResult.stdout && checkResult.stdout.trim() !== 'LOCK_NOT_FOUND' && checkResult.stdout.trim() !== '') {
     const localLock = await readLocalLock(rootDir)
     if (localLock) {
-      const removed = await compareLocksAndPrompt(rootDir, ssh, remoteCwd, { runPrompt, logWarning })
+      const removed = await compareLocksAndPrompt(rootDir, ssh, remoteCwd, { runPrompt, logWarning, interactive })
       if (!removed) {
-        let details = {}
-        try {
-          details = JSON.parse(checkResult.stdout.trim())
-        } catch (_error) {
-          details = { raw: checkResult.stdout.trim() }
-        }
-
-        const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
-        const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
+        const details = parseLockDetails(checkResult.stdout.trim())
+        const { startedBy, startedAt } = formatLockHolder(details)
         throw new Error(
           `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
         )
       }
     } else {
-      let details = {}
-      try {
-        details = JSON.parse(checkResult.stdout.trim())
-      } catch (_error) {
-        details = { raw: checkResult.stdout.trim() }
-      }
-
-      const startedBy = details.user ? `${details.user}@${details.hostname ?? 'unknown'}` : 'unknown user'
-      const startedAt = details.startedAt ? ` at ${details.startedAt}` : ''
+      const details = parseLockDetails(checkResult.stdout.trim())
+      const { startedBy, startedAt } = formatLockHolder(details)
       throw new Error(
         `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
       )
@@ -168,4 +185,3 @@ export async function releaseRemoteLock(ssh, remoteCwd, { logWarning } = {}) {
     logWarning?.(`Failed to remove lock file: ${result.stderr}`)
   }
 }
-

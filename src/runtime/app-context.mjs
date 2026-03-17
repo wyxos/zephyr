@@ -2,7 +2,7 @@ import chalk from 'chalk'
 import inquirer from 'inquirer'
 import {NodeSSH} from 'node-ssh'
 
-import {createChalkLogger} from '../utils/output.mjs'
+import {createChalkLogger, createJsonEventEmitter, createJsonLogger} from '../utils/output.mjs'
 import {runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase} from '../utils/command.mjs'
 import {createLocalCommandRunners} from './local-command.mjs'
 import {createRunPrompt} from './prompt.mjs'
@@ -13,14 +13,39 @@ export function createAppContext({
                                      inquirerInstance = inquirer,
                                      NodeSSHClass = NodeSSH,
                                      runCommandImpl = runCommandBase,
-                                     runCommandCaptureImpl = runCommandCaptureBase
+                                     runCommandCaptureImpl = runCommandCaptureBase,
+                                     executionMode = {}
                                  } = {}) {
-    const {logProcessing, logSuccess, logWarning, logError} = createChalkLogger(chalkInstance)
-    const runPrompt = createRunPrompt({inquirer: inquirerInstance})
+    const normalizedExecutionMode = {
+        interactive: executionMode.interactive !== false,
+        json: executionMode.json === true,
+        workflow: executionMode.workflow ?? 'deploy',
+        presetName: executionMode.presetName ?? null,
+        maintenanceMode: executionMode.maintenanceMode ?? null,
+        resumePending: executionMode.resumePending === true,
+        discardPending: executionMode.discardPending === true
+    }
+    const emitEvent = normalizedExecutionMode.json
+        ? createJsonEventEmitter({workflow: normalizedExecutionMode.workflow})
+        : null
+    const {logProcessing, logSuccess, logWarning, logError} = normalizedExecutionMode.json
+        ? createJsonLogger({emitEvent})
+        : createChalkLogger(chalkInstance)
+    const runPrompt = createRunPrompt({
+        inquirer: inquirerInstance,
+        interactive: normalizedExecutionMode.interactive,
+        emitEvent,
+        workflow: normalizedExecutionMode.workflow
+    })
     const createSshClient = createSshClientFactory({NodeSSH: NodeSSHClass})
     const {runCommand, runCommandCapture} = createLocalCommandRunners({
         runCommandBase: runCommandImpl,
         runCommandCaptureBase: runCommandCaptureImpl
+    })
+
+    const runCommandWithMode = (command, args, options = {}) => runCommand(command, args, {
+        ...options,
+        forwardStdoutToStderr: normalizedExecutionMode.json
     })
 
     return {
@@ -30,7 +55,9 @@ export function createAppContext({
         logError,
         runPrompt,
         createSshClient,
-        runCommand,
-        runCommandCapture
+        runCommand: runCommandWithMode,
+        runCommandCapture,
+        emitEvent,
+        executionMode: normalizedExecutionMode
     }
 }

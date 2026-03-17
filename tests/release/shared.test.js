@@ -96,7 +96,21 @@ describe('release shared helpers', () => {
 
         await validateReleaseDependencies('/workspace/demo', {prompt, logSuccess})
 
-        expect(mockValidateLocalDependencies).toHaveBeenCalledWith('/workspace/demo', prompt, logSuccess)
+        expect(mockValidateLocalDependencies).toHaveBeenCalledWith('/workspace/demo', prompt, logSuccess, {
+            interactive: true
+        })
+    })
+
+    it('passes non-interactive dependency validation through to the dependency scanner', async () => {
+        await validateReleaseDependencies('/workspace/demo', {
+            prompt: vi.fn(),
+            logSuccess: vi.fn(),
+            interactive: false
+        })
+
+        expect(mockValidateLocalDependencies).toHaveBeenCalledWith('/workspace/demo', expect.any(Function), expect.any(Function), {
+            interactive: false
+        })
     })
 
     it('resolves the current branch and verifies upstream state', async () => {

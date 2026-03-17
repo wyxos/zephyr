@@ -99,8 +99,13 @@ describe('release application actions', () => {
             logWarning
         })
 
-        expect(mockValidateReleaseDependencies).toHaveBeenCalledWith(rootDir, {logSuccess})
-        expect(mockEnsureCleanWorkingTree).toHaveBeenCalledWith(rootDir, {runCommand: mockRunReleaseCommand})
+        expect(mockValidateReleaseDependencies).toHaveBeenCalledWith(rootDir, expect.objectContaining({
+            logSuccess,
+            interactive: true
+        }))
+        expect(mockEnsureCleanWorkingTree).toHaveBeenCalledWith(rootDir, {
+            runCommand: expect.any(Function)
+        })
         expect(mockEnsureReleaseBranchReady).toHaveBeenCalledWith(expect.objectContaining({
             rootDir,
             branchMethod: 'show-current',
@@ -151,8 +156,13 @@ describe('release application actions', () => {
         const composer = JSON.parse(await readFile(join(rootDir, 'composer.json'), 'utf8'))
 
         expect(composer.version).toBe('1.0.1')
-        expect(mockValidateReleaseDependencies).toHaveBeenCalledWith(rootDir, {logSuccess})
-        expect(mockEnsureCleanWorkingTree).toHaveBeenCalledWith(rootDir, {runCommand: mockRunReleaseCommand})
+        expect(mockValidateReleaseDependencies).toHaveBeenCalledWith(rootDir, expect.objectContaining({
+            logSuccess,
+            interactive: true
+        }))
+        expect(mockEnsureCleanWorkingTree).toHaveBeenCalledWith(rootDir, {
+            runCommand: expect.any(Function)
+        })
         expect(mockEnsureReleaseBranchReady).toHaveBeenCalledWith(expect.objectContaining({
             rootDir,
             branchMethod: 'show-current',
@@ -290,5 +300,32 @@ describe('release application actions', () => {
         ]))
 
         expect(commandLog.some(({command, args}) => command === 'composer' && args[0] === 'test')).toBe(false)
+    })
+
+    it('passes non-interactive dependency validation through the node release workflow', async () => {
+        await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+            name: '@wyxos/zephyr-test',
+            version: '1.0.0'
+        }, null, 2) + '\n')
+
+        mockRunReleaseCommand.mockResolvedValue({stdout: '', stderr: ''})
+
+        await releaseNodePackage({
+            releaseType: 'patch',
+            skipTests: true,
+            skipLint: true,
+            skipBuild: true,
+            skipDeploy: true,
+            rootDir,
+            logStep: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn(),
+            runPrompt: vi.fn(),
+            interactive: false
+        })
+
+        expect(mockValidateReleaseDependencies).toHaveBeenCalledWith(rootDir, expect.objectContaining({
+            interactive: false
+        }))
     })
 })

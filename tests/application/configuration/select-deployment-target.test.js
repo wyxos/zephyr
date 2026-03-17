@@ -151,4 +151,128 @@ describe('selectDeploymentTarget', () => {
     )
     expect(logWarning).toHaveBeenCalledWith('Removed "Broken preset" from .zephyr/config.json because it is invalid.')
   })
+
+  it('resolves a valid preset by name in non-interactive mode without prompting', async () => {
+    const { projectConfig, server, appConfig, configurationService } = createSelectionScenario()
+    projectConfig.apps = [{...appConfig, serverId: 'server-1'}]
+    projectConfig.presets = [{name: 'Production', appId: 'app-1', branch: 'main'}]
+
+    mockLoadServers.mockResolvedValue([{...server, id: 'server-1'}])
+    mockLoadProjectConfig.mockResolvedValue(projectConfig)
+
+    const emitEvent = vi.fn()
+
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
+
+    const result = await selectDeploymentTarget('/workspace/project', {
+      configurationService,
+      runPrompt: vi.fn(),
+      logProcessing: vi.fn(),
+      logSuccess: vi.fn(),
+      logWarning: vi.fn(),
+      emitEvent,
+      executionMode: {
+        interactive: false,
+        json: true,
+        presetName: 'Production'
+      }
+    })
+
+    expect(result.deploymentConfig).toEqual({
+      serverName: 'production',
+      serverIp: '203.0.113.10',
+      projectPath: '~/webapps/demo',
+      branch: 'main',
+      sshUser: 'forge',
+      sshKey: '~/.ssh/id_rsa'
+    })
+    expect(configurationService.selectPreset).not.toHaveBeenCalled()
+    expect(configurationService.selectServer).not.toHaveBeenCalled()
+    expect(configurationService.selectApp).not.toHaveBeenCalled()
+    expect(emitEvent).toHaveBeenCalledWith('log', expect.objectContaining({
+      level: 'processing',
+      message: 'Selected deployment target.',
+      data: {
+        deploymentConfig: expect.objectContaining({
+          serverName: 'production',
+          branch: 'main'
+        })
+      }
+    }))
+  })
+
+  it('fails when the named preset is missing in non-interactive mode', async () => {
+    const { projectConfig, server, configurationService } = createSelectionScenario()
+
+    mockLoadServers.mockResolvedValue([{...server, id: 'server-1'}])
+    mockLoadProjectConfig.mockResolvedValue(projectConfig)
+
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
+
+    await expect(selectDeploymentTarget('/workspace/project', {
+      configurationService,
+      runPrompt: vi.fn(),
+      logProcessing: vi.fn(),
+      logSuccess: vi.fn(),
+      logWarning: vi.fn(),
+      executionMode: {
+        interactive: false,
+        json: false,
+        presetName: 'Missing'
+      }
+    })).rejects.toMatchObject({
+      code: 'ZEPHYR_PRESET_NOT_FOUND'
+    })
+  })
+
+  it('fails when the selected preset is missing SSH details in non-interactive mode', async () => {
+    const { projectConfig, server, appConfig, configurationService } = createSelectionScenario()
+    projectConfig.apps = [{...appConfig, serverId: 'server-1', sshUser: '', sshKey: ''}]
+    projectConfig.presets = [{name: 'Production', appId: 'app-1', branch: 'main'}]
+
+    mockLoadServers.mockResolvedValue([{...server, id: 'server-1'}])
+    mockLoadProjectConfig.mockResolvedValue(projectConfig)
+
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
+
+    await expect(selectDeploymentTarget('/workspace/project', {
+      configurationService,
+      runPrompt: vi.fn(),
+      logProcessing: vi.fn(),
+      logSuccess: vi.fn(),
+      logWarning: vi.fn(),
+      executionMode: {
+        interactive: false,
+        json: false,
+        presetName: 'Production'
+      }
+    })).rejects.toMatchObject({
+      code: 'ZEPHYR_SSH_DETAILS_REQUIRED'
+    })
+  })
+
+  it('fails when a named preset requires interactive repair in non-interactive mode', async () => {
+    const { projectConfig, server, configurationService } = createSelectionScenario()
+    projectConfig.presets = [{ name: 'Legacy preset', key: 'production:~/webapps/demo' }]
+
+    mockLoadServers.mockResolvedValue([{ ...server, id: 'server-1' }])
+    mockLoadProjectConfig.mockResolvedValue(projectConfig)
+
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
+
+    await expect(selectDeploymentTarget('/workspace/project', {
+      configurationService,
+      runPrompt: vi.fn(),
+      logProcessing: vi.fn(),
+      logSuccess: vi.fn(),
+      logWarning: vi.fn(),
+      executionMode: {
+        interactive: false,
+        json: false,
+        presetName: 'Legacy preset'
+      }
+    })).rejects.toMatchObject({
+      code: 'ZEPHYR_PRESET_REPAIR_REQUIRED'
+    })
+  })
 })

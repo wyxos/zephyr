@@ -1,10 +1,20 @@
+import process from 'node:process'
+
 export function createLocalCommandRunners({ runCommandBase, runCommandCaptureBase }) {
   if (!runCommandBase || !runCommandCaptureBase) {
     throw new Error('createLocalCommandRunners requires runCommandBase and runCommandCaptureBase')
   }
 
-  const runCommand = async (command, args, { silent = false, cwd } = {}) => {
-    const stdio = silent ? 'ignore' : 'inherit'
+  const runCommand = async (command, args, {
+    silent = false,
+    cwd,
+    forwardStdoutToStderr = false
+  } = {}) => {
+    const stdio = silent
+      ? 'ignore'
+      : forwardStdoutToStderr
+        ? ['ignore', process.stderr, process.stderr]
+        : 'inherit'
     return runCommandBase(command, args, { cwd, stdio })
   }
 
@@ -15,4 +25,3 @@ export function createLocalCommandRunners({ runCommandBase, runCommandCaptureBas
 
   return { runCommand, runCommandCapture }
 }
-

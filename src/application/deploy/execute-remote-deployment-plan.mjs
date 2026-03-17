@@ -46,7 +46,7 @@ export async function executeRemoteDeploymentPlan({
                                                       usefulSteps,
                                                       pendingSnapshot = null,
                                                       logProcessing,
-                                                      executionState = null
+                                                      executionState = undefined
                                                   } = {}) {
     if (usefulSteps && pendingSnapshot) {
         await persistPendingSnapshot(rootDir, pendingSnapshot, executeRemote)

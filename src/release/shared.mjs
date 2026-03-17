@@ -65,14 +65,16 @@ export function parseReleaseArgs({
 
 export async function runReleaseCommand(command, args, {
   cwd = process.cwd(),
-  capture = false
+  capture = false,
+  runCommandImpl = runCommandBase,
+  runCommandCaptureImpl = runCommandCaptureBase
 } = {}) {
   if (capture) {
-    const { stdout, stderr } = await runCommandCaptureBase(command, args, { cwd })
+    const { stdout, stderr } = await runCommandCaptureImpl(command, args, { cwd })
     return { stdout: stdout.trim(), stderr: stderr.trim() }
   }
 
-  await runCommandBase(command, args, { cwd })
+  await runCommandImpl(command, args, { cwd })
   return undefined
 }
 
@@ -91,9 +93,10 @@ export async function ensureCleanWorkingTree(rootDir = process.cwd(), {
 
 export async function validateReleaseDependencies(rootDir = process.cwd(), {
   prompt = (questions) => inquirer.prompt(questions),
-  logSuccess
+  logSuccess,
+  interactive = true
 } = {}) {
-  await validateLocalDependencies(rootDir, prompt, logSuccess)
+  await validateLocalDependencies(rootDir, prompt, logSuccess, { interactive })
 }
 
 export async function ensureReleaseBranchReady({

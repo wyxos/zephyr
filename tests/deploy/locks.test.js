@@ -80,4 +80,33 @@ describe('deploy/locks', () => {
     expect(mockUnlink).toHaveBeenCalledTimes(1)
     expect(logWarning).not.toHaveBeenCalled()
   })
+
+  it('fails in non-interactive mode when a matching stale remote lock is detected', async () => {
+    const { compareLocksAndPrompt } = await import('#src/deploy/locks.mjs')
+
+    const lockPayload = {
+      user: 'joey',
+      hostname: 'host',
+      pid: 123,
+      startedAt: '2026-01-01T00:00:00.000Z'
+    }
+
+    mockReadFile.mockResolvedValueOnce(JSON.stringify(lockPayload))
+
+    const ssh = {
+      execCommand: vi.fn().mockResolvedValueOnce({
+        code: 0,
+        stdout: JSON.stringify(lockPayload),
+        stderr: ''
+      })
+    }
+
+    await expect(compareLocksAndPrompt('/workspace/project', ssh, '/srv/app', {
+      runPrompt: vi.fn(),
+      logWarning: vi.fn(),
+      interactive: false
+    })).rejects.toMatchObject({
+      code: 'ZEPHYR_STALE_REMOTE_LOCK'
+    })
+  })
 })

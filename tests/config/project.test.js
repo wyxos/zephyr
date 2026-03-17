@@ -1,4 +1,4 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest'
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 
 import {
     mockReadFile,
@@ -93,5 +93,22 @@ describe('config/project', () => {
         expect(removed).toBe(presetToRemove)
         expect(config.presets).toHaveLength(1)
         expect(config.presets[0].name).toBe('valid')
+    })
+
+    it('fails in strict mode when the project config file is missing', async () => {
+        const missingError = new Error('ENOENT')
+        missingError.code = 'ENOENT'
+        mockReadFile.mockRejectedValueOnce(missingError)
+
+        const {loadProjectConfig} = await import('#src/config/project.mjs')
+
+        await expect(loadProjectConfig(process.cwd(), [], {
+            logSuccess: vi.fn(),
+            logWarning: vi.fn(),
+            strict: true,
+            allowMigration: false
+        })).rejects.toMatchObject({
+            code: 'ZEPHYR_PROJECT_CONFIG_MISSING'
+        })
     })
 })

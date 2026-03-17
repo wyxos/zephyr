@@ -1,25 +1,36 @@
 import process from 'node:process'
-import chalk from 'chalk'
-import {createChalkLogger} from './utils/output.mjs'
-import {
-    parseReleaseArgs,
-} from './release/shared.mjs'
+import {createAppContext} from './runtime/app-context.mjs'
+import {parseReleaseArgs} from './release/shared.mjs'
 import {releasePackagistPackage} from './application/release/release-packagist-package.mjs'
 
-const {logProcessing: logStep, logSuccess, logWarning} = createChalkLogger(chalk)
-
-export async function releasePackagist() {
-    const {releaseType, skipTests, skipLint} = parseReleaseArgs({
-        booleanFlags: ['--skip-tests', '--skip-lint']
+export async function releasePackagist(options = {}) {
+    const parsed = options.releaseType
+        ? options
+        : parseReleaseArgs({
+            booleanFlags: ['--skip-tests', '--skip-lint']
+        })
+    const rootDir = options.rootDir ?? process.cwd()
+    const context = options.context ?? createAppContext({
+        executionMode: {
+            interactive: true,
+            json: false,
+            workflow: 'release-packagist'
+        }
     })
-    const rootDir = process.cwd()
+    const {logProcessing: logStep, logSuccess, logWarning, runPrompt, runCommand, runCommandCapture, executionMode} = context
+
     await releasePackagistPackage({
-        releaseType,
-        skipTests,
-        skipLint,
+        releaseType: parsed.releaseType,
+        skipTests: parsed.skipTests === true,
+        skipLint: parsed.skipLint === true,
         rootDir,
         logStep,
         logSuccess,
-        logWarning
+        logWarning,
+        runPrompt,
+        runCommandImpl: runCommand,
+        runCommandCaptureImpl: runCommandCapture,
+        interactive: executionMode?.interactive !== false,
+        progressWriter: executionMode?.json ? process.stderr : process.stdout
     })
 }

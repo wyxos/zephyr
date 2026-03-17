@@ -25,6 +25,36 @@ export function writeStderr(message = '') {
     }
 }
 
+export function createJsonEventEmitter({
+    workflow,
+    writeEvent = writeStdoutLine
+} = {}) {
+    return function emitEvent(event, {
+        level,
+        message = '',
+        data = {},
+        code
+    } = {}) {
+        const payload = {
+            event,
+            timestamp: new Date().toISOString(),
+            workflow,
+            message
+        }
+
+        if (level) {
+            payload.level = level
+        }
+
+        if (code) {
+            payload.code = code
+        }
+
+        payload.data = data ?? {}
+        writeEvent(JSON.stringify(payload))
+    }
+}
+
 export function formatLogMessage(message = '', prefix = '') {
     const text = message == null ? '' : String(message)
 
@@ -50,5 +80,20 @@ export function createChalkLogger(chalk, {
         logSuccess: (message = '') => writeStdoutLine(chalk.green(formatLogMessage(message, prefixes.success))),
         logWarning: (message = '') => writeStderrLine(chalk.yellow(formatLogMessage(message, prefixes.warning))),
         logError: (message = '') => writeStderrLine(chalk.red(formatLogMessage(message, prefixes.error)))
+    }
+}
+
+export function createJsonLogger({
+    emitEvent
+} = {}) {
+    if (typeof emitEvent !== 'function') {
+        throw new Error('createJsonLogger requires emitEvent')
+    }
+
+    return {
+        logProcessing: (message = '', data = {}) => emitEvent('log', {level: 'processing', message: String(message ?? ''), data}),
+        logSuccess: (message = '', data = {}) => emitEvent('log', {level: 'success', message: String(message ?? ''), data}),
+        logWarning: (message = '', data = {}) => emitEvent('log', {level: 'warning', message: String(message ?? ''), data}),
+        logError: (message = '', data = {}) => emitEvent('log', {level: 'error', message: String(message ?? ''), data})
     }
 }
