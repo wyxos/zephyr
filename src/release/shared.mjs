@@ -70,7 +70,14 @@ export async function runReleaseCommand(command, args, {
   runCommandCaptureImpl = runCommandCaptureBase
 } = {}) {
   if (capture) {
-    const { stdout, stderr } = await runCommandCaptureImpl(command, args, { cwd })
+    const captured = await runCommandCaptureImpl(command, args, { cwd })
+
+    if (typeof captured === 'string') {
+      return { stdout: captured.trim(), stderr: '' }
+    }
+
+    const stdout = captured?.stdout ?? ''
+    const stderr = captured?.stderr ?? ''
     return { stdout: stdout.trim(), stderr: stderr.trim() }
   }
 
