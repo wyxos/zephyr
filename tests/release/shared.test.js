@@ -84,6 +84,17 @@ describe('release shared helpers', () => {
         expect(mockRunCommand).not.toHaveBeenCalled()
     })
 
+    it('accepts plain stdout strings from app-context capture runners', async () => {
+        mockRunCommandCapture.mockResolvedValue(' 1.2.3 \n')
+
+        const result = await runReleaseCommand('git', ['status', '--porcelain'], {
+            cwd: '/workspace/demo',
+            capture: true
+        })
+
+        expect(result).toEqual({stdout: '1.2.3', stderr: ''})
+    })
+
     it('throws when the working tree is dirty', async () => {
         await expect(ensureCleanWorkingTree('/workspace/demo', {
             runCommand: vi.fn().mockResolvedValue({stdout: ' M src/index.mjs'})
