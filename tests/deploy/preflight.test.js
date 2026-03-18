@@ -49,6 +49,26 @@ describe('deploy/preflight', () => {
         expect(logSuccess).toHaveBeenCalledWith('Linting changes committed.')
     })
 
+    it('can bypass git hooks when committing lint fixes', async () => {
+        const getGitStatus = vi.fn().mockResolvedValueOnce('M  tests/Browser/AirConJourneyFlowTest.php')
+        const runCommand = vi.fn()
+
+        await commitLintingChanges('/repo/demo', {
+            getGitStatus,
+            runCommand,
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            skipGitHooks: true
+        })
+
+        expect(runCommand).toHaveBeenNthCalledWith(
+            1,
+            'git',
+            ['commit', '--no-verify', '-m', 'style: apply linting fixes'],
+            {cwd: '/repo/demo'}
+        )
+    })
+
     it('prefers package.json lint when available', async () => {
         rootDir = await mkdtemp(join(tmpdir(), 'zephyr-preflight-'))
         await writeFile(join(rootDir, 'package.json'), JSON.stringify({

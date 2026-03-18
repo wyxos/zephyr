@@ -11,6 +11,7 @@ import {
     runReleaseCommand,
     validateReleaseDependencies
 } from '../../release/shared.mjs'
+import {gitCommitArgs, gitPushArgs} from '../../utils/git-hooks.mjs'
 
 async function readComposer(rootDir = process.cwd()) {
     const composerPath = join(rootDir, 'composer.json')
@@ -162,7 +163,8 @@ async function runTests(skipTests, composer, rootDir = process.cwd(), {
 async function bumpVersion(releaseType, rootDir = process.cwd(), {
     logStep,
     logSuccess,
-    runCommand = runReleaseCommand
+    runCommand = runReleaseCommand,
+    skipGitHooks = false
 } = {}) {
     logStep?.('Bumping composer version...')
 
@@ -186,7 +188,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd(), {
 
     const commitMessage = `chore: release ${newVersion}`
     logStep?.('Committing version bump...')
-    await runCommand('git', ['commit', '-m', commitMessage], {cwd: rootDir})
+    await runCommand('git', gitCommitArgs(['-m', commitMessage], {skipGitHooks}), {cwd: rootDir})
 
     logStep?.('Creating git tag...')
     await runCommand('git', ['tag', `v${newVersion}`], {cwd: rootDir})
@@ -198,19 +200,21 @@ async function bumpVersion(releaseType, rootDir = process.cwd(), {
 async function pushChanges(rootDir = process.cwd(), {
     logStep,
     logSuccess,
-    runCommand = runReleaseCommand
+    runCommand = runReleaseCommand,
+    skipGitHooks = false
 } = {}) {
     logStep?.('Pushing commits to origin...')
-    await runCommand('git', ['push'], {cwd: rootDir})
+    await runCommand('git', gitPushArgs([], {skipGitHooks}), {cwd: rootDir})
 
     logStep?.('Pushing tags to origin...')
-    await runCommand('git', ['push', 'origin', '--tags'], {cwd: rootDir})
+    await runCommand('git', gitPushArgs(['origin', '--tags'], {skipGitHooks}), {cwd: rootDir})
 
     logSuccess?.('Git push completed.')
 }
 
 export async function releasePackagistPackage({
                                                   releaseType,
+                                                  skipGitHooks = false,
                                                   skipTests = false,
                                                   skipLint = false,
                                                   rootDir = process.cwd(),
@@ -240,7 +244,8 @@ export async function releasePackagistPackage({
     await validateReleaseDependencies(rootDir, {
         prompt: runPrompt,
         logSuccess,
-        interactive
+        interactive,
+        skipGitHooks
     })
 
     logStep?.('Checking working tree status...')
@@ -250,8 +255,8 @@ export async function releasePackagistPackage({
     await runLint(skipLint, rootDir, {logStep, logSuccess, logWarning, runCommand, progressWriter})
     await runTests(skipTests, composer, rootDir, {logStep, logSuccess, logWarning, runCommand, progressWriter})
 
-    const updatedComposer = await bumpVersion(releaseType, rootDir, {logStep, logSuccess, runCommand})
-    await pushChanges(rootDir, {logStep, logSuccess, runCommand})
+    const updatedComposer = await bumpVersion(releaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
+    await pushChanges(rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
 
     logSuccess?.(`Release workflow completed for ${composer.name}@${updatedComposer.version}.`)
     logStep?.('Note: Packagist will automatically detect the new git tag and update the package.')

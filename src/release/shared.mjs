@@ -101,9 +101,13 @@ export async function ensureCleanWorkingTree(rootDir = process.cwd(), {
 export async function validateReleaseDependencies(rootDir = process.cwd(), {
   prompt = (questions) => inquirer.prompt(questions),
   logSuccess,
-  interactive = true
+  interactive = true,
+  skipGitHooks = false
 } = {}) {
-  await validateLocalDependencies(rootDir, prompt, logSuccess, { interactive })
+  await validateLocalDependencies(rootDir, prompt, logSuccess, {
+    interactive,
+    skipGitHooks
+  })
 }
 
 export async function ensureReleaseBranchReady({

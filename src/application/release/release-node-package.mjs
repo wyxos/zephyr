@@ -11,6 +11,7 @@ import {
     runReleaseCommand,
     validateReleaseDependencies
 } from '../../release/shared.mjs'
+import {gitCommitArgs, gitPushArgs, npmVersionArgs} from '../../utils/git-hooks.mjs'
 
 async function readPackage(rootDir = process.cwd()) {
     const packagePath = join(rootDir, 'package.json')
@@ -137,7 +138,8 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd(), {
     logStep,
     logSuccess,
     logWarning,
-    runCommand = runReleaseCommand
+    runCommand = runReleaseCommand,
+    skipGitHooks = false
 } = {}) {
     if (skipBuild) {
         logWarning?.('Skipping library build because --skip-build flag was provided.')
@@ -173,7 +175,7 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd(), {
     if (hasLibChanges) {
         logStep?.('Committing lib build artifacts...')
         await runCommand('git', ['add', 'lib/'], {capture: true, cwd: rootDir})
-        await runCommand('git', ['commit', '-m', 'chore: build lib artifacts'], {capture: true, cwd: rootDir})
+        await runCommand('git', gitCommitArgs(['-m', 'chore: build lib artifacts'], {skipGitHooks}), {capture: true, cwd: rootDir})
         logSuccess?.('Lib build artifacts committed.')
     }
 
@@ -183,7 +185,8 @@ async function runLibBuild(skipBuild, pkg, rootDir = process.cwd(), {
 async function bumpVersion(releaseType, rootDir = process.cwd(), {
     logStep,
     logSuccess,
-    runCommand = runReleaseCommand
+    runCommand = runReleaseCommand,
+    skipGitHooks = false
 } = {}) {
     logStep?.('Bumping package version...')
 
@@ -199,7 +202,7 @@ async function bumpVersion(releaseType, rootDir = process.cwd(), {
     }
 
     try {
-        await runCommand('npm', ['version', releaseType], {capture: true, cwd: rootDir})
+        await runCommand('npm', npmVersionArgs(releaseType, {skipGitHooks}), {capture: true, cwd: rootDir})
     } finally {
         if (hasLibChanges) {
             logStep?.('Restoring lib build artifacts...')
@@ -207,14 +210,14 @@ async function bumpVersion(releaseType, rootDir = process.cwd(), {
             await runCommand('git', ['add', 'lib/'], {capture: true, cwd: rootDir})
             const {stdout: statusAfter} = await runCommand('git', ['status', '--porcelain'], {capture: true, cwd: rootDir})
             if (statusAfter.includes('lib/')) {
-                await runCommand('git', ['commit', '--amend', '--no-edit'], {capture: true, cwd: rootDir})
+                await runCommand('git', gitCommitArgs(['--amend', '--no-edit'], {skipGitHooks}), {capture: true, cwd: rootDir})
             }
         }
     }
 
     const pkg = await readPackage(rootDir)
     const commitMessage = `chore: release ${pkg.version}`
-    await runCommand('git', ['commit', '--amend', '-m', commitMessage], {capture: true, cwd: rootDir})
+    await runCommand('git', gitCommitArgs(['--amend', '-m', commitMessage], {skipGitHooks}), {capture: true, cwd: rootDir})
     await runCommand('git', ['tag', '-fa', `v${pkg.version}`, '-m', `v${pkg.version}`], {capture: true, cwd: rootDir})
 
     logSuccess?.(`Version updated to ${pkg.version}.`)
@@ -224,11 +227,12 @@ async function bumpVersion(releaseType, rootDir = process.cwd(), {
 async function pushChanges(rootDir = process.cwd(), {
     logStep,
     logSuccess,
-    runCommand = runReleaseCommand
+    runCommand = runReleaseCommand,
+    skipGitHooks = false
 } = {}) {
     logStep?.('Pushing commits and tags to origin...')
     try {
-        await runCommand('git', ['push', '--follow-tags'], {capture: true, cwd: rootDir})
+        await runCommand('git', gitPushArgs(['--follow-tags'], {skipGitHooks}), {capture: true, cwd: rootDir})
         logSuccess?.('Git push completed.')
     } catch (error) {
         if (error.stdout) {
@@ -256,7 +260,8 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd(), {
     logStep,
     logSuccess,
     logWarning,
-    runCommand = runReleaseCommand
+    runCommand = runReleaseCommand,
+    skipGitHooks = false
 } = {}) {
     if (skipDeploy) {
         logWarning?.('Skipping GitHub Pages deployment because --skip-deploy flag was provided.')
@@ -324,8 +329,12 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd(), {
         fs.cpSync(distPath, worktreeDir, {recursive: true})
 
         await runCommand('git', ['-C', worktreeDir, 'add', '-A'], {capture: true})
-        await runCommand('git', ['-C', worktreeDir, 'commit', '-m', `deploy: demo ${new Date().toISOString()}`, '--allow-empty'], {capture: true})
-        await runCommand('git', ['-C', worktreeDir, 'push', '-f', 'origin', 'gh-pages'], {capture: true})
+        await runCommand('git', [
+            '-C',
+            worktreeDir,
+            ...gitCommitArgs(['-m', `deploy: demo ${new Date().toISOString()}`, '--allow-empty'], {skipGitHooks})
+        ], {capture: true})
+        await runCommand('git', ['-C', worktreeDir, ...gitPushArgs(['-f', 'origin', 'gh-pages'], {skipGitHooks})], {capture: true})
 
         logSuccess?.('GitHub Pages deployment completed.')
     } catch (error) {
@@ -341,6 +350,7 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd(), {
 
 export async function releaseNodePackage({
                                              releaseType,
+                                             skipGitHooks = false,
                                              skipTests = false,
                                              skipLint = false,
                                              skipBuild = false,
@@ -367,7 +377,8 @@ export async function releaseNodePackage({
     await validateReleaseDependencies(rootDir, {
         prompt: runPrompt,
         logSuccess,
-        interactive
+        interactive,
+        skipGitHooks
     })
 
     logStep?.('Checking working tree status...')
@@ -376,12 +387,12 @@ export async function releaseNodePackage({
 
     await runLint(skipLint, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
     await runTests(skipTests, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
-    await runLibBuild(skipBuild, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
+    await runLibBuild(skipBuild, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand, skipGitHooks})
 
-    const updatedPkg = await bumpVersion(releaseType, rootDir, {logStep, logSuccess, runCommand})
+    const updatedPkg = await bumpVersion(releaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
     await runBuild(skipBuild, updatedPkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
-    await pushChanges(rootDir, {logStep, logSuccess, runCommand})
-    await deployGHPages(skipDeploy, updatedPkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
+    await pushChanges(rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
+    await deployGHPages(skipDeploy, updatedPkg, rootDir, {logStep, logSuccess, logWarning, runCommand, skipGitHooks})
 
     logStep?.('Publishing will be handled by GitHub Actions via trusted publishing.')
     logSuccess?.(`Release workflow completed for ${updatedPkg.name}@${updatedPkg.version}.`)

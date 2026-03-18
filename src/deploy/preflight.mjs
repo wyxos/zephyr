@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
+import {gitCommitArgs} from '../utils/git-hooks.mjs'
+
 export async function hasPrePushHook(rootDir) {
   const hookPaths = [
     path.join(rootDir, '.git', 'hooks', 'pre-push'),
@@ -126,7 +128,13 @@ export function hasStagedChanges(statusOutput) {
   })
 }
 
-export async function commitLintingChanges(rootDir, { getGitStatus, runCommand, logProcessing, logSuccess } = {}) {
+export async function commitLintingChanges(rootDir, {
+  getGitStatus,
+  runCommand,
+  logProcessing,
+  logSuccess,
+  skipGitHooks = false
+} = {}) {
   const status = await getGitStatus(rootDir)
 
   if (!hasStagedChanges(status)) {
@@ -138,7 +146,7 @@ export async function commitLintingChanges(rootDir, { getGitStatus, runCommand, 
   }
 
   logProcessing?.('Committing linting changes...')
-  await runCommand('git', ['commit', '-m', 'style: apply linting fixes'], { cwd: rootDir })
+  await runCommand('git', gitCommitArgs(['-m', 'style: apply linting fixes'], {skipGitHooks}), { cwd: rootDir })
   logSuccess?.('Linting changes committed.')
   return true
 }

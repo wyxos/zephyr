@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import {commandExists} from '../../utils/command.mjs'
+import {gitCommitArgs} from '../../utils/git-hooks.mjs'
 
 async function readPackageJson(rootDir) {
     const packageJsonPath = path.join(rootDir, 'package.json')
@@ -20,6 +21,7 @@ async function isGitIgnored(rootDir, filePath, {runCommand} = {}) {
 
 export async function bumpLocalPackageVersion(rootDir, {
     versionArg = null,
+    skipGitHooks = false,
     runCommand,
     logProcessing,
     logSuccess,
@@ -72,7 +74,9 @@ export async function bumpLocalPackageVersion(rootDir, {
         return updatedPkg
     }
 
-    await runCommand('git', ['commit', '-m', `chore: bump version to ${nextVersion}`, '--', ...filesToStage], {
+    await runCommand('git', gitCommitArgs(['-m', `chore: bump version to ${nextVersion}`, '--', ...filesToStage], {
+        skipGitHooks
+    }), {
         cwd: rootDir
     })
     logSuccess?.(`Version updated to ${nextVersion}.`)

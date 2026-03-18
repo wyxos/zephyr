@@ -86,6 +86,29 @@ describe('application/deploy/run-local-deployment-checks', () => {
         )
     })
 
+    it('warns when a pre-push hook is present but hook skipping is enabled', async () => {
+        const logWarning = vi.fn()
+        const runCommandCapture = vi.fn().mockResolvedValue('test\nqueue:work\n')
+
+        await runLocalDeploymentChecks({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            hasHook: true,
+            skipGitHooks: true,
+            runCommand: vi.fn(),
+            runCommandCapture,
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning
+        })
+
+        expect(logWarning).toHaveBeenCalledWith(
+            'Pre-push git hook detected. Built-in release checks are supported, and Zephyr will skip executing them here. WARNING: --skip-git-hooks is enabled, so Zephyr will also bypass that hook if it needs to push local commits during this release.'
+        )
+        expect(mockRunLinting).not.toHaveBeenCalled()
+        expect(mockCommitLintingChanges).not.toHaveBeenCalled()
+    })
+
     it('commits lint changes and runs local Laravel tests when needed', async () => {
         mockRunLinting.mockResolvedValue(true)
         mockHasUncommittedChanges.mockResolvedValue(true)
@@ -126,7 +149,8 @@ describe('application/deploy/run-local-deployment-checks', () => {
             runCommand,
             logProcessing,
             logSuccess,
-            getGitStatus: expect.any(Function)
+            getGitStatus: expect.any(Function),
+            skipGitHooks: false
         }))
         expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
         expect(logSuccess).toHaveBeenCalledWith('Local tests passed.')

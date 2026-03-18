@@ -71,6 +71,7 @@ async function configureRepo(repoDir) {
 describe('main smoke', () => {
     const originalCwd = process.cwd()
     const originalHome = process.env.HOME
+    const originalUserProfile = process.env.USERPROFILE
 
     let tempRoot
     let homeDir
@@ -109,6 +110,7 @@ describe('main smoke', () => {
         await git(['commit', '-m', 'Initial commit'], projectDir)
 
         process.env.HOME = homeDir
+        process.env.USERPROFILE = homeDir
         process.chdir(projectDir)
 
         promptQueue = [
@@ -141,6 +143,7 @@ describe('main smoke', () => {
                 workflow: 'deploy',
                 presetName: null,
                 maintenanceMode: null,
+                skipGitHooks: false,
                 resumePending: false,
                 discardPending: false
             }
@@ -159,6 +162,12 @@ describe('main smoke', () => {
             process.env.HOME = originalHome
         }
 
+        if (originalUserProfile === undefined) {
+            delete process.env.USERPROFILE
+        } else {
+            process.env.USERPROFILE = originalUserProfile
+        }
+
         await rm(tempRoot, {recursive: true, force: true})
     })
 
@@ -173,7 +182,7 @@ describe('main smoke', () => {
             effectiveProjectDir,
             smokeContext.runPrompt,
             smokeContext.logSuccess,
-            {interactive: true}
+            {interactive: true, skipGitHooks: false}
         )
         expect(mockRunDeployment).toHaveBeenCalledWith({
             serverName: 'production',

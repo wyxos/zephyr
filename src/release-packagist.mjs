@@ -3,11 +3,25 @@ import {createAppContext} from './runtime/app-context.mjs'
 import {parseReleaseArgs} from './release/shared.mjs'
 import {releasePackagistPackage} from './application/release/release-packagist-package.mjs'
 
+function hasExplicitReleaseOptions(options = {}) {
+    return [
+        'releaseType',
+        'skipGitHooks',
+        'skipTests',
+        'skipLint'
+    ].some((key) => key in options)
+}
+
 export async function releasePackagist(options = {}) {
-    const parsed = options.releaseType
-        ? options
+    const parsed = hasExplicitReleaseOptions(options)
+        ? {
+            releaseType: options.releaseType ?? 'patch',
+            skipGitHooks: options.skipGitHooks === true,
+            skipTests: options.skipTests === true,
+            skipLint: options.skipLint === true
+        }
         : parseReleaseArgs({
-            booleanFlags: ['--skip-tests', '--skip-lint']
+            booleanFlags: ['--skip-git-hooks', '--skip-tests', '--skip-lint']
         })
     const rootDir = options.rootDir ?? process.cwd()
     const context = options.context ?? createAppContext({
@@ -21,6 +35,7 @@ export async function releasePackagist(options = {}) {
 
     await releasePackagistPackage({
         releaseType: parsed.releaseType,
+        skipGitHooks: parsed.skipGitHooks === true || executionMode?.skipGitHooks === true,
         skipTests: parsed.skipTests === true,
         skipLint: parsed.skipLint === true,
         rootDir,

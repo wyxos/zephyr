@@ -96,6 +96,7 @@ describe('application/deploy/prepare-local-deployment', () => {
         })
         expect(mockBumpLocalPackageVersion).toHaveBeenCalledWith('/repo/demo', {
             versionArg: null,
+            skipGitHooks: false,
             runCommand,
             logProcessing,
             logSuccess,
@@ -109,10 +110,11 @@ describe('application/deploy/prepare-local-deployment', () => {
             logSuccess,
             logWarning
         }))
-        expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith({
+        expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
             rootDir: '/repo/demo',
             isLaravel: true,
             hasHook: false,
+            skipGitHooks: false,
             runCommand,
             runCommandCapture,
             logProcessing,
@@ -127,7 +129,7 @@ describe('application/deploy/prepare-local-deployment', () => {
                 command: 'php',
                 args: ['artisan', 'test', '--compact']
             })
-        })
+        }))
     })
 
     it('skips version bump when resuming from a snapshot', async () => {

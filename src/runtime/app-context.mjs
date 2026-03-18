@@ -22,6 +22,7 @@ export function createAppContext({
         workflow: executionMode.workflow ?? 'deploy',
         presetName: executionMode.presetName ?? null,
         maintenanceMode: executionMode.maintenanceMode ?? null,
+        skipGitHooks: executionMode.skipGitHooks === true,
         resumePending: executionMode.resumePending === true,
         discardPending: executionMode.discardPending === true
     }

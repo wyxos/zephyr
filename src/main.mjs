@@ -16,6 +16,7 @@ import {createConfigurationService} from './application/configuration/service.mj
 import {selectDeploymentTarget} from './application/configuration/select-deployment-target.mjs'
 import {resolvePendingSnapshot} from './application/deploy/resolve-pending-snapshot.mjs'
 import {runDeployment} from './application/deploy/run-deployment.mjs'
+import {SKIP_GIT_HOOKS_WARNING} from './utils/git-hooks.mjs'
 
 const RELEASE_SCRIPT_NAME = 'release'
 const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@latest'
@@ -33,6 +34,7 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
             resumePending: firstArg.resumePending === true,
             discardPending: firstArg.discardPending === true,
             maintenanceMode: firstArg.maintenanceMode ?? null,
+            skipGitHooks: firstArg.skipGitHooks === true,
             skipTests: firstArg.skipTests === true,
             skipLint: firstArg.skipLint === true,
             skipBuild: firstArg.skipBuild === true,
@@ -50,6 +52,7 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
         resumePending: false,
         discardPending: false,
         maintenanceMode: null,
+        skipGitHooks: false,
         skipTests: false,
         skipLint: false,
         skipBuild: false,
@@ -86,6 +89,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         workflow: resolveWorkflowName(options.workflowType),
         presetName: options.presetName,
         maintenanceMode: options.maintenanceMode,
+        skipGitHooks: options.skipGitHooks === true,
         resumePending: options.resumePending,
         discardPending: options.discardPending
     }
@@ -114,6 +118,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                     nonInteractive: currentExecutionMode.interactive === false,
                     presetName: currentExecutionMode.presetName,
                     maintenanceMode: currentExecutionMode.maintenanceMode,
+                    skipGitHooks: currentExecutionMode.skipGitHooks === true,
                     resumePending: currentExecutionMode.resumePending,
                     discardPending: currentExecutionMode.discardPending
                 }
@@ -122,9 +127,14 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             logProcessing(`Zephyr v${ZEPHYR_VERSION}`)
         }
 
+        if (currentExecutionMode.skipGitHooks) {
+            logWarning(SKIP_GIT_HOOKS_WARNING)
+        }
+
         if (options.workflowType === 'node' || options.workflowType === 'vue') {
             await releaseNode({
                 releaseType: options.versionArg,
+                skipGitHooks: options.skipGitHooks,
                 skipTests: options.skipTests,
                 skipLint: options.skipLint,
                 skipBuild: options.skipBuild,
@@ -144,6 +154,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         if (options.workflowType === 'packagist') {
             await releasePackagist({
                 releaseType: options.versionArg,
+                skipGitHooks: options.skipGitHooks,
                 skipTests: options.skipTests,
                 skipLint: options.skipLint,
                 context: appContext
@@ -164,13 +175,15 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             projectConfigDir: PROJECT_CONFIG_DIR,
             runCommand,
             logSuccess,
-            logWarning
+            logWarning,
+            skipGitHooks: currentExecutionMode.skipGitHooks
         })
         await bootstrap.ensureProjectReleaseScript(rootDir, {
             runPrompt,
             runCommand,
             logSuccess,
             logWarning,
+            skipGitHooks: currentExecutionMode.skipGitHooks,
             interactive: currentExecutionMode.interactive,
             releaseScriptName: RELEASE_SCRIPT_NAME,
             releaseScriptCommand: RELEASE_SCRIPT_COMMAND
@@ -184,7 +197,8 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         if (hasPackageJson || hasComposerJson) {
             logProcessing('Validating dependencies...')
             await validateLocalDependencies(rootDir, runPrompt, logSuccess, {
-                interactive: currentExecutionMode.interactive
+                interactive: currentExecutionMode.interactive,
+                skipGitHooks: currentExecutionMode.skipGitHooks
             })
         }
 

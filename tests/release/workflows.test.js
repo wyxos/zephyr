@@ -41,7 +41,8 @@ describe('release workflow entrypoints', () => {
             executionMode: {
                 interactive: false,
                 json: true,
-                workflow: 'release-node'
+                workflow: 'release-node',
+                skipGitHooks: true
             }
         }
 
@@ -56,6 +57,7 @@ describe('release workflow entrypoints', () => {
         expect(mockReleaseNodePackage).toHaveBeenCalledWith(expect.objectContaining({
             releaseType: 'minor',
             interactive: false,
+            skipGitHooks: true,
             runCommandImpl: context.runCommand,
             runCommandCaptureImpl: context.runCommandCapture
         }))
@@ -72,7 +74,8 @@ describe('release workflow entrypoints', () => {
             executionMode: {
                 interactive: false,
                 json: true,
-                workflow: 'release-packagist'
+                workflow: 'release-packagist',
+                skipGitHooks: true
             }
         }
 
@@ -86,6 +89,7 @@ describe('release workflow entrypoints', () => {
         expect(mockReleasePackagistPackage).toHaveBeenCalledWith(expect.objectContaining({
             releaseType: 'patch',
             interactive: false,
+            skipGitHooks: true,
             progressWriter: process.stderr
         }))
     })

@@ -179,6 +179,52 @@ describe('deploy/local-repo', () => {
         ).toBe(true)
     })
 
+    it('bypasses git hooks for automatic commit and push when requested', async () => {
+        queueSpawnResponse({stdout: 'main\n'})
+        queueSpawnResponse({stdout: 'M  file.php\n'})
+        queueSpawnResponse({})
+        queueSpawnResponse({})
+
+        mockPrompt.mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
+
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
+        const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
+
+        await ensureLocalRepositoryState('main', process.cwd(), {
+            runPrompt: mockPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing: () => {
+            },
+            logSuccess: () => {
+            },
+            logWarning: () => {
+            },
+            skipGitHooks: true,
+            readUpstreamSyncState: async () => ({
+                upstreamRef: 'origin/main',
+                remoteName: 'origin',
+                upstreamBranch: 'main',
+                remoteExists: true,
+                aheadCount: 0,
+                behindCount: 0
+            })
+        })
+
+        expect(
+            mockSpawn.mock.calls.some(
+                ([command, args]) => command === 'git' && args[0] === 'commit' && args[1] === '--no-verify'
+            )
+        ).toBe(true)
+        expect(
+            mockSpawn.mock.calls.some(
+                ([command, args]) => command === 'git' && args[0] === 'push' && args[1] === '--no-verify' && args.includes('main')
+            )
+        ).toBe(true)
+    })
+
     it('announces the pre-push hook before pushing committed changes', async () => {
         const {ensureCommittedChangesPushed} = await import('#src/deploy/local-repo.mjs')
         const logProcessing = vi.fn()
@@ -203,6 +249,44 @@ describe('deploy/local-repo', () => {
 
         expect(result).toEqual({pushed: true, upstreamRef: 'origin/main'})
         expect(logProcessing).toHaveBeenCalledWith('Pre-push git hook detected. Running hook during git push...')
+        expect(logSuccess).toHaveBeenCalledWith('Pushed committed changes to origin/main.')
+    })
+
+    it('warns loudly and bypasses the pre-push hook when requested', async () => {
+        const {ensureCommittedChangesPushed} = await import('#src/deploy/local-repo.mjs')
+        const logProcessing = vi.fn()
+        const logSuccess = vi.fn()
+        const logWarning = vi.fn()
+        const runCommandCapture = vi.fn().mockResolvedValue('')
+
+        const result = await ensureCommittedChangesPushed('main', '/repo/demo', {
+            runCommand: vi.fn(),
+            runCommandCapture,
+            logProcessing,
+            logSuccess,
+            logWarning,
+            skipGitHooks: true,
+            readUpstreamSyncState: vi.fn().mockResolvedValue({
+                upstreamRef: 'origin/main',
+                remoteName: 'origin',
+                upstreamBranch: 'main',
+                remoteExists: true,
+                aheadCount: 1,
+                behindCount: 0
+            }),
+            hasPrePushHook: vi.fn().mockResolvedValue(true)
+        })
+
+        expect(result).toEqual({pushed: true, upstreamRef: 'origin/main'})
+        expect(logProcessing).toHaveBeenCalledWith('Found 1 commit not yet pushed to origin/main. Pushing before deployment...')
+        expect(logWarning).toHaveBeenCalledWith(
+            'Pre-push git hook detected, but Zephyr will bypass it because --skip-git-hooks was provided.'
+        )
+        expect(runCommandCapture).toHaveBeenCalledWith(
+            'git',
+            ['push', '--no-verify', 'origin', 'main:main'],
+            {cwd: '/repo/demo'}
+        )
         expect(logSuccess).toHaveBeenCalledWith('Pushed committed changes to origin/main.')
     })
 

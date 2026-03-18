@@ -24,6 +24,7 @@ describe('cli/options', () => {
             resumePending: true,
             discardPending: false,
             maintenanceMode: true,
+            skipGitHooks: false,
             skipTests: false,
             skipLint: false,
             skipBuild: false,
@@ -53,6 +54,11 @@ describe('cli/options', () => {
         const options = parseCliOptions(['--maintenance', 'off'])
 
         expect(options.maintenanceMode).toBe(false)
+    })
+
+    it('parses skip-git-hooks for release and deploy workflows', () => {
+        expect(parseCliOptions(['--skip-git-hooks']).skipGitHooks).toBe(true)
+        expect(parseCliOptions(['--type=node', '--skip-git-hooks']).skipGitHooks).toBe(true)
     })
 
     it('rejects conflicting pending snapshot flags', () => {

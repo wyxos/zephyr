@@ -72,7 +72,7 @@ describe('project/bootstrap', () => {
         })
 
         expect(mockWriteFile).toHaveBeenCalledWith(
-            '/workspace/project/.gitignore',
+            expect.stringMatching(/[\\/]workspace[\\/]project[\\/]\.gitignore$/),
             'node_modules/\n.zephyr/\n'
         )
     })

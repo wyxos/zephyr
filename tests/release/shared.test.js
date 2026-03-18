@@ -108,7 +108,8 @@ describe('release shared helpers', () => {
         await validateReleaseDependencies('/workspace/demo', {prompt, logSuccess})
 
         expect(mockValidateLocalDependencies).toHaveBeenCalledWith('/workspace/demo', prompt, logSuccess, {
-            interactive: true
+            interactive: true,
+            skipGitHooks: false
         })
     })
 
@@ -116,11 +117,13 @@ describe('release shared helpers', () => {
         await validateReleaseDependencies('/workspace/demo', {
             prompt: vi.fn(),
             logSuccess: vi.fn(),
-            interactive: false
+            interactive: false,
+            skipGitHooks: true
         })
 
         expect(mockValidateLocalDependencies).toHaveBeenCalledWith('/workspace/demo', expect.any(Function), expect.any(Function), {
-            interactive: false
+            interactive: false,
+            skipGitHooks: true
         })
     })
 
