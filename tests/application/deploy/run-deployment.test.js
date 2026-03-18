@@ -196,11 +196,27 @@ describe('application/deploy/run-deployment', () => {
 
         mockConnect.mockResolvedValue()
         mockDispose.mockResolvedValue()
-        mockExecCommand
-            .mockResolvedValueOnce({stdout: '/home/runcloud', stderr: '', code: 0})
-            .mockResolvedValueOnce({stdout: 'LOCK_NOT_FOUND', stderr: '', code: 0})
-            .mockResolvedValueOnce({stdout: 'no', stderr: '', code: 0})
-            .mockResolvedValue({stdout: '', stderr: '', code: 0})
+        mockExecCommand.mockImplementation(async (command) => {
+            const response = {stdout: '', stderr: '', code: 0}
+
+            if (command.includes('printf "%s" "$HOME"')) {
+                return {...response, stdout: '/home/runcloud'}
+            }
+
+            if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
+                if (command.includes('cat')) {
+                    return {...response, stdout: 'LOCK_NOT_FOUND'}
+                }
+
+                return response
+            }
+
+            if (command.includes('grep -q "laravel/framework"')) {
+                return {...response, stdout: 'no'}
+            }
+
+            return response
+        })
 
         const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
         const {createAppContext} = await import('#src/runtime/app-context.mjs')
@@ -218,5 +234,48 @@ describe('application/deploy/run-deployment', () => {
         const executedCommands = mockExecCommand.mock.calls.map(([cmd]) => cmd)
         expect(executedCommands.every((cmd) => !cmd.includes('composer install'))).toBe(true)
         expect(executedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
+    })
+
+    it('fails before local preparation when a non-interactive Laravel deploy omits maintenance mode', async () => {
+        mockReadFile.mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----')
+        mockReaddir.mockResolvedValueOnce([])
+        mockConnect.mockResolvedValue()
+        mockDispose.mockResolvedValue()
+
+        mockExecCommand.mockImplementation(async (command) => {
+            if (command.includes('printf "%s" "$HOME"')) {
+                return {stdout: '/home/runcloud', stderr: '', code: 0}
+            }
+
+            if (command.includes('grep -q "laravel/framework"')) {
+                return {stdout: 'yes', stderr: '', code: 0}
+            }
+
+            return {stdout: '', stderr: '', code: 0}
+        })
+
+        const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
+        const {createAppContext} = await import('#src/runtime/app-context.mjs')
+
+        await expect(runDeployment({
+            serverIp: '127.0.0.1',
+            projectPath: '~/app',
+            branch: 'main',
+            sshUser: 'forge',
+            sshKey: '~/.ssh/id_rsa'
+        }, {
+            context: createAppContext({
+                executionMode: {
+                    interactive: false,
+                    json: true,
+                    workflow: 'deploy',
+                    maintenanceMode: null
+                }
+            })
+        })).rejects.toThrow(
+            'Deployment failed: Zephyr cannot run this Laravel deployment non-interactively without an explicit maintenance-mode decision. Pass --maintenance on or --maintenance off.'
+        )
+
+        expect(mockPrepareLocalDeployment).not.toHaveBeenCalled()
     })
 })

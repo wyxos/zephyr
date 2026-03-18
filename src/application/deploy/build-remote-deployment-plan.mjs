@@ -338,19 +338,15 @@ async function resolveMaintenanceModePlan({
     })
 }
 
-export async function buildRemoteDeploymentPlan({
-                                                    config,
-                                                    snapshot = null,
-                                                    requiredPhpVersion = null,
-                                                    executionMode = {},
-                                                    ssh,
-                                                    remoteCwd,
-                                                    executeRemote,
-                                                    logProcessing,
-                                                    logSuccess,
-                                                    logWarning,
-                                                    runPrompt
-                                                } = {}) {
+export async function resolveRemoteDeploymentState({
+                                                       snapshot,
+                                                       executionMode = {},
+                                                       ssh,
+                                                       remoteCwd,
+                                                       runPrompt,
+                                                       logSuccess,
+                                                       logWarning
+                                                   } = {}) {
     const remoteIsLaravel = await detectRemoteLaravelProject(ssh, remoteCwd)
 
     if (remoteIsLaravel) {
@@ -359,10 +355,54 @@ export async function buildRemoteDeploymentPlan({
         logWarning?.('Laravel project not detected; skipping Laravel-specific maintenance tasks.')
     }
 
+    const maintenanceModeEnabled = await resolveMaintenanceMode({
+        snapshot,
+        remoteIsLaravel,
+        runPrompt,
+        executionMode
+    })
+
+    return {
+        remoteIsLaravel,
+        maintenanceModeEnabled
+    }
+}
+
+export async function buildRemoteDeploymentPlan({
+                                                    config,
+                                                    snapshot = null,
+                                                    requiredPhpVersion = null,
+                                                    executionMode = {},
+                                                    remoteIsLaravel = null,
+                                                    maintenanceModeEnabled = null,
+                                                    ssh,
+                                                    remoteCwd,
+                                                    executeRemote,
+                                                    logProcessing,
+                                                    logSuccess,
+                                                    logWarning,
+                                                    runPrompt
+                                                } = {}) {
+    const remoteState = typeof remoteIsLaravel === 'boolean' &&
+    (remoteIsLaravel === false || typeof maintenanceModeEnabled === 'boolean')
+        ? {
+            remoteIsLaravel,
+            maintenanceModeEnabled: remoteIsLaravel ? maintenanceModeEnabled : false
+        }
+        : await resolveRemoteDeploymentState({
+            snapshot,
+            executionMode,
+            ssh,
+            remoteCwd,
+            runPrompt,
+            logSuccess,
+            logWarning
+        })
+
     const changedFiles = await collectChangedFiles({
         config,
         snapshot,
-        remoteIsLaravel,
+        remoteIsLaravel: remoteState.remoteIsLaravel,
         executeRemote,
         logProcessing
     })
@@ -370,7 +410,7 @@ export async function buildRemoteDeploymentPlan({
     const horizonConfigured = await detectHorizonConfiguration({
         ssh,
         remoteCwd,
-        remoteIsLaravel,
+        remoteIsLaravel: remoteState.remoteIsLaravel,
         changedFiles
     })
 
@@ -382,18 +422,11 @@ export async function buildRemoteDeploymentPlan({
         logWarning
     })
 
-    const maintenanceModeEnabled = await resolveMaintenanceMode({
-        snapshot,
-        remoteIsLaravel,
-        runPrompt,
-        executionMode
-    })
-
     const maintenanceModePlan = await resolveMaintenanceModePlan({
         snapshot,
-        remoteIsLaravel,
+        remoteIsLaravel: remoteState.remoteIsLaravel,
         remoteCwd,
-        maintenanceModeEnabled,
+        maintenanceModeEnabled: remoteState.maintenanceModeEnabled,
         phpCommand,
         ssh,
         executeRemote,
@@ -403,7 +436,7 @@ export async function buildRemoteDeploymentPlan({
 
     const steps = planLaravelDeploymentTasks({
         branch: config.branch,
-        isLaravel: remoteIsLaravel,
+        isLaravel: remoteState.remoteIsLaravel,
         changedFiles,
         horizonConfigured,
         phpCommand,
@@ -438,7 +471,7 @@ export async function buildRemoteDeploymentPlan({
     }
 
     return {
-        remoteIsLaravel,
+        remoteIsLaravel: remoteState.remoteIsLaravel,
         changedFiles,
         horizonConfigured,
         phpCommand,

@@ -111,6 +111,9 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
             executedCommands.findIndex((command) => command.includes('composer install'))
         )
         expect(mockPrompt).toHaveBeenCalledTimes(2)
+        expect(mockPrompt.mock.invocationCallOrder[0]).toBeLessThan(
+            mockPrepareLocalDeployment.mock.invocationCallOrder[0]
+        )
     })
 
     it('automatically disables maintenance mode in non-interactive JSON mode after a failed deploy', async () => {
