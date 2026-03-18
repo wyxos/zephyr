@@ -12,13 +12,44 @@ import {createRemoteExecutor} from '../../deploy/remote-exec.mjs'
 import {resolveSshKeyPath} from '../../ssh/keys.mjs'
 import {cleanupOldLogs, closeLogFile, getLogFilePath, writeToLogFile} from '../../utils/log-file.mjs'
 import {resolveRemotePath} from '../../utils/remote-path.mjs'
-import {buildRemoteDeploymentPlan} from './build-remote-deployment-plan.mjs'
+import {buildRemoteDeploymentPlan, resolveRemoteDeploymentState} from './build-remote-deployment-plan.mjs'
 import {executeRemoteDeploymentPlan} from './execute-remote-deployment-plan.mjs'
 import {prepareLocalDeployment} from './prepare-local-deployment.mjs'
 
 async function resolveRemoteHome(ssh, sshUser) {
     const remoteHomeResult = await ssh.execCommand('printf "%s" "$HOME"')
     return remoteHomeResult.stdout.trim() || `/home/${sshUser}`
+}
+
+async function connectToRemoteDeploymentTarget({
+                                                   config,
+                                                   createSshClient,
+                                                   sshUser,
+                                                   privateKey,
+                                                   remoteCwd = null,
+                                                   logProcessing,
+                                                   message
+                                               } = {}) {
+    const ssh = createSshClient()
+
+    logProcessing?.(`\n${message ?? `Connecting to ${config.serverIp} as ${sshUser}...`}`)
+
+    await ssh.connect({
+        host: config.serverIp,
+        username: sshUser,
+        privateKey
+    })
+
+    if (remoteCwd) {
+        return {ssh, remoteCwd}
+    }
+
+    const remoteHome = await resolveRemoteHome(ssh, sshUser)
+
+    return {
+        ssh,
+        remoteCwd: resolveRemotePath(config.projectPath, remoteHome)
+    }
 }
 
 async function maybeRecoverLaravelMaintenanceMode({
@@ -105,43 +136,66 @@ export async function runDeployment(config, options = {}) {
 
     await cleanupOldLogs(rootDir)
 
-    const {requiredPhpVersion} = await prepareLocalDeployment(config, {
-        snapshot,
-        rootDir,
-        versionArg,
-        runPrompt,
-        runCommand,
-        runCommandCapture: context.runCommandCapture,
-        logProcessing,
-        logSuccess,
-        logWarning
-    })
-
-    const ssh = createSshClient()
     const sshUser = config.sshUser || os.userInfo().username
     const privateKeyPath = await resolveSshKeyPath(config.sshKey)
     const privateKey = await fs.readFile(privateKeyPath, 'utf8')
+    let ssh = null
     let remoteCwd = null
     let executeRemote = null
     let remotePlan = null
+    let remoteState = null
     const executionState = {
         enteredMaintenanceMode: false,
         exitedMaintenanceMode: false
     }
 
-    logProcessing(`\nConnecting to ${config.serverIp} as ${sshUser}...`)
-
     let lockAcquired = false
 
     try {
-        await ssh.connect({
-            host: config.serverIp,
-            username: sshUser,
-            privateKey
+        ({ssh, remoteCwd} = await connectToRemoteDeploymentTarget({
+            config,
+            createSshClient,
+            sshUser,
+            privateKey,
+            logProcessing,
+            message: `Connecting to ${config.serverIp} as ${sshUser} to inspect remote deployment state...`
+        }))
+
+        remoteState = await resolveRemoteDeploymentState({
+            snapshot,
+            executionMode,
+            ssh,
+            remoteCwd,
+            runPrompt,
+            logSuccess,
+            logWarning
         })
 
-        const remoteHome = await resolveRemoteHome(ssh, sshUser)
-        remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
+        // Reconnect after local checks so long-running validation does not hold a stale SSH session open.
+        await ssh.dispose()
+        ssh = null
+
+        const {requiredPhpVersion} = await prepareLocalDeployment(config, {
+            snapshot,
+            rootDir,
+            versionArg,
+            runPrompt,
+            runCommand,
+            runCommandCapture: context.runCommandCapture,
+            logProcessing,
+            logSuccess,
+            logWarning
+        })
+
+        ;({ssh} = await connectToRemoteDeploymentTarget({
+            config,
+            createSshClient,
+            sshUser,
+            privateKey,
+            remoteCwd,
+            logProcessing,
+            message: `Reconnecting to ${config.serverIp} as ${sshUser}...`
+        }))
 
         logProcessing('Connection established. Acquiring deployment lock on server...')
         await acquireRemoteLock(ssh, remoteCwd, rootDir, {
@@ -168,6 +222,8 @@ export async function runDeployment(config, options = {}) {
             rootDir,
             requiredPhpVersion,
             executionMode,
+            remoteIsLaravel: remoteState?.remoteIsLaravel,
+            maintenanceModeEnabled: remoteState?.maintenanceModeEnabled,
             ssh,
             remoteCwd,
             executeRemote,
