@@ -4,6 +4,7 @@ import process from 'node:process'
 import chalk from 'chalk'
 import {ZephyrError} from './runtime/errors.mjs'
 import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from './utils/command.mjs'
+import {gitCommitArgs} from './utils/git-hooks.mjs'
 
 function isLocalPathOutsideRepo(depPath, rootDir) {
   if (!depPath || typeof depPath !== 'string') {
@@ -227,7 +228,9 @@ async function runCommand(command, args, { cwd = process.cwd(), capture = false 
 }
 
 
-async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn) {
+async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn, {
+  skipGitHooks = false
+} = {}) {
   try {
     // Check if we're in a git repository
     await runCommand('git', ['rev-parse', '--is-inside-work-tree'], { capture: true, cwd: rootDir })
@@ -254,7 +257,7 @@ async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn) {
     logFn('Committing dependency updates...')
   }
 
-  await runCommand('git', ['commit', '-m', commitMessage, '--', ...updatedFiles], { cwd: rootDir })
+  await runCommand('git', gitCommitArgs(['-m', commitMessage, '--', ...updatedFiles], {skipGitHooks}), { cwd: rootDir })
 
   if (logFn) {
     logFn('Dependency updates committed.')
@@ -264,7 +267,8 @@ async function commitDependencyUpdates(rootDir, updatedFiles, promptFn, logFn) {
 }
 
 async function validateLocalDependencies(rootDir, promptFn, logFn = null, {
-  interactive = true
+  interactive = true,
+  skipGitHooks = false
 } = {}) {
   const packageDeps = await scanPackageJsonDependencies(rootDir)
   const composerDeps = await scanComposerJsonDependencies(rootDir)
@@ -401,7 +405,9 @@ async function validateLocalDependencies(rootDir, promptFn, logFn = null, {
 
   // Commit the changes if any files were updated
   if (updatedFiles.size > 0) {
-    const committed = await commitDependencyUpdates(rootDir, Array.from(updatedFiles), promptFn, logFn)
+    const committed = await commitDependencyUpdates(rootDir, Array.from(updatedFiles), promptFn, logFn, {
+      skipGitHooks
+    })
     if (!committed) {
       throw new Error(
         'Release cancelled: dependency updates were applied but were not committed. Commit/stash your changes and rerun.'

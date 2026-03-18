@@ -31,6 +31,7 @@ const {
             workflow: 'deploy',
             presetName: null,
             maintenanceMode: null,
+            skipGitHooks: false,
             resumePending: false,
             discardPending: false
         }
@@ -133,6 +134,7 @@ describe('main entrypoint', () => {
             workflow: 'deploy',
             presetName: null,
             maintenanceMode: null,
+            skipGitHooks: false,
             resumePending: false,
             discardPending: false
         }
@@ -174,7 +176,7 @@ describe('main entrypoint', () => {
         const snapshot = {changedFiles: ['composer.json']}
 
         mockAccess.mockImplementation(async (filePath) => {
-            if (String(filePath).endsWith('/package.json')) {
+            if (/[\\/]package\.json$/.test(String(filePath))) {
                 return undefined
             }
 
@@ -202,7 +204,7 @@ describe('main entrypoint', () => {
             process.cwd(),
             appContext.runPrompt,
             appContext.logSuccess,
-            {interactive: true}
+            {interactive: true, skipGitHooks: false}
         )
         expect(mockSelectDeploymentTarget).toHaveBeenCalledWith(process.cwd(), expect.objectContaining({
             configurationService,
@@ -244,6 +246,7 @@ describe('main entrypoint', () => {
             workflow: 'deploy',
             presetName: 'production',
             maintenanceMode: false,
+            skipGitHooks: false,
             resumePending: false,
             discardPending: false
         }
@@ -276,6 +279,7 @@ describe('main entrypoint', () => {
             workflow: 'release-packagist',
             presetName: null,
             maintenanceMode: null,
+            skipGitHooks: false,
             resumePending: false,
             discardPending: false
         }

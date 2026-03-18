@@ -179,6 +179,7 @@ export async function runDeployment(config, options = {}) {
             snapshot,
             rootDir,
             versionArg,
+            skipGitHooks: executionMode?.skipGitHooks === true,
             runPrompt,
             runCommand,
             runCommandCapture: context.runCommandCapture,

@@ -85,6 +85,7 @@ export async function runLocalDeploymentChecks({
     rootDir,
     isLaravel,
     hasHook,
+    skipGitHooks = false,
     runCommand,
     runCommandCapture,
     logProcessing,
@@ -102,9 +103,15 @@ export async function runLocalDeploymentChecks({
         })
 
     if (hasHook) {
-        logProcessing?.(
-            'Pre-push git hook detected. Built-in release checks are supported, but Zephyr will skip executing them here. If Zephyr pushes local commits during this release, the hook will run during git push.'
-        )
+        if (skipGitHooks) {
+            logWarning?.(
+                'Pre-push git hook detected. Built-in release checks are supported, and Zephyr will skip executing them here. WARNING: --skip-git-hooks is enabled, so Zephyr will also bypass that hook if it needs to push local commits during this release.'
+            )
+        } else {
+            logProcessing?.(
+                'Pre-push git hook detected. Built-in release checks are supported, but Zephyr will skip executing them here. If Zephyr pushes local commits during this release, the hook will run during git push.'
+            )
+        }
         return
     }
 
@@ -124,7 +131,8 @@ export async function runLocalDeploymentChecks({
                 getGitStatus: (dir) => getGitStatus(dir, {runCommandCapture}),
                 runCommand,
                 logProcessing,
-                logSuccess
+                logSuccess,
+                skipGitHooks
             })
         }
     }

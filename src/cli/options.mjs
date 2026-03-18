@@ -35,6 +35,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .option('--resume-pending', 'Resume a saved pending deployment snapshot without prompting.')
         .option('--discard-pending', 'Discard a saved pending deployment snapshot without prompting.')
         .option('--maintenance <mode>', 'Laravel maintenance mode policy for non-interactive app deploys (on|off).')
+        .option('--skip-git-hooks', 'Bypass local git hooks for any commits and pushes Zephyr performs.')
         .option('--skip-tests', 'Skip test execution in package release workflows.')
         .option('--skip-lint', 'Skip lint execution in package release workflows.')
         .option('--skip-build', 'Skip build execution in node/vue release workflows.')
@@ -66,6 +67,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         resumePending: Boolean(options.resumePending),
         discardPending: Boolean(options.discardPending),
         maintenanceMode: normalizeMaintenanceMode(options.maintenance),
+        skipGitHooks: Boolean(options.skipGitHooks),
         skipTests: Boolean(options.skipTests),
         skipLint: Boolean(options.skipLint),
         skipBuild: Boolean(options.skipBuild),

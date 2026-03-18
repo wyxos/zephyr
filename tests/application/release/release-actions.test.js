@@ -292,11 +292,31 @@ describe('release application actions', () => {
         })
 
         expect(commandLog).toEqual(expect.arrayContaining([
-            {command: 'php', args: ['vendor/bin/pint'], options: {capture: true, cwd: rootDir}},
-            {command: 'php', args: ['artisan', 'test', '--compact'], options: {capture: true, cwd: rootDir}},
-            {command: 'git', args: ['add', 'composer.json'], options: {cwd: rootDir}},
-            {command: 'git', args: ['commit', '-m', 'chore: release 1.0.1'], options: {cwd: rootDir}},
-            {command: 'git', args: ['tag', 'v1.0.1'], options: {cwd: rootDir}}
+            expect.objectContaining({
+                command: 'php',
+                args: [expect.stringMatching(/vendor[\\/]+bin[\\/]+pint/)],
+                options: expect.objectContaining({capture: true, cwd: rootDir})
+            }),
+            expect.objectContaining({
+                command: 'php',
+                args: ['artisan', 'test', '--compact'],
+                options: expect.objectContaining({capture: true, cwd: rootDir})
+            }),
+            expect.objectContaining({
+                command: 'git',
+                args: ['add', 'composer.json'],
+                options: expect.objectContaining({cwd: rootDir})
+            }),
+            expect.objectContaining({
+                command: 'git',
+                args: ['commit', '-m', 'chore: release 1.0.1'],
+                options: expect.objectContaining({cwd: rootDir})
+            }),
+            expect.objectContaining({
+                command: 'git',
+                args: ['tag', 'v1.0.1'],
+                options: expect.objectContaining({cwd: rootDir})
+            })
         ]))
 
         expect(commandLog.some(({command, args}) => command === 'composer' && args[0] === 'test')).toBe(false)
@@ -327,5 +347,86 @@ describe('release application actions', () => {
         expect(mockValidateReleaseDependencies).toHaveBeenCalledWith(rootDir, expect.objectContaining({
             interactive: false
         }))
+    })
+
+    it('can bypass git hooks in the node release workflow', async () => {
+        await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+            name: '@wyxos/zephyr-test',
+            version: '1.0.0'
+        }, null, 2) + '\n')
+
+        const commandLog = []
+
+        mockRunReleaseCommand.mockImplementation(async (command, args, options = {}) => {
+            commandLog.push({command, args, options})
+
+            if (command === 'git' && args[0] === 'status') {
+                return {stdout: '', stderr: ''}
+            }
+
+            if (command === 'npm' && args[0] === 'version') {
+                const packagePath = join(options.cwd, 'package.json')
+                const pkg = JSON.parse(await readFile(packagePath, 'utf8'))
+                pkg.version = '1.0.1'
+                await writeFile(packagePath, JSON.stringify(pkg, null, 2) + '\n')
+                return {stdout: 'v1.0.1', stderr: ''}
+            }
+
+            return options.capture ? {stdout: '', stderr: ''} : undefined
+        })
+
+        await releaseNodePackage({
+            releaseType: 'patch',
+            skipGitHooks: true,
+            skipTests: true,
+            skipLint: true,
+            skipBuild: true,
+            skipDeploy: true,
+            rootDir,
+            logStep: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })
+
+        expect(commandLog.map(({command, args}) => [command, ...args])).toEqual([
+            ['git', 'status', '--porcelain'],
+            ['npm', 'version', 'patch', '--no-commit-hooks'],
+            ['git', 'commit', '--no-verify', '--amend', '-m', 'chore: release 1.0.1'],
+            ['git', 'tag', '-fa', 'v1.0.1', '-m', 'v1.0.1'],
+            ['git', 'push', '--no-verify', '--follow-tags']
+        ])
+    })
+
+    it('can bypass git hooks in the Packagist release workflow', async () => {
+        await writeFile(join(rootDir, 'composer.json'), JSON.stringify({
+            name: 'wyxos/test-package',
+            version: '1.0.0'
+        }, null, 2) + '\n')
+
+        const commandLog = []
+
+        mockRunReleaseCommand.mockImplementation(async (command, args, options = {}) => {
+            commandLog.push({command, args, options})
+            return options.capture ? {stdout: '', stderr: ''} : undefined
+        })
+
+        await releasePackagistPackage({
+            releaseType: 'patch',
+            skipGitHooks: true,
+            skipTests: true,
+            skipLint: true,
+            rootDir,
+            logStep: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })
+
+        expect(commandLog.map(({command, args}) => [command, ...args])).toEqual([
+            ['git', 'add', 'composer.json'],
+            ['git', 'commit', '--no-verify', '-m', 'chore: release 1.0.1'],
+            ['git', 'tag', 'v1.0.1'],
+            ['git', 'push', '--no-verify'],
+            ['git', 'push', '--no-verify', 'origin', '--tags']
+        ])
     })
 })

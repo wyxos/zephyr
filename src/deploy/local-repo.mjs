@@ -1,5 +1,6 @@
 import { getCurrentBranch as getCurrentBranchImpl, getUpstreamRef as getUpstreamRefImpl } from '../utils/git.mjs'
 import {hasPrePushHook} from './preflight.mjs'
+import {gitCommitArgs, gitPushArgs} from '../utils/git-hooks.mjs'
 
 export async function getCurrentBranch(rootDir) {
   const branch = await getCurrentBranchImpl(rootDir)
@@ -165,7 +166,9 @@ async function commitAndPushStagedChanges(targetBranch, rootDir, {
   runCommand,
   getGitStatus,
   logProcessing,
-  logSuccess
+  logSuccess,
+  logWarning,
+  skipGitHooks = false
 } = {}) {
   const { commitMessage } = await runPrompt([
     {
@@ -179,15 +182,19 @@ async function commitAndPushStagedChanges(targetBranch, rootDir, {
   const message = commitMessage.trim()
 
   logProcessing?.('Committing staged changes before deployment...')
-  await runCommand('git', ['commit', '-m', message], { cwd: rootDir })
+  await runCommand('git', gitCommitArgs(['-m', message], {skipGitHooks}), { cwd: rootDir })
 
   const prePushHookPresent = await hasPrePushHook(rootDir)
   if (prePushHookPresent) {
-    logProcessing?.('Pre-push git hook detected. Running hook during git push...')
+    if (skipGitHooks) {
+      logWarning?.('Pre-push git hook detected, but Zephyr will bypass it because --skip-git-hooks was provided.')
+    } else {
+      logProcessing?.('Pre-push git hook detected. Running hook during git push...')
+    }
   }
 
   try {
-    await runCommand('git', ['push', 'origin', targetBranch], { cwd: rootDir })
+    await runCommand('git', gitPushArgs(['origin', targetBranch], {skipGitHooks}), { cwd: rootDir })
   } catch (error) {
     if (prePushHookPresent) {
       throw new Error(`Git push failed while the pre-push hook was running. See hook output above.\n${error.message}`)
@@ -211,6 +218,7 @@ export async function ensureCommittedChangesPushed(targetBranch, rootDir, {
   logProcessing,
   logSuccess,
   logWarning,
+  skipGitHooks = false,
   getUpstreamRef: getUpstreamRefFn = getUpstreamRef,
   readUpstreamSyncState: readUpstreamSyncStateFn = (branch, dir) =>
     readUpstreamSyncState(branch, dir, {
@@ -256,11 +264,15 @@ export async function ensureCommittedChangesPushed(targetBranch, rootDir, {
   const prePushHookPresent = await hasPrePushHookFn(rootDir)
 
   if (prePushHookPresent) {
-    logProcessing?.('Pre-push git hook detected. Running hook during git push...')
+    if (skipGitHooks) {
+      logWarning?.('Pre-push git hook detected, but Zephyr will bypass it because --skip-git-hooks was provided.')
+    } else {
+      logProcessing?.('Pre-push git hook detected. Running hook during git push...')
+    }
   }
 
   try {
-    await runCommandCapture('git', ['push', remoteName, `${targetBranch}:${upstreamBranch}`], { cwd: rootDir })
+    await runCommandCapture('git', gitPushArgs([remoteName, `${targetBranch}:${upstreamBranch}`], {skipGitHooks}), { cwd: rootDir })
   } catch (error) {
     if (prePushHookPresent) {
       const hookOutput = [error.stdout, error.stderr]
@@ -290,6 +302,7 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
   logProcessing,
   logSuccess,
   logWarning,
+  skipGitHooks = false,
   getCurrentBranch: getCurrentBranchFn = getCurrentBranch,
   getGitStatus: getGitStatusFn = (dir) => getGitStatus(dir, { runCommandCapture }),
   readUpstreamSyncState: readUpstreamSyncStateFn = (branch, dir) =>
@@ -304,7 +317,8 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
       runCommandCapture,
       logProcessing,
       logSuccess,
-      logWarning
+      logWarning,
+      skipGitHooks
     })
 } = {}) {
   if (!targetBranch) {
@@ -369,7 +383,9 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
     runCommand,
     getGitStatus: getGitStatusFn,
     logProcessing,
-    logSuccess
+    logSuccess,
+    logWarning,
+    skipGitHooks
   })
 
   await ensureCommittedChangesPushedFn(targetBranch, rootDir)

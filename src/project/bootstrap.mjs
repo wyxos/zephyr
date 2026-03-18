@@ -2,12 +2,14 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import {ZephyrError} from '../runtime/errors.mjs'
+import {gitCommitArgs} from '../utils/git-hooks.mjs'
 
 export async function ensureGitignoreEntry(rootDir, {
   projectConfigDir = '.zephyr',
   runCommand,
   logSuccess,
-  logWarning
+  logWarning,
+  skipGitHooks = false
 } = {}) {
   const gitignorePath = path.join(rootDir, '.gitignore')
   const targetEntry = `${projectConfigDir}/`
@@ -53,7 +55,7 @@ export async function ensureGitignoreEntry(rootDir, {
 
   try {
     await runCommand('git', ['add', '.gitignore'], { cwd: rootDir })
-    await runCommand('git', ['commit', '-m', 'chore: ignore zephyr config'], { cwd: rootDir })
+    await runCommand('git', gitCommitArgs(['-m', 'chore: ignore zephyr config'], {skipGitHooks}), { cwd: rootDir })
   } catch (error) {
     if (error.exitCode === 1) {
       logWarning?.('Git commit skipped: nothing to commit or pre-commit hook prevented commit.')
@@ -68,6 +70,7 @@ export async function ensureProjectReleaseScript(rootDir, {
   runCommand,
   logSuccess,
   logWarning,
+  skipGitHooks = false,
   interactive = true,
   releaseScriptName = 'release',
   releaseScriptCommand = 'npx @wyxos/zephyr@latest'
@@ -141,7 +144,7 @@ export async function ensureProjectReleaseScript(rootDir, {
   if (isGitRepo) {
     try {
       await runCommand('git', ['add', 'package.json'], { cwd: rootDir, silent: true })
-      await runCommand('git', ['commit', '-m', 'chore: add zephyr release script'], { cwd: rootDir, silent: true })
+      await runCommand('git', gitCommitArgs(['-m', 'chore: add zephyr release script'], {skipGitHooks}), { cwd: rootDir, silent: true })
       logSuccess?.('Committed package.json release script addition.')
     } catch (error) {
       if (error.exitCode === 1) {

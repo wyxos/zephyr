@@ -9,6 +9,7 @@ export async function prepareLocalDeployment(config, {
     snapshot = null,
     rootDir = process.cwd(),
     versionArg = null,
+    skipGitHooks = false,
     runPrompt,
     runCommand,
     runCommandCapture,
@@ -26,6 +27,7 @@ export async function prepareLocalDeployment(config, {
     if (!snapshot && context.isLaravel) {
         await bumpLocalPackageVersion(rootDir, {
             versionArg,
+            skipGitHooks,
             runCommand,
             logProcessing,
             logSuccess,
@@ -39,13 +41,15 @@ export async function prepareLocalDeployment(config, {
         runCommandCapture,
         logProcessing,
         logSuccess,
-        logWarning
+        logWarning,
+        skipGitHooks
     })
 
     await runLocalDeploymentChecks({
         rootDir,
         isLaravel: context.isLaravel,
         hasHook: context.hasHook,
+        skipGitHooks,
         runCommand,
         runCommandCapture,
         logProcessing,
