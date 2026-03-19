@@ -83,10 +83,12 @@ export async function resolveSupportedLintCommand(rootDir, {commandExists} = {})
     }
   }
 
-  throw new Error(
+  const error = new Error(
     'Release cannot run because no supported lint command was found.\n' +
     'Zephyr requires either `npm run lint` or Laravel Pint (`vendor/bin/pint`) before deployment.'
   )
+  error.code = 'ZEPHYR_LINT_COMMAND_NOT_FOUND'
+  throw error
 }
 
 export async function runLinting(rootDir, {

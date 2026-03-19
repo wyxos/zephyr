@@ -195,12 +195,16 @@ describe('application/deploy/prepare-local-deployment', () => {
         }))
     })
 
-    it('halts before bumping or syncing when local check support is missing', async () => {
-        mockResolveLocalDeploymentCheckSupport.mockRejectedValue(
-            new Error('Release cannot run because no supported lint command was found.')
-        )
+    it('continues when lint support is unavailable', async () => {
+        mockResolveLocalDeploymentCheckSupport.mockResolvedValue({
+            lintCommand: null,
+            testCommand: {
+                command: 'php',
+                args: ['artisan', 'test', '--compact']
+            }
+        })
 
-        await expect(prepareLocalDeployment({
+        const result = await prepareLocalDeployment({
             branch: 'main'
         }, {
             rootDir: '/repo/demo',
@@ -210,10 +214,21 @@ describe('application/deploy/prepare-local-deployment', () => {
             logProcessing: vi.fn(),
             logSuccess: vi.fn(),
             logWarning: vi.fn()
-        })).rejects.toThrow('Release cannot run because no supported lint command was found.')
+        })
 
-        expect(mockBumpLocalPackageVersion).not.toHaveBeenCalled()
-        expect(mockEnsureLocalRepositoryState).not.toHaveBeenCalled()
-        expect(mockRunLocalDeploymentChecks).not.toHaveBeenCalled()
+        expect(result).toEqual({
+            requiredPhpVersion: '8.4.0',
+            isLaravel: true,
+            hasHook: false
+        })
+        expect(mockBumpLocalPackageVersion).toHaveBeenCalled()
+        expect(mockEnsureLocalRepositoryState).toHaveBeenCalled()
+        expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
+            lintCommand: null,
+            testCommand: expect.objectContaining({
+                command: 'php',
+                args: ['artisan', 'test', '--compact']
+            })
+        }))
     })
 })

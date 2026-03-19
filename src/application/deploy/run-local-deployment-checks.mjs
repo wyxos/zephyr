@@ -52,7 +52,16 @@ export async function resolveLocalDeploymentCheckSupport({
     isLaravel,
     runCommandCapture
 } = {}) {
-    const lintCommand = await preflight.resolveSupportedLintCommand(rootDir, {commandExists})
+    let lintCommand = null
+
+    try {
+        lintCommand = await preflight.resolveSupportedLintCommand(rootDir, {commandExists})
+    } catch (error) {
+        if (error?.code !== 'ZEPHYR_LINT_COMMAND_NOT_FOUND') {
+            throw error
+        }
+    }
+
     const testCommand = isLaravel
         ? await resolveSupportedLaravelTestCommand(rootDir, {runCommandCapture})
         : null
@@ -115,14 +124,20 @@ export async function runLocalDeploymentChecks({
         }
     }
 
-    const lintRan = await preflight.runLinting(rootDir, {
-        runCommand,
-        logProcessing,
-        logSuccess,
-        logWarning,
-        commandExists,
-        lintCommand: support.lintCommand
-    })
+    if (support.lintCommand === null) {
+        logWarning?.('No supported lint command was found. Skipping linting checks.')
+    }
+
+    const lintRan = support.lintCommand === null
+        ? false
+        : await preflight.runLinting(rootDir, {
+            runCommand,
+            logProcessing,
+            logSuccess,
+            logWarning,
+            commandExists,
+            lintCommand: support.lintCommand
+        })
 
     if (lintRan) {
         const hasChanges = await hasUncommittedChanges(rootDir, {runCommandCapture})
