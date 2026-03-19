@@ -169,43 +169,61 @@ describe('application/deploy/run-local-deployment-checks', () => {
         expect(logSuccess).toHaveBeenCalledWith('Local tests passed.')
     })
 
-    it('fails early when no supported lint command exists', async () => {
+    it('skips linting when no supported lint command exists', async () => {
         mockResolveSupportedLintCommand.mockRejectedValue(
-            new Error('Release cannot run because no supported lint command was found.')
+            Object.assign(
+                new Error('Release cannot run because no supported lint command was found.'),
+                {code: 'ZEPHYR_LINT_COMMAND_NOT_FOUND'}
+            )
         )
 
-        await expect(runLocalDeploymentChecks({
+        const runCommand = vi.fn()
+        const runCommandCapture = vi.fn().mockResolvedValue('test\nqueue:work\n')
+        const logWarning = vi.fn()
+
+        await runLocalDeploymentChecks({
             rootDir: '/repo/demo',
-            isLaravel: false,
+            isLaravel: true,
             hasHook: false,
-            runCommand: vi.fn(),
-            runCommandCapture: vi.fn(),
+            runCommand,
+            runCommandCapture,
             logProcessing: vi.fn(),
             logSuccess: vi.fn(),
-            logWarning: vi.fn()
-        })).rejects.toThrow('Release cannot run because no supported lint command was found.')
+            logWarning
+        })
 
+        expect(logWarning).toHaveBeenCalledWith('No supported lint command was found. Skipping linting checks.')
         expect(mockRunLinting).not.toHaveBeenCalled()
+        expect(mockCommitLintingChanges).not.toHaveBeenCalled()
+        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
     })
 
-    it('still fails early for unsupported checks even when a pre-push hook is present', async () => {
+    it('returns early for hook-managed releases even when lint support is unavailable', async () => {
         mockResolveSupportedLintCommand.mockRejectedValue(
-            new Error('Release cannot run because no supported lint command was found.')
+            Object.assign(
+                new Error('Release cannot run because no supported lint command was found.'),
+                {code: 'ZEPHYR_LINT_COMMAND_NOT_FOUND'}
+            )
         )
 
-        await expect(runLocalDeploymentChecks({
+        const logProcessing = vi.fn()
+
+        await runLocalDeploymentChecks({
             rootDir: '/repo/demo',
             isLaravel: true,
             hasHook: true,
             runCommand: vi.fn(),
-            runCommandCapture: vi.fn(),
-            logProcessing: vi.fn(),
+            runCommandCapture: vi.fn().mockResolvedValue('test\nqueue:work\n'),
+            logProcessing,
             logSuccess: vi.fn(),
             logWarning: vi.fn()
-        })).rejects.toThrow('Release cannot run because no supported lint command was found.')
+        })
 
         expect(mockRunLinting).not.toHaveBeenCalled()
         expect(mockCommitLintingChanges).not.toHaveBeenCalled()
+        expect(logProcessing).toHaveBeenCalledWith(
+            'Pre-push git hook detected. Built-in release checks are supported, but Zephyr will skip executing them here. If Zephyr pushes local commits during this release, the hook will run during git push.'
+        )
     })
 
     it('fails early when Laravel does not support artisan test', async () => {
@@ -222,6 +240,27 @@ describe('application/deploy/run-local-deployment-checks', () => {
 
         expect(mockResolveSupportedLintCommand).toHaveBeenCalledWith('/repo/demo', {
             commandExists: mockCommandExists
+        })
+    })
+
+    it('treats missing lint support as optional and still resolves Laravel tests', async () => {
+        mockResolveSupportedLintCommand.mockRejectedValue(
+            Object.assign(
+                new Error('Release cannot run because no supported lint command was found.'),
+                {code: 'ZEPHYR_LINT_COMMAND_NOT_FOUND'}
+            )
+        )
+
+        await expect(resolveLocalDeploymentCheckSupport({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            runCommandCapture: vi.fn().mockResolvedValue('test\nqueue:work\n')
+        })).resolves.toEqual({
+            lintCommand: null,
+            testCommand: {
+                command: 'php',
+                args: ['artisan', 'test', '--compact']
+            }
         })
     })
 
