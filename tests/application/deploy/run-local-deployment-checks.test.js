@@ -86,8 +86,9 @@ describe('application/deploy/run-local-deployment-checks', () => {
         )
     })
 
-    it('warns when a pre-push hook is present but hook skipping is enabled', async () => {
+    it('runs manual checks when a pre-push hook is present and hook skipping is enabled', async () => {
         const logWarning = vi.fn()
+        const runCommand = vi.fn()
         const runCommandCapture = vi.fn().mockResolvedValue('test\nqueue:work\n')
 
         await runLocalDeploymentChecks({
@@ -95,7 +96,7 @@ describe('application/deploy/run-local-deployment-checks', () => {
             isLaravel: true,
             hasHook: true,
             skipGitHooks: true,
-            runCommand: vi.fn(),
+            runCommand,
             runCommandCapture,
             logProcessing: vi.fn(),
             logSuccess: vi.fn(),
@@ -103,10 +104,22 @@ describe('application/deploy/run-local-deployment-checks', () => {
         })
 
         expect(logWarning).toHaveBeenCalledWith(
-            'Pre-push git hook detected. Built-in release checks are supported, and Zephyr will skip executing them here. WARNING: --skip-git-hooks is enabled, so Zephyr will also bypass that hook if it needs to push local commits during this release.'
+            'Pre-push git hook detected. Zephyr will run its built-in release checks manually because --skip-git-hooks is enabled, and the hook will be bypassed during git push.'
         )
-        expect(mockRunLinting).not.toHaveBeenCalled()
+        expect(mockRunLinting).toHaveBeenCalledWith('/repo/demo', expect.objectContaining({
+            runCommand,
+            logProcessing: expect.any(Function),
+            logSuccess: expect.any(Function),
+            logWarning,
+            commandExists: mockCommandExists,
+            lintCommand: expect.objectContaining({
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'lint']
+            })
+        }))
         expect(mockCommitLintingChanges).not.toHaveBeenCalled()
+        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
     })
 
     it('commits lint changes and runs local Laravel tests when needed', async () => {

@@ -105,14 +105,14 @@ export async function runLocalDeploymentChecks({
     if (hasHook) {
         if (skipGitHooks) {
             logWarning?.(
-                'Pre-push git hook detected. Built-in release checks are supported, and Zephyr will skip executing them here. WARNING: --skip-git-hooks is enabled, so Zephyr will also bypass that hook if it needs to push local commits during this release.'
+                'Pre-push git hook detected. Zephyr will run its built-in release checks manually because --skip-git-hooks is enabled, and the hook will be bypassed during git push.'
             )
         } else {
             logProcessing?.(
                 'Pre-push git hook detected. Built-in release checks are supported, but Zephyr will skip executing them here. If Zephyr pushes local commits during this release, the hook will run during git push.'
             )
+            return
         }
-        return
     }
 
     const lintRan = await preflight.runLinting(rootDir, {

@@ -14,6 +14,14 @@ function createLockPayload() {
   }
 }
 
+function createLockKey(details = {}) {
+  return `${details.user}@${details.hostname}:${details.pid}:${details.startedAt}`
+}
+
+function waitForDelay(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs))
+}
+
 export async function acquireLocalLock(rootDir) {
   const lockPath = getLockFilePath(rootDir)
   const configDir = getProjectConfigDir(rootDir)
@@ -68,12 +76,12 @@ export async function readRemoteLock(ssh, remoteCwd) {
   return null
 }
 
-function parseLockDetails(rawContent = '') {
-  try {
-    return JSON.parse(rawContent.trim())
-  } catch (_error) {
-    return { raw: rawContent.trim() }
-  }
+async function removeRemoteLock(ssh, remoteCwd) {
+  const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
+  const escapedLockPath = lockPath.replace(/'/g, "'\\''")
+  const removeCommand = `rm -f '${escapedLockPath}'`
+
+  await ssh.execCommand(removeCommand, { cwd: remoteCwd })
 }
 
 function formatLockHolder(details = {}) {
@@ -83,10 +91,80 @@ function formatLockHolder(details = {}) {
   return { startedBy, startedAt }
 }
 
+function buildRemoteLockConflictMessage(lockDetails, { stale = false } = {}) {
+  const { startedBy, startedAt } = formatLockHolder(lockDetails)
+
+  return stale
+    ? `Stale deployment lock detected on the server (started by ${startedBy}${startedAt}).`
+    : `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}).`
+}
+
+async function promptToResolveRemoteLockConflict(rootDir, ssh, remoteCwd, lockDetails, {
+  runPrompt,
+  logWarning,
+  logProcessing,
+  interactive = true,
+  stale = false,
+  wait = waitForDelay
+} = {}) {
+  const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
+
+  if (!interactive) {
+    if (stale) {
+      throw new ZephyrError(
+        `Stale deployment lock detected on the server (started by ${formatLockHolder(lockDetails).startedBy}${formatLockHolder(lockDetails).startedAt}). Remove ${remoteCwd}/${lockPath} manually before rerunning with --non-interactive.`,
+        {code: 'ZEPHYR_STALE_REMOTE_LOCK'}
+      )
+    }
+
+    const { startedBy, startedAt } = formatLockHolder(lockDetails)
+    throw new Error(
+      `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
+    )
+  }
+
+  if (typeof runPrompt !== 'function') {
+    throw new Error('Remote lock conflicts require runPrompt when Zephyr is interactive.')
+  }
+
+  let currentLock = lockDetails
+
+  while (currentLock) {
+    const { action } = await runPrompt([
+      {
+        type: 'list',
+        name: 'action',
+        message: `${buildRemoteLockConflictMessage(currentLock, { stale })} What would you like to do?`,
+        choices: [
+          {name: 'Delete the lock file and continue', value: 'delete'},
+          {name: 'Wait 60 seconds and check again', value: 'wait'}
+        ],
+        default: 'wait'
+      }
+    ])
+
+    if (action === 'delete') {
+      await removeRemoteLock(ssh, remoteCwd)
+      await releaseLocalLock(rootDir, { logWarning })
+      return
+    }
+
+    logProcessing?.('Waiting 60 seconds before checking the remote deployment lock again...')
+    await wait(60_000)
+
+    currentLock = await readRemoteLock(ssh, remoteCwd)
+    if (!currentLock) {
+      return
+    }
+  }
+}
+
 export async function compareLocksAndPrompt(rootDir, ssh, remoteCwd, {
   runPrompt,
   logWarning,
-  interactive = true
+  logProcessing,
+  interactive = true,
+  wait = waitForDelay
 } = {}) {
   const localLock = await readLocalLock(rootDir)
   const remoteLock = await readRemoteLock(ssh, remoteCwd)
@@ -95,36 +173,27 @@ export async function compareLocksAndPrompt(rootDir, ssh, remoteCwd, {
     return false
   }
 
-  const localKey = `${localLock.user}@${localLock.hostname}:${localLock.pid}:${localLock.startedAt}`
-  const remoteKey = `${remoteLock.user}@${remoteLock.hostname}:${remoteLock.pid}:${remoteLock.startedAt}`
+  const localKey = createLockKey(localLock)
+  const remoteKey = createLockKey(remoteLock)
 
   if (localKey === remoteKey) {
-    const { startedBy, startedAt } = formatLockHolder(remoteLock)
-
     if (!interactive) {
       throw new ZephyrError(
-        `Stale deployment lock detected on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/.zephyr/${PROJECT_LOCK_FILE} manually before rerunning with --non-interactive.`,
+        `Stale deployment lock detected on the server (started by ${formatLockHolder(remoteLock).startedBy}${formatLockHolder(remoteLock).startedAt}). Remove ${remoteCwd}/.zephyr/${PROJECT_LOCK_FILE} manually before rerunning with --non-interactive.`,
         {code: 'ZEPHYR_STALE_REMOTE_LOCK'}
       )
     }
 
-    const { shouldRemove } = await runPrompt([
-      {
-        type: 'confirm',
-        name: 'shouldRemove',
-        message: `Stale lock detected on server (started by ${startedBy}${startedAt}). This appears to be from a failed deployment. Remove it?`,
-        default: true
-      }
-    ])
+    await promptToResolveRemoteLockConflict(rootDir, ssh, remoteCwd, remoteLock, {
+      runPrompt,
+      logWarning,
+      logProcessing,
+      interactive,
+      stale: true,
+      wait
+    })
 
-    if (shouldRemove) {
-      const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
-      const escapedLockPath = lockPath.replace(/'/g, "'\\''")
-      const removeCommand = `rm -f '${escapedLockPath}'`
-      await ssh.execCommand(removeCommand, { cwd: remoteCwd })
-      await releaseLocalLock(rootDir, { logWarning })
-      return true
-    }
+    return true
   }
 
   return false
@@ -133,31 +202,70 @@ export async function compareLocksAndPrompt(rootDir, ssh, remoteCwd, {
 export async function acquireRemoteLock(ssh, remoteCwd, rootDir, {
   runPrompt,
   logWarning,
-  interactive = true
+  logProcessing,
+  interactive = true,
+  wait = waitForDelay
 } = {}) {
   const lockPath = `.zephyr/${PROJECT_LOCK_FILE}`
   const escapedLockPath = lockPath.replace(/'/g, "'\\''")
-  const checkCommand = `mkdir -p .zephyr && if [ -f '${escapedLockPath}' ]; then cat '${escapedLockPath}'; else echo "LOCK_NOT_FOUND"; fi`
+  const remoteLock = await readRemoteLock(ssh, remoteCwd)
 
-  const checkResult = await ssh.execCommand(checkCommand, { cwd: remoteCwd })
-
-  if (checkResult.stdout && checkResult.stdout.trim() !== 'LOCK_NOT_FOUND' && checkResult.stdout.trim() !== '') {
+  if (remoteLock) {
     const localLock = await readLocalLock(rootDir)
     if (localLock) {
-      const removed = await compareLocksAndPrompt(rootDir, ssh, remoteCwd, { runPrompt, logWarning, interactive })
-      if (!removed) {
-        const details = parseLockDetails(checkResult.stdout.trim())
-        const { startedBy, startedAt } = formatLockHolder(details)
+      const localKey = createLockKey(localLock)
+      const remoteKey = createLockKey(remoteLock)
+
+      if (localKey === remoteKey) {
+        const resolvedStaleLock = await compareLocksAndPrompt(rootDir, ssh, remoteCwd, {
+          runPrompt,
+          logWarning,
+          logProcessing,
+          interactive,
+          wait
+        })
+
+        if (!resolvedStaleLock) {
+          const refreshedRemoteLock = await readRemoteLock(ssh, remoteCwd)
+          if (refreshedRemoteLock) {
+            if (interactive) {
+              await promptToResolveRemoteLockConflict(rootDir, ssh, remoteCwd, refreshedRemoteLock, {
+                runPrompt,
+                logWarning,
+                logProcessing,
+                interactive,
+                wait
+              })
+            } else {
+              const { startedBy, startedAt } = formatLockHolder(refreshedRemoteLock)
+              throw new Error(
+                `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
+              )
+            }
+          }
+        }
+      } else if (interactive) {
+        await promptToResolveRemoteLockConflict(rootDir, ssh, remoteCwd, remoteLock, {
+          runPrompt,
+          logWarning,
+          logProcessing,
+          interactive,
+          wait
+        })
+      } else {
+        const { startedBy, startedAt } = formatLockHolder(remoteLock)
         throw new Error(
           `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
         )
       }
     } else {
-      const details = parseLockDetails(checkResult.stdout.trim())
-      const { startedBy, startedAt } = formatLockHolder(details)
-      throw new Error(
-        `Another deployment is currently in progress on the server (started by ${startedBy}${startedAt}). Remove ${remoteCwd}/${lockPath} if you are sure it is stale.`
-      )
+      await promptToResolveRemoteLockConflict(rootDir, ssh, remoteCwd, remoteLock, {
+        runPrompt,
+        logWarning,
+        logProcessing,
+        interactive,
+        wait
+      })
     }
   }
 
