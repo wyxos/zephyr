@@ -89,6 +89,74 @@ describe('application/deploy/build-remote-deployment-plan', () => {
         expect(runPrompt).not.toHaveBeenCalled()
     })
 
+    it('uses an explicit interactive maintenance-mode choice without prompting', async () => {
+        mockPlanLaravelDeploymentTasks.mockReturnValue([
+            {label: 'Pull latest changes for main', command: 'git pull origin main'},
+            {label: 'Compile frontend assets', command: 'npm run build'}
+        ])
+
+        const ssh = {
+            execCommand: vi.fn(async (command) => {
+                if (command.includes('grep -q "laravel/framework"')) {
+                    return {stdout: 'yes', code: 0}
+                }
+
+                if (command.includes('config/horizon.php')) {
+                    return {stdout: 'no', code: 0}
+                }
+
+                return {stdout: '', code: 0}
+            })
+        }
+
+        const executeRemote = vi.fn(async (label) => {
+            if (label === 'Inspect pending changes') {
+                return {stdout: 'composer.json\nresources/js/app.js\n', code: 0}
+            }
+
+            return {stdout: '', stderr: '', code: 0}
+        })
+        const runPrompt = vi.fn()
+
+        const result = await buildRemoteDeploymentPlan({
+            config: {
+                branch: 'main',
+                serverName: 'production',
+                projectPath: '~/webapps/demo',
+                sshUser: 'forge'
+            },
+            ssh,
+            remoteCwd: '/home/runcloud/webapps/demo',
+            executeRemote,
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            runPrompt,
+            logWarning: vi.fn(),
+            executionMode: {
+                interactive: true,
+                maintenanceMode: false
+            }
+        })
+
+        expect(runPrompt).not.toHaveBeenCalled()
+        expect(mockPlanLaravelDeploymentTasks).toHaveBeenCalledWith({
+            branch: 'main',
+            isLaravel: true,
+            changedFiles: ['composer.json', 'resources/js/app.js'],
+            horizonConfigured: false,
+            phpCommand: 'php',
+            maintenanceMode: false,
+            maintenanceDownCommand: null,
+            maintenanceUpCommand: 'php artisan up'
+        })
+        expect(result.maintenanceModeEnabled).toBe(false)
+        expect(result.pendingSnapshot).toEqual(expect.objectContaining({
+            maintenanceModeEnabled: false,
+            maintenanceModeUsesPrerender: false,
+            maintenanceModeRenderView: null
+        }))
+    })
+
     it('uses prerendered maintenance mode when the remote Laravel app supports it', async () => {
         mockFindPhpBinary.mockResolvedValue('php')
         mockPlanLaravelDeploymentTasks.mockReturnValue([

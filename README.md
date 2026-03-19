@@ -87,6 +87,8 @@ If Zephyr would normally prompt to:
 
 then non-interactive mode stops immediately with a clear error instead.
 
+For Laravel app deployments, `--maintenance on|off` overrides the maintenance prompt when you want an explicit choice instead of an interactive confirm.
+
 ## AI Agents and Automation
 
 Zephyr can be used safely by Codex, CI jobs, or other automation once configuration is already in place.
