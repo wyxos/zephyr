@@ -201,6 +201,7 @@ export async function runDeployment(config, options = {}) {
         logProcessing('Connection established. Acquiring deployment lock on server...')
         await acquireRemoteLock(ssh, remoteCwd, rootDir, {
             runPrompt,
+            logProcessing,
             logWarning,
             interactive: executionMode?.interactive !== false
         })
@@ -268,6 +269,7 @@ export async function runDeployment(config, options = {}) {
             try {
                 await compareLocksAndPrompt(rootDir, ssh, remoteCwd, {
                     runPrompt,
+                    logProcessing,
                     logWarning,
                     interactive: executionMode?.interactive !== false
                 })
