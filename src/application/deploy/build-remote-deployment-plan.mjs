@@ -253,15 +253,15 @@ async function resolveMaintenanceMode({
         return snapshot.maintenanceModeEnabled
     }
 
-    if (executionMode?.interactive === false) {
-        if (typeof executionMode.maintenanceMode !== 'boolean') {
-            throw new ZephyrError(
-                'Zephyr cannot run this Laravel deployment non-interactively without an explicit maintenance-mode decision. Pass --maintenance on or --maintenance off.',
-                {code: 'ZEPHYR_MAINTENANCE_FLAG_REQUIRED'}
-            )
-        }
-
+    if (typeof executionMode.maintenanceMode === 'boolean') {
         return executionMode.maintenanceMode
+    }
+
+    if (executionMode?.interactive === false) {
+        throw new ZephyrError(
+            'Zephyr cannot run this Laravel deployment non-interactively without an explicit maintenance-mode decision. Pass --maintenance on or --maintenance off.',
+            {code: 'ZEPHYR_MAINTENANCE_FLAG_REQUIRED'}
+        )
     }
 
     if (typeof runPrompt !== 'function') {

@@ -34,7 +34,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .option('--preset <name>', 'Preset name to use for non-interactive app deployments.')
         .option('--resume-pending', 'Resume a saved pending deployment snapshot without prompting.')
         .option('--discard-pending', 'Discard a saved pending deployment snapshot without prompting.')
-        .option('--maintenance <mode>', 'Laravel maintenance mode policy for non-interactive app deploys (on|off).')
+        .option('--maintenance <mode>', 'Laravel maintenance mode policy for app deployments (on|off).')
         .option('--skip-git-hooks', 'Bypass local git hooks for any commits and pushes Zephyr performs.')
         .option('--skip-tests', 'Skip test execution in package release workflows.')
         .option('--skip-lint', 'Skip lint execution in package release workflows.')
