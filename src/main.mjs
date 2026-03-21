@@ -8,7 +8,7 @@ import {releaseNode} from './release-node.mjs'
 import {releasePackagist} from './release-packagist.mjs'
 import {validateLocalDependencies} from './dependency-scanner.mjs'
 import * as bootstrap from './project/bootstrap.mjs'
-import {getErrorCode} from './runtime/errors.mjs'
+import {getErrorCode, ZephyrError} from './runtime/errors.mjs'
 import {PROJECT_CONFIG_DIR} from './utils/paths.mjs'
 import {writeStderrLine} from './utils/output.mjs'
 import {createAppContext} from './runtime/app-context.mjs'
@@ -73,6 +73,23 @@ function resolveWorkflowName(workflowType = null) {
     return 'deploy'
 }
 
+function assertInteractiveAppDeploySession({workflowType = null, executionMode = {}, appContext = {}} = {}) {
+    const isAppDeploy = workflowType !== 'node' && workflowType !== 'vue' && workflowType !== 'packagist'
+
+    if (!isAppDeploy || executionMode?.interactive === false) {
+        return
+    }
+
+    if (appContext?.hasInteractiveTerminal !== false) {
+        return
+    }
+
+    throw new ZephyrError(
+        'Zephyr refuses interactive app deployments without a real interactive terminal. Rerun in a TTY, or use --non-interactive --preset <name> --maintenance on|off.',
+        {code: 'ZEPHYR_INTERACTIVE_SESSION_REQUIRED'}
+    )
+}
+
 async function runRemoteTasks(config, options = {}) {
     return await runDeployment(config, {
         ...options,
@@ -130,6 +147,12 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         if (currentExecutionMode.skipGitHooks) {
             logWarning(SKIP_GIT_HOOKS_WARNING)
         }
+
+        assertInteractiveAppDeploySession({
+            workflowType: options.workflowType,
+            executionMode: currentExecutionMode,
+            appContext
+        })
 
         if (options.workflowType === 'node' || options.workflowType === 'vue') {
             await releaseNode({
