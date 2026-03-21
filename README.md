@@ -68,6 +68,8 @@ When `--type node` or `--type vue` is used without a bump argument, Zephyr defau
 
 Interactive mode remains the default and is the best fit for first-time setup, config repair, and one-off deployments.
 
+For app deployments, interactive mode now requires a real interactive terminal. If stdin/stdout are not attached to a TTY, Zephyr refuses to continue in interactive mode and tells you to rerun with --non-interactive --preset <name> --maintenance on|off.
+
 Non-interactive mode is strict and is intended for already-configured projects:
 
 - `--non-interactive` fails instead of prompting
@@ -76,6 +78,8 @@ Non-interactive mode is strict and is intended for already-configured projects:
 - pending deployment snapshots require either `--resume-pending` or `--discard-pending`
 - stale remote locks are never auto-removed in non-interactive mode
 - `--json` is only supported together with `--non-interactive`
+
+If Laravel maintenance mode has already been enabled and Zephyr then exits abnormally because of a signal such as `SIGINT`, `SIGTERM`, or `SIGHUP`, it now makes a best-effort attempt to run `artisan up` automatically before exiting.
 
 If Zephyr would normally prompt to:
 

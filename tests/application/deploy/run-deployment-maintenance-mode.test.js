@@ -198,7 +198,7 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
         )
         expect(mockPrompt).not.toHaveBeenCalled()
         expect(process.stdout.write).toHaveBeenCalledWith(
-            expect.stringContaining('"message":"Deployment failed after Laravel maintenance mode was enabled. Running `artisan up` automatically..."')
+            expect.stringContaining('"message":"Deployment interrupted after Laravel maintenance mode was enabled. Running `artisan up` automatically..."')
         )
     })
 })

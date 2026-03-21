@@ -1,3 +1,4 @@
+import process from 'node:process'
 import chalk from 'chalk'
 import inquirer from 'inquirer'
 import {NodeSSH} from 'node-ssh'
@@ -12,6 +13,7 @@ export function createAppContext({
                                      chalkInstance = chalk,
                                      inquirerInstance = inquirer,
                                      NodeSSHClass = NodeSSH,
+                                     processInstance = process,
                                      runCommandImpl = runCommandBase,
                                      runCommandCaptureImpl = runCommandCaptureBase,
                                      executionMode = {}
@@ -38,6 +40,7 @@ export function createAppContext({
         emitEvent,
         workflow: normalizedExecutionMode.workflow
     })
+    const hasInteractiveTerminal = Boolean(processInstance?.stdin?.isTTY && processInstance?.stdout?.isTTY)
     const createSshClient = createSshClientFactory({NodeSSH: NodeSSHClass})
     const {runCommand, runCommandCapture} = createLocalCommandRunners({
         runCommandBase: runCommandImpl,
@@ -59,6 +62,7 @@ export function createAppContext({
         runCommand: runCommandWithMode,
         runCommandCapture,
         emitEvent,
+        hasInteractiveTerminal,
         executionMode: normalizedExecutionMode
     }
 }

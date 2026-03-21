@@ -25,6 +25,7 @@ const {
         runCommandCapture: vi.fn(),
         createSshClient: vi.fn(),
         emitEvent: vi.fn(),
+        hasInteractiveTerminal: true,
         executionMode: {
             interactive: true,
             json: false,
@@ -128,6 +129,7 @@ describe('main entrypoint', () => {
         appContext.runCommandCapture.mockReset()
         appContext.createSshClient.mockReset()
         appContext.emitEvent.mockReset()
+        appContext.hasInteractiveTerminal = true
         appContext.executionMode = {
             interactive: true,
             json: false,
@@ -309,5 +311,24 @@ describe('main entrypoint', () => {
             code: 'ZEPHYR_INVALID_OPTIONS',
             message: '--preset is only valid for app deployments.'
         }))
+    })
+
+    it('refuses interactive app deployments without a real interactive terminal', async () => {
+        appContext.hasInteractiveTerminal = false
+
+        const {main} = await import('#src/main.mjs')
+        let failure = null
+
+        try {
+            await main({context: appContext})
+        } catch (error) {
+            failure = error
+        }
+
+        expect(failure).toMatchObject({
+            code: 'ZEPHYR_INTERACTIVE_SESSION_REQUIRED'
+        })
+        expect(mockEnsureGitignoreEntry).not.toHaveBeenCalled()
+        expect(mockRunDeployment).not.toHaveBeenCalled()
     })
 })
