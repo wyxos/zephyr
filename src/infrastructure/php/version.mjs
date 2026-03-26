@@ -2,6 +2,25 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import semver from 'semver'
 
+function normalizeComposerConstraint(constraint) {
+  if (typeof constraint !== 'string') {
+    return null
+  }
+
+  return constraint
+    .replace(/\s*\|{1,2}\s*/g, ' || ')
+    .replace(/,/g, ' ')
+    .replace(/\s+@[\w.-]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function getHighestVersion(versions = []) {
+  return versions
+    .filter((version) => semver.valid(version))
+    .reduce((highest, version) => (!highest || semver.gt(version, highest) ? version : highest), null)
+}
+
 /**
  * Extracts the minimum PHP version requirement from a composer.json object
  * @param {object} composer - Parsed composer.json object
@@ -13,47 +32,78 @@ export function parsePhpVersionRequirement(composer) {
     return null
   }
 
-  // Parse version constraint (e.g., "^8.4", ">=8.4.0", "8.4.*", "~8.4.0")
-  // Extract the minimum version needed
-  const versionMatch = phpRequirement.match(/(\d+)\.(\d+)(?:\.(\d+))?/)
-  if (!versionMatch) {
+  const normalizedConstraint = normalizeComposerConstraint(phpRequirement)
+  if (normalizedConstraint) {
+    const minimumVersion = semver.minVersion(normalizedConstraint)
+    if (minimumVersion) {
+      return minimumVersion.version
+    }
+  }
+
+  const versionMatches = [...phpRequirement.matchAll(/(\d+)\.(\d+)(?:\.(\d+))?/g)]
+  if (versionMatches.length === 0) {
     return null
   }
 
-  const major = versionMatch[1]
-  const minor = versionMatch[2]
-  const patch = versionMatch[3] || '0'
-  
-  const versionStr = `${major}.${minor}.${patch}`
-  
-  // Normalize to semver format
-  if (semver.valid(versionStr)) {
-    return versionStr
-  }
-  
-  // Try to coerce to valid semver
-  const coerced = semver.coerce(versionStr)
-  if (coerced) {
-    return coerced.version
+  const versions = versionMatches
+    .map(([, major, minor, patch = '0']) => semver.coerce(`${major}.${minor}.${patch}`)?.version ?? null)
+    .filter(Boolean)
+
+  return versions.length > 0 ? versions.sort(semver.compare)[0] : null
+}
+
+export function parseComposerLockPhpVersionRequirement(lock) {
+  const versions = []
+  const platformPhpVersion = parsePhpVersionRequirement({require: {php: lock?.platform?.php}})
+  if (platformPhpVersion) {
+    versions.push(platformPhpVersion)
   }
 
-  return null
+  const packages = Array.isArray(lock?.packages) ? lock.packages : []
+  for (const pkg of packages) {
+    const packagePhpVersion = parsePhpVersionRequirement({require: {php: pkg?.require?.php}})
+    if (packagePhpVersion) {
+      versions.push(packagePhpVersion)
+    }
+  }
+
+  return getHighestVersion(versions)
 }
 
 /**
- * Extracts the minimum PHP version requirement from composer.json file
+ * Extracts the effective minimum PHP version requirement from composer.json and composer.lock.
+ * The lock file wins when runtime dependencies need a higher version than the root package declares.
  * @param {string} rootDir - Project root directory
  * @returns {Promise<string|null>} - PHP version requirement (e.g., "8.4.0") or null
  */
 export async function getPhpVersionRequirement(rootDir) {
+  const versions = []
+
   try {
     const composerPath = path.join(rootDir, 'composer.json')
     const raw = await fs.readFile(composerPath, 'utf8')
     const composer = JSON.parse(raw)
-    return parsePhpVersionRequirement(composer)
+    const composerPhpVersion = parsePhpVersionRequirement(composer)
+    if (composerPhpVersion) {
+      versions.push(composerPhpVersion)
+    }
   } catch {
-    return null
+    // Ignore and continue to composer.lock if present.
   }
+
+  try {
+    const lockPath = path.join(rootDir, 'composer.lock')
+    const raw = await fs.readFile(lockPath, 'utf8')
+    const lock = JSON.parse(raw)
+    const lockPhpVersion = parseComposerLockPhpVersionRequirement(lock)
+    if (lockPhpVersion) {
+      versions.push(lockPhpVersion)
+    }
+  } catch {
+    // Ignore when composer.lock is absent or unreadable.
+  }
+
+  return getHighestVersion(versions)
 }
 
 const RUNCLOUD_PACKAGES = '/RunCloud/Packages'
@@ -126,6 +176,8 @@ export async function findPhpBinary(ssh, remoteCwd, requiredVersion) {
     return 'php'
   }
 
+  let defaultPhpVersion = null
+
   const majorMinor = semver.major(requiredVersion) + '.' + semver.minor(requiredVersion)
   const versionedPhp = `php${majorMinor.replace('.', '')}` // e.g., "php84"
 
@@ -175,11 +227,16 @@ export async function findPhpBinary(ssh, remoteCwd, requiredVersion) {
     if (actualVersion && satisfiesVersion(actualVersion, requiredVersion)) {
       return 'php'
     }
+    defaultPhpVersion = actualVersion
   } catch {
     // Ignore
   }
 
-  return 'php'
+  const defaultVersionHint = defaultPhpVersion
+    ? ` The default php command reports ${defaultPhpVersion}.`
+    : ''
+
+  throw new Error(`No PHP binary satisfying ${requiredVersion} was found on the remote server.${defaultVersionHint}`)
 }
 
 /**

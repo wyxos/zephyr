@@ -56,6 +56,14 @@ describe('application/deploy/run-deployment', () => {
                 return {...response, stdout: '/home/runcloud'}
             }
 
+            if (command.includes('ls -1 /RunCloud/Packages')) {
+                return {...response, stdout: 'php84rc\n'}
+            }
+
+            if (command.includes('/RunCloud/Packages/php84rc/bin/php -r "echo PHP_VERSION;"')) {
+                return {...response, stdout: '8.4.6'}
+            }
+
             if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
                 if (command.includes('cat')) {
                     return {...response, stdout: 'LOCK_NOT_FOUND'}
@@ -156,6 +164,14 @@ describe('application/deploy/run-deployment', () => {
                 return {...response, stdout: '/home/runcloud'}
             }
 
+            if (command.includes('ls -1 /RunCloud/Packages')) {
+                return {...response, stdout: 'php84rc\n'}
+            }
+
+            if (command.includes('/RunCloud/Packages/php84rc/bin/php -r "echo PHP_VERSION;"')) {
+                return {...response, stdout: '8.4.6'}
+            }
+
             if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
                 if (command.includes('cat')) {
                     return {...response, stdout: 'LOCK_NOT_FOUND'}
@@ -201,6 +217,14 @@ describe('application/deploy/run-deployment', () => {
 
             if (command.includes('printf "%s" "$HOME"')) {
                 return {...response, stdout: '/home/runcloud'}
+            }
+
+            if (command.includes('ls -1 /RunCloud/Packages')) {
+                return {...response, stdout: 'php84rc\n'}
+            }
+
+            if (command.includes('/RunCloud/Packages/php84rc/bin/php -r "echo PHP_VERSION;"')) {
+                return {...response, stdout: '8.4.6'}
             }
 
             if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
