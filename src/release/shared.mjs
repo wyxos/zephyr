@@ -1,13 +1,21 @@
 import inquirer from 'inquirer'
 import process from 'node:process'
 
-import { validateLocalDependencies } from '../dependency-scanner.mjs'
-import { runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase } from '../utils/command.mjs'
+import {validateLocalDependencies} from '../dependency-scanner.mjs'
+import {runCommand as runCommandBase, runCommandCapture as runCommandCaptureBase} from '../utils/command.mjs'
+import {gitCommitArgs} from '../utils/git-hooks.mjs'
 import {
   ensureUpToDateWithUpstream,
   getCurrentBranch,
   getUpstreamRef
 } from '../utils/git.mjs'
+import {
+  buildFallbackCommitMessage,
+  formatWorkingTreePreview,
+  parseWorkingTreeEntries,
+  parseWorkingTreeStatus,
+  suggestReleaseCommitMessage
+} from './commit-message.mjs'
 
 const RELEASE_TYPES = new Set([
   'major',
@@ -18,6 +26,8 @@ const RELEASE_TYPES = new Set([
   'prepatch',
   'prerelease'
 ])
+const DIRTY_WORKING_TREE_MESSAGE = 'Working tree has uncommitted changes. Commit or stash them before releasing.'
+const DIRTY_WORKING_TREE_CANCELLED_MESSAGE = 'Release cancelled: pending changes were not committed.'
 
 function flagToKey(flag) {
   return flag
@@ -60,7 +70,7 @@ export function parseReleaseArgs({
     booleanFlags.map((flag) => [flagToKey(flag), presentFlags.has(flag)])
   )
 
-  return { releaseType, ...parsedFlags }
+  return {releaseType, ...parsedFlags}
 }
 
 export async function runReleaseCommand(command, args, {
@@ -70,32 +80,103 @@ export async function runReleaseCommand(command, args, {
   runCommandCaptureImpl = runCommandCaptureBase
 } = {}) {
   if (capture) {
-    const captured = await runCommandCaptureImpl(command, args, { cwd })
+    const captured = await runCommandCaptureImpl(command, args, {cwd})
 
     if (typeof captured === 'string') {
-      return { stdout: captured.trim(), stderr: '' }
+      return {stdout: captured.trim(), stderr: ''}
     }
 
     const stdout = captured?.stdout ?? ''
     const stderr = captured?.stderr ?? ''
-    return { stdout: stdout.trim(), stderr: stderr.trim() }
+    return {stdout: stdout.trim(), stderr: stderr.trim()}
   }
 
-  await runCommandImpl(command, args, { cwd })
+  await runCommandImpl(command, args, {cwd})
   return undefined
 }
 
 export async function ensureCleanWorkingTree(rootDir = process.cwd(), {
-  runCommand = runReleaseCommand
+  runCommand = runReleaseCommand,
+  runPrompt,
+  logStep,
+  logSuccess,
+  logWarning,
+  interactive = true,
+  skipGitHooks = false,
+  suggestCommitMessage = suggestReleaseCommitMessage
 } = {}) {
-  const { stdout } = await runCommand('git', ['status', '--porcelain'], {
+  const {stdout} = await runCommand('git', ['status', '--porcelain'], {
+    capture: true,
+    cwd: rootDir
+  })
+  const statusEntries = parseWorkingTreeEntries(stdout)
+
+  if (statusEntries.length === 0) {
+    return
+  }
+
+  if (!interactive || typeof runPrompt !== 'function') {
+    throw new Error(DIRTY_WORKING_TREE_MESSAGE)
+  }
+
+  const suggestedCommitMessage = await suggestCommitMessage(rootDir, {
+    runCommand,
+    logStep,
+    logWarning,
+    statusEntries
+  }) ?? buildFallbackCommitMessage(statusEntries)
+
+  const changeLabel = statusEntries.length === 1 ? 'change' : 'changes'
+  const {shouldCommitPendingChanges} = await runPrompt([
+    {
+      type: 'confirm',
+      name: 'shouldCommitPendingChanges',
+      message:
+        `Pending ${changeLabel} detected before release:\n\n` +
+        `${formatWorkingTreePreview(statusEntries)}\n\n` +
+        'Stage and commit all current changes before continuing?',
+      default: true
+    }
+  ])
+
+  if (!shouldCommitPendingChanges) {
+    throw new Error(DIRTY_WORKING_TREE_CANCELLED_MESSAGE)
+  }
+
+  const {commitMessage} = await runPrompt([
+    {
+      type: 'input',
+      name: 'commitMessage',
+      message: 'Commit message for pending release changes',
+      default: suggestedCommitMessage,
+      validate: (value) => (value && value.trim().length > 0 ? true : 'Commit message cannot be empty.')
+    }
+  ])
+
+  const message = commitMessage.trim()
+
+  logStep?.('Staging all pending changes before release...')
+  await runCommand('git', ['add', '-A'], {
     capture: true,
     cwd: rootDir
   })
 
-  if (stdout.length > 0) {
-    throw new Error('Working tree has uncommitted changes. Commit or stash them before releasing.')
+  logStep?.('Committing pending changes before release...')
+  await runCommand('git', gitCommitArgs(['-m', message], {skipGitHooks}), {
+    capture: true,
+    cwd: rootDir
+  })
+
+  const {stdout: finalStatus} = await runCommand('git', ['status', '--porcelain'], {
+    capture: true,
+    cwd: rootDir
+  })
+
+  if (parseWorkingTreeStatus(finalStatus).length > 0) {
+    throw new Error('Working tree still has uncommitted changes after the release commit. Commit or stash them before releasing.')
   }
+
+  logSuccess?.(`Committed pending changes with "${message}".`)
 }
 
 export async function validateReleaseDependencies(rootDir = process.cwd(), {
@@ -119,7 +200,7 @@ export async function ensureReleaseBranchReady({
   logStep,
   logWarning
 } = {}) {
-  const branch = await getCurrentBranchImpl(rootDir, { method: branchMethod })
+  const branch = await getCurrentBranchImpl(rootDir, {method: branchMethod})
 
   if (!branch) {
     throw new Error('Unable to determine current branch.')
@@ -128,7 +209,9 @@ export async function ensureReleaseBranchReady({
   logStep?.(`Current branch: ${branch}`)
 
   const upstreamRef = await getUpstreamRefImpl(rootDir)
-  await ensureUpToDateWithUpstreamImpl({ branch, upstreamRef, rootDir, logStep, logWarning })
+  await ensureUpToDateWithUpstreamImpl({branch, upstreamRef, rootDir, logStep, logWarning})
 
-  return { branch, upstreamRef }
+  return {branch, upstreamRef}
 }
+
+export {suggestReleaseCommitMessage}
