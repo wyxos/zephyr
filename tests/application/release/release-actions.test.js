@@ -103,9 +103,11 @@ describe('release application actions', () => {
             logSuccess,
             interactive: true
         }))
-        expect(mockEnsureCleanWorkingTree).toHaveBeenCalledWith(rootDir, {
-            runCommand: expect.any(Function)
-        })
+        expect(mockEnsureCleanWorkingTree).toHaveBeenCalledWith(rootDir, expect.objectContaining({
+            runCommand: expect.any(Function),
+            interactive: true,
+            skipGitHooks: false
+        }))
         expect(mockEnsureReleaseBranchReady).toHaveBeenCalledWith(expect.objectContaining({
             rootDir,
             branchMethod: 'show-current',
@@ -160,9 +162,11 @@ describe('release application actions', () => {
             logSuccess,
             interactive: true
         }))
-        expect(mockEnsureCleanWorkingTree).toHaveBeenCalledWith(rootDir, {
-            runCommand: expect.any(Function)
-        })
+        expect(mockEnsureCleanWorkingTree).toHaveBeenCalledWith(rootDir, expect.objectContaining({
+            runCommand: expect.any(Function),
+            interactive: true,
+            skipGitHooks: false
+        }))
         expect(mockEnsureReleaseBranchReady).toHaveBeenCalledWith(expect.objectContaining({
             rootDir,
             branchMethod: 'show-current',
