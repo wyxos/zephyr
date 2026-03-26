@@ -382,7 +382,15 @@ export async function releaseNodePackage({
     })
 
     logStep?.('Checking working tree status...')
-    await ensureCleanWorkingTree(rootDir, {runCommand})
+    await ensureCleanWorkingTree(rootDir, {
+        runCommand,
+        runPrompt,
+        logStep,
+        logSuccess,
+        logWarning,
+        interactive,
+        skipGitHooks
+    })
     await ensureReleaseBranchReady({rootDir, branchMethod: 'show-current', logStep, logWarning})
 
     await runLint(skipLint, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
