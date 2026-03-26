@@ -89,6 +89,50 @@ describe('application/deploy/build-remote-deployment-plan', () => {
         expect(runPrompt).not.toHaveBeenCalled()
     })
 
+    it('fails before planning when no remote PHP binary satisfies the detected requirement', async () => {
+        mockFindPhpBinary.mockRejectedValue(new Error('No PHP binary satisfying 8.4.0 was found on the remote server. The default php command reports 8.3.29.'))
+
+        const ssh = {
+            execCommand: vi.fn(async (command) => {
+                if (command.includes('grep -q "laravel/framework"')) {
+                    return {stdout: 'yes', code: 0}
+                }
+
+                if (command.includes('config/horizon.php')) {
+                    return {stdout: 'no', code: 0}
+                }
+
+                return {stdout: '', code: 0}
+            })
+        }
+
+        const executeRemote = vi.fn(async (label) => {
+            if (label === 'Inspect pending changes') {
+                return {stdout: 'composer.json\n', code: 0}
+            }
+
+            return {stdout: '', stderr: '', code: 0}
+        })
+
+        await expect(buildRemoteDeploymentPlan({
+            config: {
+                branch: 'main',
+                serverName: 'production',
+                projectPath: '~/webapps/demo',
+                sshUser: 'forge'
+            },
+            requiredPhpVersion: '8.4.0',
+            ssh,
+            remoteCwd: '/home/runcloud/webapps/demo',
+            executeRemote,
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })).rejects.toThrow(
+            'No PHP binary satisfying 8.4.0 was found on the remote server. The default php command reports 8.3.29.'
+        )
+    })
+
     it('uses an explicit interactive maintenance-mode choice without prompting', async () => {
         mockPlanLaravelDeploymentTasks.mockReturnValue([
             {label: 'Pull latest changes for main', command: 'git pull origin main'},

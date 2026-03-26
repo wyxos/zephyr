@@ -190,24 +190,16 @@ async function resolvePhpCommand({
                                      requiredPhpVersion,
                                      ssh,
                                      remoteCwd,
-                                     logProcessing,
-                                     logWarning
+                                     logProcessing
                                  } = {}) {
     if (!requiredPhpVersion) {
         return 'php'
     }
 
-    try {
-        const phpCommand = await findPhpBinary(ssh, remoteCwd, requiredPhpVersion)
-        if (phpCommand !== 'php') {
-            logProcessing?.(`Detected PHP requirement: ${requiredPhpVersion}, using ${phpCommand}`)
-        }
+    const phpCommand = await findPhpBinary(ssh, remoteCwd, requiredPhpVersion)
+    logProcessing?.(`Detected PHP requirement: ${requiredPhpVersion}, using ${phpCommand}`)
 
-        return phpCommand
-    } catch (error) {
-        logWarning?.(`Could not find PHP binary for version ${requiredPhpVersion}: ${error.message}`)
-        return 'php'
-    }
+    return phpCommand
 }
 
 function createMaintenanceModePlan({
