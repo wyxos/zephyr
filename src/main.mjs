@@ -17,6 +17,7 @@ import {selectDeploymentTarget} from './application/configuration/select-deploym
 import {resolvePendingSnapshot} from './application/deploy/resolve-pending-snapshot.mjs'
 import {runDeployment} from './application/deploy/run-deployment.mjs'
 import {SKIP_GIT_HOOKS_WARNING} from './utils/git-hooks.mjs'
+import {notifyWorkflowResult} from './utils/notifications.mjs'
 
 const RELEASE_SCRIPT_NAME = 'release'
 const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@latest'
@@ -99,6 +100,7 @@ async function runRemoteTasks(config, options = {}) {
 
 async function main(optionsOrWorkflowType = null, versionArg = null) {
     const options = normalizeMainOptions(optionsOrWorkflowType, versionArg)
+    const rootDir = process.cwd()
 
     const executionMode = {
         interactive: !options.nonInteractive,
@@ -171,6 +173,14 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                     workflow: currentExecutionMode.workflow
                 }
             })
+            if (!currentExecutionMode.json) {
+                await notifyWorkflowResult({
+                    status: 'success',
+                    workflow: currentExecutionMode.workflow,
+                    presetName: currentExecutionMode.presetName,
+                    rootDir
+                })
+            }
             return
         }
 
@@ -189,10 +199,16 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                     workflow: currentExecutionMode.workflow
                 }
             })
+            if (!currentExecutionMode.json) {
+                await notifyWorkflowResult({
+                    status: 'success',
+                    workflow: currentExecutionMode.workflow,
+                    presetName: currentExecutionMode.presetName,
+                    rootDir
+                })
+            }
             return
         }
-
-        const rootDir = process.cwd()
 
         await bootstrap.ensureGitignoreEntry(rootDir, {
             projectConfigDir: PROJECT_CONFIG_DIR,
@@ -256,6 +272,14 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                 workflow: currentExecutionMode.workflow
             }
         })
+        if (!currentExecutionMode.json) {
+            await notifyWorkflowResult({
+                status: 'success',
+                workflow: currentExecutionMode.workflow,
+                presetName: currentExecutionMode.presetName,
+                rootDir
+            })
+        }
     } catch (error) {
         const errorCode = getErrorCode(error)
         emitEvent?.('run_failed', {
@@ -272,6 +296,13 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             if (errorCode === 'ZEPHYR_FAILURE' && error.stack) {
                 writeStderrLine(error.stack)
             }
+            await notifyWorkflowResult({
+                status: 'failure',
+                workflow: currentExecutionMode.workflow,
+                presetName: currentExecutionMode.presetName,
+                rootDir,
+                message: error.message
+            })
         }
 
         throw error

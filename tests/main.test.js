@@ -7,6 +7,7 @@ const {
     mockCreateConfigurationService,
     mockEnsureGitignoreEntry,
     mockEnsureProjectReleaseScript,
+    mockNotifyWorkflowResult,
     mockReleaseNode,
     mockReleasePackagist,
     mockResolvePendingSnapshot,
@@ -47,6 +48,7 @@ const {
     mockCreateConfigurationService: vi.fn(),
     mockEnsureGitignoreEntry: vi.fn(),
     mockEnsureProjectReleaseScript: vi.fn(),
+    mockNotifyWorkflowResult: vi.fn(),
     mockReleaseNode: vi.fn(),
     mockReleasePackagist: vi.fn(),
     mockResolvePendingSnapshot: vi.fn(),
@@ -78,6 +80,10 @@ vi.mock('#src/dependency-scanner.mjs', () => ({
 vi.mock('#src/project/bootstrap.mjs', () => ({
     ensureGitignoreEntry: mockEnsureGitignoreEntry,
     ensureProjectReleaseScript: mockEnsureProjectReleaseScript
+}))
+
+vi.mock('#src/utils/notifications.mjs', () => ({
+    notifyWorkflowResult: mockNotifyWorkflowResult
 }))
 
 vi.mock('#src/utils/output.mjs', () => ({
@@ -112,6 +118,7 @@ describe('main entrypoint', () => {
         mockCreateConfigurationService.mockReset()
         mockEnsureGitignoreEntry.mockReset()
         mockEnsureProjectReleaseScript.mockReset()
+        mockNotifyWorkflowResult.mockReset()
         mockReleaseNode.mockReset()
         mockReleasePackagist.mockReset()
         mockResolvePendingSnapshot.mockReset()
@@ -146,6 +153,7 @@ describe('main entrypoint', () => {
         mockRunDeployment.mockResolvedValue(undefined)
         mockEnsureGitignoreEntry.mockResolvedValue(undefined)
         mockEnsureProjectReleaseScript.mockResolvedValue(false)
+        mockNotifyWorkflowResult.mockResolvedValue(true)
         mockValidateLocalDependencies.mockResolvedValue(undefined)
     })
 
@@ -157,6 +165,11 @@ describe('main entrypoint', () => {
         expect(appContext.logProcessing).toHaveBeenNthCalledWith(1, expect.stringMatching(/^Zephyr v\d+\.\d+\.\d+/))
         expect(mockReleaseNode).toHaveBeenCalledTimes(1)
         expect(mockReleasePackagist).not.toHaveBeenCalled()
+        expect(mockNotifyWorkflowResult).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'success',
+            workflow: 'deploy',
+            rootDir: process.cwd()
+        }))
     })
 
     it('delegates Packagist releases to the Packagist release command', async () => {
@@ -167,6 +180,11 @@ describe('main entrypoint', () => {
         expect(appContext.logProcessing).toHaveBeenNthCalledWith(1, expect.stringMatching(/^Zephyr v\d+\.\d+\.\d+/))
         expect(mockReleasePackagist).toHaveBeenCalledTimes(1)
         expect(mockReleaseNode).not.toHaveBeenCalled()
+        expect(mockNotifyWorkflowResult).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'success',
+            workflow: 'deploy',
+            rootDir: process.cwd()
+        }))
     })
 
     it('bootstraps and runs the deployment workflow through the extracted actions', async () => {
@@ -226,6 +244,11 @@ describe('main entrypoint', () => {
             versionArg: 'minor',
             context: appContext
         })
+        expect(mockNotifyWorkflowResult).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'success',
+            workflow: 'deploy',
+            rootDir: process.cwd()
+        }))
     })
 
     it('emits JSON lifecycle events for a successful non-interactive deployment', async () => {
@@ -272,6 +295,7 @@ describe('main entrypoint', () => {
         }))
         expect(appContext.emitEvent.mock.calls.filter(([event]) => event === 'run_completed')).toHaveLength(1)
         expect(appContext.emitEvent.mock.calls.filter(([event]) => event === 'run_failed')).toHaveLength(0)
+        expect(mockNotifyWorkflowResult).not.toHaveBeenCalled()
     })
 
     it('emits a JSON failure event for invalid options before running a workflow', async () => {
@@ -311,6 +335,7 @@ describe('main entrypoint', () => {
             code: 'ZEPHYR_INVALID_OPTIONS',
             message: '--preset is only valid for app deployments.'
         }))
+        expect(mockNotifyWorkflowResult).not.toHaveBeenCalled()
     })
 
     it('refuses interactive app deployments without a real interactive terminal', async () => {
@@ -330,5 +355,41 @@ describe('main entrypoint', () => {
         })
         expect(mockEnsureGitignoreEntry).not.toHaveBeenCalled()
         expect(mockRunDeployment).not.toHaveBeenCalled()
+        expect(mockNotifyWorkflowResult).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'failure',
+            workflow: 'deploy',
+            rootDir: process.cwd(),
+            message: expect.stringContaining('interactive terminal')
+        }))
+    })
+
+    it('sends a failure notification for non-JSON workflow errors', async () => {
+        const deploymentConfig = {
+            serverIp: '203.0.113.10',
+            branch: 'main',
+            projectPath: '~/webapps/demo'
+        }
+
+        mockAccess.mockImplementation(async (filePath) => {
+            if (/[\\/]package\.json$/.test(String(filePath))) {
+                return undefined
+            }
+
+            throw new Error('ENOENT')
+        })
+        mockSelectDeploymentTarget.mockResolvedValue({deploymentConfig})
+        mockResolvePendingSnapshot.mockResolvedValue(null)
+        mockRunDeployment.mockRejectedValue(new Error('deploy blew up'))
+
+        const {main} = await import('#src/main.mjs')
+
+        await expect(main()).rejects.toThrow('deploy blew up')
+
+        expect(mockNotifyWorkflowResult).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'failure',
+            workflow: 'deploy',
+            rootDir: process.cwd(),
+            message: 'deploy blew up'
+        }))
     })
 })
