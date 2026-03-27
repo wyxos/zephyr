@@ -98,11 +98,21 @@ describe('deploy/local-repo', () => {
         }).rejects.toThrow(/uncommitted changes/)
     })
 
-    it('ignores unstaged-only changes on the target branch', async () => {
+    it('prompts to commit unstaged changes on the target branch', async () => {
         queueSpawnResponse({stdout: 'main\n'})
         queueSpawnResponse({stdout: ' M file.php\n'})
+        queueSpawnResponse({stdout: ' M file.php\n'})
+        queueSpawnResponse({})
+        queueSpawnResponse({})
+        queueSpawnResponse({})
+        queueSpawnResponse({stdout: ''})
+
+        mockPrompt
+            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
+            .mockResolvedValueOnce({commitMessage: 'fix: align deployment dirty tree handling'})
 
         const ensureCommittedChangesPushed = async () => ({pushed: false, upstreamRef: 'origin/main'})
+        const suggestCommitMessage = vi.fn().mockResolvedValue('fix: align deployment dirty tree handling')
 
         const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
         const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
@@ -127,24 +137,36 @@ describe('deploy/local-repo', () => {
                 aheadCount: 0,
                 behindCount: 0
             }),
-            ensureCommittedChangesPushed
+            ensureCommittedChangesPushed,
+            suggestCommitMessage
         })
 
-        expect(mockPrompt).not.toHaveBeenCalled()
+        expect(mockPrompt).toHaveBeenCalledTimes(2)
+        expect(mockPrompt.mock.calls[0][0][0].message).toContain('modified: file.php')
         expect(
             mockSpawn.mock.calls.some(
-                ([command, args]) => command === 'git' && args[0] === 'commit'
+                ([command, args]) => command === 'git' && args[0] === 'add' && args[1] === '-A'
             )
-        ).toBe(false)
+        ).toBe(true)
+        expect(
+            mockSpawn.mock.calls.some(
+                ([command, args]) => command === 'git' && args[0] === 'commit' && args.includes('fix: align deployment dirty tree handling')
+            )
+        ).toBe(true)
     })
 
     it('commits and pushes staged changes on the target branch', async () => {
         queueSpawnResponse({stdout: 'main\n'})
         queueSpawnResponse({stdout: 'M  file.php\n'})
+        queueSpawnResponse({stdout: 'M  file.php\n'})
+        queueSpawnResponse({})
         queueSpawnResponse({})
         queueSpawnResponse({})
 
-        mockPrompt.mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
+        mockPrompt
+            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
+            .mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
+        const suggestCommitMessage = vi.fn().mockResolvedValue('fix: stage pending deployment changes')
 
         const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
         const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
@@ -168,10 +190,11 @@ describe('deploy/local-repo', () => {
                 remoteExists: true,
                 aheadCount: 0,
                 behindCount: 0
-            })
+            }),
+            suggestCommitMessage
         })
 
-        expect(mockPrompt).toHaveBeenCalledTimes(1)
+        expect(mockPrompt).toHaveBeenCalledTimes(2)
         expect(
             mockSpawn.mock.calls.some(
                 ([command, args]) => command === 'git' && args[0] === 'push' && args.includes('main')
@@ -182,10 +205,15 @@ describe('deploy/local-repo', () => {
     it('bypasses git hooks for automatic commit and push when requested', async () => {
         queueSpawnResponse({stdout: 'main\n'})
         queueSpawnResponse({stdout: 'M  file.php\n'})
+        queueSpawnResponse({stdout: 'M  file.php\n'})
+        queueSpawnResponse({})
         queueSpawnResponse({})
         queueSpawnResponse({})
 
-        mockPrompt.mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
+        mockPrompt
+            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
+            .mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
+        const suggestCommitMessage = vi.fn().mockResolvedValue('fix: stage pending deployment changes')
 
         const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
         const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
@@ -210,7 +238,8 @@ describe('deploy/local-repo', () => {
                 remoteExists: true,
                 aheadCount: 0,
                 behindCount: 0
-            })
+            }),
+            suggestCommitMessage
         })
 
         expect(

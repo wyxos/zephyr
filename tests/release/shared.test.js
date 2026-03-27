@@ -31,6 +31,7 @@ import {
     suggestReleaseCommitMessage,
     validateReleaseDependencies
 } from '#src/release/shared.mjs'
+import {buildFallbackCommitMessage, sanitizeSuggestedCommitMessage} from '#src/release/commit-message.mjs'
 
 describe('release shared helpers', () => {
     beforeEach(() => {
@@ -193,11 +194,24 @@ describe('release shared helpers', () => {
         ])
     })
 
+    it('builds a deploy-specific fallback message for deploy guard changes', () => {
+        expect(buildFallbackCommitMessage([
+            {indexStatus: ' ', worktreeStatus: 'M', path: 'src/application/deploy/prepare-local-deployment.mjs', previousPath: null},
+            {indexStatus: ' ', worktreeStatus: 'M', path: 'src/deploy/local-repo.mjs', previousPath: null},
+            {indexStatus: ' ', worktreeStatus: 'M', path: 'src/release/commit-message.mjs', previousPath: null}
+        ])).toBe('fix: prompt for dirty deploy changes before version bump')
+    })
+
+    it('rejects meta commit subjects about committing pending changes', () => {
+        expect(sanitizeSuggestedCommitMessage('feat: commit pending changes before deployment')).toBeNull()
+        expect(sanitizeSuggestedCommitMessage('fix: allow committing pending changes before release')).toBeNull()
+    })
+
     it('asks Codex for a suggested conventional commit message when available', async () => {
         mockCommandExists.mockReturnValue(true)
         const runCommand = vi.fn(async (_command, args) => {
             const outputPath = args[args.indexOf('--output-last-message') + 1]
-            await writeFile(outputPath, 'feat(release): allow committing pending changes before release\n')
+            await writeFile(outputPath, 'fix: prompt for dirty deploy changes before version bump\n')
             return {stdout: '', stderr: ''}
         })
         const logStep = vi.fn()
@@ -214,7 +228,7 @@ describe('release shared helpers', () => {
             ]
         })
 
-        expect(result).toBe('feat: allow committing pending changes before release')
+        expect(result).toBe('fix: prompt for dirty deploy changes before version bump')
         expect(runCommand).toHaveBeenCalledWith('codex', expect.arrayContaining([
             'exec',
             '--model',
@@ -228,6 +242,7 @@ describe('release shared helpers', () => {
         const codexCall = runCommand.mock.calls.find(([command]) => command === 'codex')
         expect(codexCall?.[1].at(-1)).toContain('modified: src/release/shared.mjs')
         expect(codexCall?.[1].at(-1)).toContain('untracked: tests/release/shared.test.js')
+        expect(codexCall?.[1].at(-1)).toContain('Do not describe the commit itself')
         expect(logStep).toHaveBeenCalledWith('Generating a suggested commit message with Codex...')
         expect(logWarning).not.toHaveBeenCalled()
     })

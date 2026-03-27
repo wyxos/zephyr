@@ -1,6 +1,15 @@
 import { getCurrentBranch as getCurrentBranchImpl, getUpstreamRef as getUpstreamRefImpl } from '../utils/git.mjs'
 import {hasPrePushHook} from './preflight.mjs'
 import {gitCommitArgs, gitPushArgs} from '../utils/git-hooks.mjs'
+import {
+  buildFallbackCommitMessage,
+  formatWorkingTreePreview,
+  parseWorkingTreeEntries,
+  suggestCommitMessage as suggestCommitMessageImpl
+} from '../release/commit-message.mjs'
+
+const DIRTY_DEPLOYMENT_MESSAGE = 'Local repository has uncommitted changes. Commit or stash them before deployment.'
+const DIRTY_DEPLOYMENT_CANCELLED_MESSAGE = 'Deployment cancelled: pending changes were not committed.'
 
 export async function getCurrentBranch(rootDir) {
   const branch = await getCurrentBranchImpl(rootDir)
@@ -161,27 +170,84 @@ async function checkoutTargetBranch(targetBranch, currentBranch, rootDir, {
   logSuccess?.(`Checked out ${targetBranch} locally.`)
 }
 
-async function commitAndPushStagedChanges(targetBranch, rootDir, {
+async function commitAndPushPendingChanges(targetBranch, rootDir, {
   runPrompt,
   runCommand,
+  runCommandCapture,
   getGitStatus,
   logProcessing,
   logSuccess,
   logWarning,
-  skipGitHooks = false
+  skipGitHooks = false,
+  suggestCommitMessage = suggestCommitMessageImpl
 } = {}) {
+  const statusEntries = parseWorkingTreeEntries(await getGitStatus(rootDir))
+
+  if (statusEntries.length === 0) {
+    return
+  }
+
+  if (typeof runPrompt !== 'function') {
+    throw new Error(DIRTY_DEPLOYMENT_MESSAGE)
+  }
+
+  const captureAwareRunCommand = async (command, args, { capture = false, cwd } = {}) => {
+    if (capture) {
+      const captured = await runCommandCapture(command, args, { cwd })
+
+      if (typeof captured === 'string') {
+        return {stdout: captured.trim(), stderr: ''}
+      }
+
+      const stdout = captured?.stdout ?? ''
+      const stderr = captured?.stderr ?? ''
+      return {stdout: stdout.trim(), stderr: stderr.trim()}
+    }
+
+    await runCommand(command, args, { cwd })
+    return undefined
+  }
+
+  const suggestedCommitMessage = await suggestCommitMessage(rootDir, {
+    runCommand: captureAwareRunCommand,
+    logStep: logProcessing,
+    logWarning,
+    statusEntries
+  }) ?? buildFallbackCommitMessage(statusEntries)
+
+  const changeLabel = statusEntries.length === 1 ? 'change' : 'changes'
+  const {shouldCommitPendingChanges} = await runPrompt([
+    {
+      type: 'confirm',
+      name: 'shouldCommitPendingChanges',
+      message:
+        `Pending ${changeLabel} detected before deployment:\n\n` +
+        `${formatWorkingTreePreview(statusEntries)}\n\n` +
+        'Stage and commit all current changes before continuing?',
+      default: true
+    }
+  ])
+
+  if (!shouldCommitPendingChanges) {
+    throw new Error(DIRTY_DEPLOYMENT_CANCELLED_MESSAGE)
+  }
+
   const { commitMessage } = await runPrompt([
     {
       type: 'input',
       name: 'commitMessage',
-      message: 'Enter a commit message for pending changes before deployment',
+      message: 'Commit message for pending deployment changes',
+      default: suggestedCommitMessage,
       validate: (value) => (value && value.trim().length > 0 ? true : 'Commit message cannot be empty.')
     }
   ])
 
   const message = commitMessage.trim()
 
-  logProcessing?.('Committing staged changes before deployment...')
+  logProcessing?.('Staging all pending changes before deployment...')
+  await runCommand('git', ['add', '-A'], { cwd: rootDir })
+
+  logProcessing?.('Committing pending changes before deployment...')
   await runCommand('git', gitCommitArgs(['-m', message], {skipGitHooks}), { cwd: rootDir })
 
   const prePushHookPresent = await hasPrePushHook(rootDir)
@@ -203,7 +269,8 @@ async function commitAndPushStagedChanges(targetBranch, rootDir, {
     throw error
   }
 
-  logSuccess?.(`Committed and pushed changes to origin/${targetBranch}.`)
+  logSuccess?.(`Committed pending changes with "${message}".`)
+  logSuccess?.(`Pushed committed changes to origin/${targetBranch}.`)
 
   const finalStatus = await getGitStatus(rootDir)
 
@@ -303,6 +370,7 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
   logSuccess,
   logWarning,
   skipGitHooks = false,
+  suggestCommitMessage: suggestCommitMessageFn = suggestCommitMessageImpl,
   getCurrentBranch: getCurrentBranchFn = getCurrentBranch,
   getGitStatus: getGitStatusFn = (dir) => getGitStatus(dir, { runCommandCapture }),
   readUpstreamSyncState: readUpstreamSyncStateFn = (branch, dir) =>
@@ -371,21 +439,17 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
     return
   }
 
-  if (!hasStagedChanges(statusAfterCheckout)) {
-    await ensureCommittedChangesPushedFn(targetBranch, rootDir)
-    logProcessing?.('No staged changes detected. Unstaged or untracked files will not affect deployment. Proceeding with deployment.')
-    return
-  }
-
-  logWarning?.(`Staged changes detected on ${targetBranch}. A commit is required before deployment.`)
-  await commitAndPushStagedChanges(targetBranch, rootDir, {
+  logWarning?.(`Pending changes detected on ${targetBranch}. A commit is required before deployment.`)
+  await commitAndPushPendingChanges(targetBranch, rootDir, {
     runPrompt,
     runCommand,
+    runCommandCapture,
     getGitStatus: getGitStatusFn,
     logProcessing,
     logSuccess,
     logWarning,
-    skipGitHooks
+    skipGitHooks,
+    suggestCommitMessage: suggestCommitMessageFn
   })
 
   await ensureCommittedChangesPushedFn(targetBranch, rootDir)

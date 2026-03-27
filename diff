@@ -1,1 +1,1 @@
-feat(release): allow committing pending changes before release
+fix: prompt for dirty deploy changes before version bump

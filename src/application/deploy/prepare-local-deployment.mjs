@@ -1,6 +1,6 @@
 import process from 'node:process'
 
-import {ensureLocalRepositoryState} from '../../deploy/local-repo.mjs'
+import {ensureCommittedChangesPushed, ensureLocalRepositoryState} from '../../deploy/local-repo.mjs'
 import {bumpLocalPackageVersion} from './bump-local-package-version.mjs'
 import {resolveLocalDeploymentContext} from './resolve-local-deployment-context.mjs'
 import {resolveLocalDeploymentCheckSupport, runLocalDeploymentChecks} from './run-local-deployment-checks.mjs'
@@ -17,6 +17,16 @@ export async function prepareLocalDeployment(config, {
     logSuccess,
     logWarning
 } = {}) {
+    await ensureLocalRepositoryState(config.branch, rootDir, {
+        runPrompt,
+        runCommand,
+        runCommandCapture,
+        logProcessing,
+        logSuccess,
+        logWarning,
+        skipGitHooks
+    })
+
     const context = await resolveLocalDeploymentContext(rootDir)
     const checkSupport = await resolveLocalDeploymentCheckSupport({
         rootDir,
@@ -33,17 +43,16 @@ export async function prepareLocalDeployment(config, {
             logSuccess,
             logWarning
         })
-    }
 
-    await ensureLocalRepositoryState(config.branch, rootDir, {
-        runPrompt,
-        runCommand,
-        runCommandCapture,
-        logProcessing,
-        logSuccess,
-        logWarning,
-        skipGitHooks
-    })
+        await ensureCommittedChangesPushed(config.branch, rootDir, {
+            runCommand,
+            runCommandCapture,
+            logProcessing,
+            logSuccess,
+            logWarning,
+            skipGitHooks
+        })
+    }
 
     await runLocalDeploymentChecks({
         rootDir,
