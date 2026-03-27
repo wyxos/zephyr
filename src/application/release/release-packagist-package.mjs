@@ -11,6 +11,7 @@ import {
     runReleaseCommand,
     validateReleaseDependencies
 } from '../../release/shared.mjs'
+import {resolveReleaseType} from '../../release/release-type.mjs'
 import {gitCommitArgs, gitPushArgs} from '../../utils/git-hooks.mjs'
 
 async function readComposer(rootDir = process.cwd()) {
@@ -259,11 +260,22 @@ export async function releasePackagistPackage({
         skipGitHooks
     })
     await ensureReleaseBranchReady({rootDir, branchMethod: 'show-current', logStep, logWarning})
+    const resolvedReleaseType = await resolveReleaseType({
+        releaseType,
+        currentVersion: composer.version,
+        packageName: composer.name,
+        rootDir,
+        interactive,
+        runPrompt,
+        runCommand,
+        logStep,
+        logWarning
+    })
 
     await runLint(skipLint, rootDir, {logStep, logSuccess, logWarning, runCommand, progressWriter})
     await runTests(skipTests, composer, rootDir, {logStep, logSuccess, logWarning, runCommand, progressWriter})
 
-    const updatedComposer = await bumpVersion(releaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
+    const updatedComposer = await bumpVersion(resolvedReleaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
     await pushChanges(rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
 
     logSuccess?.(`Release workflow completed for ${composer.name}@${updatedComposer.version}.`)

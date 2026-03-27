@@ -17,7 +17,7 @@ function hasExplicitReleaseOptions(options = {}) {
 export async function releaseNode(options = {}) {
     const parsed = hasExplicitReleaseOptions(options)
         ? {
-            releaseType: options.releaseType ?? 'patch',
+            releaseType: 'releaseType' in options ? (options.releaseType ?? null) : null,
             skipGitHooks: options.skipGitHooks === true,
             skipTests: options.skipTests === true,
             skipLint: options.skipLint === true,

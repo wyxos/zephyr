@@ -11,6 +11,7 @@ import {
     runReleaseCommand,
     validateReleaseDependencies
 } from '../../release/shared.mjs'
+import {resolveReleaseType} from '../../release/release-type.mjs'
 import {gitCommitArgs, gitPushArgs, npmVersionArgs} from '../../utils/git-hooks.mjs'
 
 async function readPackage(rootDir = process.cwd()) {
@@ -392,12 +393,23 @@ export async function releaseNodePackage({
         skipGitHooks
     })
     await ensureReleaseBranchReady({rootDir, branchMethod: 'show-current', logStep, logWarning})
+    const resolvedReleaseType = await resolveReleaseType({
+        releaseType,
+        currentVersion: pkg.version,
+        packageName: pkg.name,
+        rootDir,
+        interactive,
+        runPrompt,
+        runCommand,
+        logStep,
+        logWarning
+    })
 
     await runLint(skipLint, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
     await runTests(skipTests, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
     await runLibBuild(skipBuild, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand, skipGitHooks})
 
-    const updatedPkg = await bumpVersion(releaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
+    const updatedPkg = await bumpVersion(resolvedReleaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
     await runBuild(skipBuild, updatedPkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
     await pushChanges(rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
     await deployGHPages(skipDeploy, updatedPkg, rootDir, {logStep, logSuccess, logWarning, runCommand, skipGitHooks})
