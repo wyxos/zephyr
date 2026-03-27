@@ -6,11 +6,13 @@ import {join} from 'node:path'
 const {
     mockEnsureCleanWorkingTree,
     mockEnsureReleaseBranchReady,
+    mockResolveReleaseType,
     mockRunReleaseCommand,
     mockValidateReleaseDependencies
 } = vi.hoisted(() => ({
     mockEnsureCleanWorkingTree: vi.fn(),
     mockEnsureReleaseBranchReady: vi.fn(),
+    mockResolveReleaseType: vi.fn(),
     mockRunReleaseCommand: vi.fn(),
     mockValidateReleaseDependencies: vi.fn()
 }))
@@ -20,6 +22,10 @@ vi.mock('#src/release/shared.mjs', () => ({
     ensureReleaseBranchReady: mockEnsureReleaseBranchReady,
     runReleaseCommand: mockRunReleaseCommand,
     validateReleaseDependencies: mockValidateReleaseDependencies
+}))
+
+vi.mock('#src/release/release-type.mjs', () => ({
+    resolveReleaseType: mockResolveReleaseType
 }))
 
 import {releaseNodePackage} from '#src/application/release/release-node-package.mjs'
@@ -39,11 +45,13 @@ describe('release application actions', () => {
 
         mockEnsureCleanWorkingTree.mockReset()
         mockEnsureReleaseBranchReady.mockReset()
+        mockResolveReleaseType.mockReset()
         mockRunReleaseCommand.mockReset()
         mockValidateReleaseDependencies.mockReset()
 
         mockEnsureCleanWorkingTree.mockResolvedValue(undefined)
         mockEnsureReleaseBranchReady.mockResolvedValue({branch: 'main', upstreamRef: 'origin/main'})
+        mockResolveReleaseType.mockImplementation(async ({releaseType}) => releaseType ?? 'patch')
         mockValidateReleaseDependencies.mockResolvedValue(undefined)
     })
 
@@ -185,6 +193,55 @@ describe('release application actions', () => {
         expect(logSuccess).toHaveBeenCalledWith('Version updated to 1.0.1.')
         expect(logSuccess).toHaveBeenCalledWith('Git push completed.')
         expect(logSuccess).toHaveBeenCalledWith('Release workflow completed for wyxos/test-package@1.0.1.')
+    })
+
+    it('resolves the release type when none was provided', async () => {
+        await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+            name: '@wyxos/zephyr-test',
+            version: '1.0.0'
+        }, null, 2) + '\n')
+
+        mockResolveReleaseType.mockResolvedValue('minor')
+
+        const commandLog = []
+
+        mockRunReleaseCommand.mockImplementation(async (command, args, options = {}) => {
+            commandLog.push({command, args, options})
+
+            if (command === 'git' && args[0] === 'status') {
+                return {stdout: '', stderr: ''}
+            }
+
+            if (command === 'npm' && args[0] === 'version') {
+                const packagePath = join(options.cwd, 'package.json')
+                const pkg = JSON.parse(await readFile(packagePath, 'utf8'))
+                pkg.version = '1.1.0'
+                await writeFile(packagePath, JSON.stringify(pkg, null, 2) + '\n')
+                return {stdout: 'v1.1.0', stderr: ''}
+            }
+
+            return options.capture ? {stdout: '', stderr: ''} : undefined
+        })
+
+        await releaseNodePackage({
+            releaseType: null,
+            skipTests: true,
+            skipLint: true,
+            skipBuild: true,
+            skipDeploy: true,
+            rootDir,
+            logStep: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn(),
+            runPrompt: vi.fn()
+        })
+
+        expect(mockResolveReleaseType).toHaveBeenCalledWith(expect.objectContaining({
+            releaseType: null,
+            currentVersion: '1.0.0',
+            packageName: '@wyxos/zephyr-test'
+        }))
+        expect(commandLog.map(({command, args}) => [command, ...args])).toContainEqual(['npm', 'version', 'minor'])
     })
 
     it('handles lib artifacts and GitHub Pages deployment in the node release action', async () => {

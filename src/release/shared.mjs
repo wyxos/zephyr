@@ -16,16 +16,9 @@ import {
   parseWorkingTreeStatus,
   suggestReleaseCommitMessage
 } from './commit-message.mjs'
+import {RELEASE_TYPES as SUPPORTED_RELEASE_TYPES} from './release-type.mjs'
 
-const RELEASE_TYPES = new Set([
-  'major',
-  'minor',
-  'patch',
-  'premajor',
-  'preminor',
-  'prepatch',
-  'prerelease'
-])
+const RELEASE_TYPES = new Set(SUPPORTED_RELEASE_TYPES)
 const DIRTY_WORKING_TREE_MESSAGE = 'Working tree has uncommitted changes. Commit or stash them before releasing.'
 const DIRTY_WORKING_TREE_CANCELLED_MESSAGE = 'Release cancelled: pending changes were not committed.'
 
@@ -58,9 +51,9 @@ export function parseReleaseArgs({
 
   const positionals = filteredArgs.filter((arg) => !arg.startsWith('--'))
   const presentFlags = new Set(filteredArgs.filter((arg) => arg.startsWith('--')))
-  const releaseType = positionals[0] ?? 'patch'
+  const releaseType = positionals[0] ?? null
 
-  if (!RELEASE_TYPES.has(releaseType)) {
+  if (releaseType && !RELEASE_TYPES.has(releaseType)) {
     throw new Error(
       `Invalid release type "${releaseType}". Use one of: ${Array.from(RELEASE_TYPES).join(', ')}.`
     )

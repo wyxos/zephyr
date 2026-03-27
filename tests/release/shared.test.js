@@ -67,7 +67,7 @@ describe('release shared helpers', () => {
 
         expect(parseReleaseArgs({
             args: ['--type', 'packagist']
-        })).toEqual({releaseType: 'patch'})
+        })).toEqual({releaseType: null})
     })
 
     it('throws for invalid release types', () => {
