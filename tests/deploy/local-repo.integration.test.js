@@ -176,8 +176,11 @@ describe('deploy/local-repo integration', () => {
         await writeFile(join(localDir, 'README.md'), '# zephyr\nupdated locally\n')
         await git(['add', 'README.md'], localDir)
 
-        const runPrompt = vi.fn().mockResolvedValue({commitMessage: 'Prepare deployment'})
+        const runPrompt = vi.fn()
+            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
+            .mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
         const logSuccess = vi.fn()
+        const suggestCommitMessage = vi.fn().mockResolvedValue('fix: align deployment dirty tree handling')
 
         const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
 
@@ -187,17 +190,51 @@ describe('deploy/local-repo integration', () => {
             runCommandCapture,
             logProcessing: vi.fn(),
             logSuccess,
-            logWarning: vi.fn()
+            logWarning: vi.fn(),
+            suggestCommitMessage
         })
 
         const {stdout: localStatus} = await git(['status', '--porcelain'], localDir)
         const {stdout: remoteReadme} = await git(['show', 'main:README.md'], remoteDir)
         const {stdout: remoteMessage} = await git(['log', '-1', '--pretty=%s', 'main'], remoteDir)
 
-        expect(runPrompt).toHaveBeenCalledTimes(1)
+        expect(runPrompt).toHaveBeenCalledTimes(2)
         expect(localStatus).toBe('')
         expect(remoteReadme).toContain('updated locally')
         expect(remoteMessage).toBe('Prepare deployment')
-        expect(logSuccess).toHaveBeenCalledWith('Committed and pushed changes to origin/main.')
+        expect(logSuccess).toHaveBeenCalledWith('Committed pending changes with "Prepare deployment".')
+        expect(logSuccess).toHaveBeenCalledWith('Pushed committed changes to origin/main.')
+    }, 30000)
+
+    it('commits and pushes unstaged tracked changes to the remote branch', async () => {
+        const {localDir, remoteDir} = await createTrackedRemoteScenario(rootDir)
+
+        await writeFile(join(localDir, 'README.md'), '# zephyr\nupdated without staging\n')
+
+        const runPrompt = vi.fn()
+            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
+            .mockResolvedValueOnce({commitMessage: 'Fix deployment guard'})
+        const suggestCommitMessage = vi.fn().mockResolvedValue('fix: align deployment dirty tree handling')
+
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+
+        await ensureLocalRepositoryState('main', localDir, {
+            runPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn(),
+            suggestCommitMessage
+        })
+
+        const {stdout: localStatus} = await git(['status', '--porcelain'], localDir)
+        const {stdout: remoteReadme} = await git(['show', 'main:README.md'], remoteDir)
+        const {stdout: remoteMessage} = await git(['log', '-1', '--pretty=%s', 'main'], remoteDir)
+
+        expect(runPrompt).toHaveBeenCalledTimes(2)
+        expect(localStatus).toBe('')
+        expect(remoteReadme).toContain('updated without staging')
+        expect(remoteMessage).toBe('Fix deployment guard')
     }, 30000)
 })

@@ -2,12 +2,14 @@ import {beforeEach, describe, expect, it, vi} from 'vitest'
 
 const {
     mockBumpLocalPackageVersion,
+    mockEnsureCommittedChangesPushed,
     mockEnsureLocalRepositoryState,
     mockResolveLocalDeploymentCheckSupport,
     mockResolveLocalDeploymentContext,
     mockRunLocalDeploymentChecks
 } = vi.hoisted(() => ({
     mockBumpLocalPackageVersion: vi.fn(),
+    mockEnsureCommittedChangesPushed: vi.fn(),
     mockEnsureLocalRepositoryState: vi.fn(),
     mockResolveLocalDeploymentCheckSupport: vi.fn(),
     mockResolveLocalDeploymentContext: vi.fn(),
@@ -15,6 +17,7 @@ const {
 }))
 
 vi.mock('#src/deploy/local-repo.mjs', () => ({
+    ensureCommittedChangesPushed: mockEnsureCommittedChangesPushed,
     ensureLocalRepositoryState: mockEnsureLocalRepositoryState
 }))
 
@@ -36,12 +39,14 @@ import {prepareLocalDeployment} from '#src/application/deploy/prepare-local-depl
 describe('application/deploy/prepare-local-deployment', () => {
     beforeEach(() => {
         mockBumpLocalPackageVersion.mockReset()
+        mockEnsureCommittedChangesPushed.mockReset()
         mockEnsureLocalRepositoryState.mockReset()
         mockResolveLocalDeploymentCheckSupport.mockReset()
         mockResolveLocalDeploymentContext.mockReset()
         mockRunLocalDeploymentChecks.mockReset()
 
         mockBumpLocalPackageVersion.mockResolvedValue(undefined)
+        mockEnsureCommittedChangesPushed.mockResolvedValue({pushed: false, upstreamRef: 'origin/main'})
         mockEnsureLocalRepositoryState.mockResolvedValue(undefined)
         mockResolveLocalDeploymentCheckSupport.mockResolvedValue({
             lintCommand: {
@@ -94,6 +99,14 @@ describe('application/deploy/prepare-local-deployment', () => {
             isLaravel: true,
             runCommandCapture
         })
+        expect(mockEnsureLocalRepositoryState).toHaveBeenCalledWith('main', '/repo/demo', expect.objectContaining({
+            runPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing,
+            logSuccess,
+            logWarning
+        }))
         expect(mockBumpLocalPackageVersion).toHaveBeenCalledWith('/repo/demo', {
             versionArg: null,
             skipGitHooks: false,
@@ -102,13 +115,13 @@ describe('application/deploy/prepare-local-deployment', () => {
             logSuccess,
             logWarning
         })
-        expect(mockEnsureLocalRepositoryState).toHaveBeenCalledWith('main', '/repo/demo', expect.objectContaining({
-            runPrompt,
+        expect(mockEnsureCommittedChangesPushed).toHaveBeenCalledWith('main', '/repo/demo', expect.objectContaining({
             runCommand,
             runCommandCapture,
             logProcessing,
             logSuccess,
-            logWarning
+            logWarning,
+            skipGitHooks: false
         }))
         expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
             rootDir: '/repo/demo',
@@ -130,6 +143,10 @@ describe('application/deploy/prepare-local-deployment', () => {
                 args: ['artisan', 'test', '--compact']
             })
         }))
+        expect(mockEnsureLocalRepositoryState.mock.invocationCallOrder[0]).toBeLessThan(mockResolveLocalDeploymentContext.mock.invocationCallOrder[0])
+        expect(mockResolveLocalDeploymentContext.mock.invocationCallOrder[0]).toBeLessThan(mockResolveLocalDeploymentCheckSupport.mock.invocationCallOrder[0])
+        expect(mockEnsureLocalRepositoryState.mock.invocationCallOrder[0]).toBeLessThan(mockBumpLocalPackageVersion.mock.invocationCallOrder[0])
+        expect(mockBumpLocalPackageVersion.mock.invocationCallOrder[0]).toBeLessThan(mockEnsureCommittedChangesPushed.mock.invocationCallOrder[0])
     })
 
     it('skips version bump when resuming from a snapshot', async () => {
@@ -155,6 +172,7 @@ describe('application/deploy/prepare-local-deployment', () => {
             hasHook: false
         })
         expect(mockBumpLocalPackageVersion).not.toHaveBeenCalled()
+        expect(mockEnsureCommittedChangesPushed).not.toHaveBeenCalled()
         expect(mockResolveLocalDeploymentCheckSupport).toHaveBeenCalled()
         expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
             rootDir: '/repo/demo',
@@ -190,6 +208,7 @@ describe('application/deploy/prepare-local-deployment', () => {
             hasHook: false
         })
         expect(mockBumpLocalPackageVersion).not.toHaveBeenCalled()
+        expect(mockEnsureCommittedChangesPushed).not.toHaveBeenCalled()
         expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
             isLaravel: false
         }))
@@ -223,6 +242,7 @@ describe('application/deploy/prepare-local-deployment', () => {
         })
         expect(mockBumpLocalPackageVersion).toHaveBeenCalled()
         expect(mockEnsureLocalRepositoryState).toHaveBeenCalled()
+        expect(mockEnsureCommittedChangesPushed).toHaveBeenCalled()
         expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
             lintCommand: null,
             testCommand: expect.objectContaining({

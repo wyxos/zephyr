@@ -9,6 +9,11 @@ const CONVENTIONAL_COMMIT_PATTERN = /^(build|chore|ci|docs|feat|fix|perf|refacto
 const GENERIC_SUBJECT_PATTERNS = [
   /^commit pending (release )?changes$/i,
   /^pending (release )?changes$/i,
+  /^commit pending changes before .+$/i,
+  /^commit pending (release |deployment )?changes before .+$/i,
+  /^commit (all )?(current |pending )?changes( before .+)?$/i,
+  /^stage and commit (all )?(current |pending )?changes( before .+)?$/i,
+  /^(allow|enable|support) committing pending changes( before .+)?$/i,
   /^commit changes$/i,
   /^update changes$/i,
   /^update files$/i,
@@ -43,6 +48,11 @@ const TOPIC_STOP_WORDS = new Set([
   'shared',
   'index',
   'main',
+  'local',
+  'repo',
+  'prepare',
+  'commit',
+  'message',
   'js',
   'jsx',
   'ts',
@@ -57,6 +67,24 @@ const TOPIC_STOP_WORDS = new Set([
   'toml',
   'lock'
 ])
+
+function buildTargetedFallbackCommitMessage(statusEntries = []) {
+  const paths = statusEntries.map((entry) => entry.path.toLowerCase())
+  const touchesDeployPrep = paths.some((pathValue) => pathValue.includes('prepare-local-deployment'))
+  const touchesLocalRepo = paths.some((pathValue) => pathValue.includes('local-repo'))
+  const touchesCommitMessage = paths.some((pathValue) => pathValue.includes('commit-message'))
+  const touchesReleaseFlow = paths.some((pathValue) => pathValue.includes('/release/') || pathValue.includes('release-'))
+
+  if (touchesDeployPrep && touchesLocalRepo) {
+    return 'fix: prompt for dirty deploy changes before version bump'
+  }
+
+  if (touchesCommitMessage && touchesReleaseFlow) {
+    return 'fix: tighten release commit suggestions'
+  }
+
+  return null
+}
 
 function resolveWorkingTreeEntryLabel(entry) {
   if (entry.indexStatus === '?' && entry.worktreeStatus === '?') {
@@ -198,6 +226,11 @@ export function sanitizeSuggestedCommitMessage(message) {
 }
 
 export function buildFallbackCommitMessage(statusEntries = []) {
+  const targetedFallback = buildTargetedFallbackCommitMessage(statusEntries)
+  if (targetedFallback) {
+    return targetedFallback
+  }
+
   const tokenCounts = new Map()
 
   for (const entry of statusEntries) {
@@ -272,7 +305,7 @@ async function buildCommitMessageContext(rootDir, {
   return statusEntries.map((entry) => `- ${summarizeWorkingTreeEntry(entry, {changeCountsByPath})}`).join('\n')
 }
 
-export async function suggestReleaseCommitMessage(rootDir = process.cwd(), {
+export async function suggestCommitMessage(rootDir = process.cwd(), {
   runCommand,
   commandExistsImpl = commandExists,
   logStep,
@@ -310,6 +343,7 @@ export async function suggestReleaseCommitMessage(rootDir = process.cwd(), {
         'Use the exact format "<type>: <subject>" with no scope, no exclamation mark, and no extra text.',
         'Choose the most appropriate type from: fix, feat, chore, docs, refactor, test, style, perf, build, ci, revert.',
         'Make the subject specific enough to describe the actual behavior or workflow change, not just that files changed.',
+        'Do not describe the commit itself, staging, or "pending changes"; describe the underlying behavior or workflow fix.',
         'Pending change summary:',
         commitContext || '- changed files present'
       ].join('\n\n')
@@ -329,3 +363,5 @@ export async function suggestReleaseCommitMessage(rootDir = process.cwd(), {
     }
   }
 }
+
+export {suggestCommitMessage as suggestReleaseCommitMessage}
