@@ -31,7 +31,7 @@ import {
     suggestReleaseCommitMessage,
     validateReleaseDependencies
 } from '#src/release/shared.mjs'
-import {buildFallbackCommitMessage, sanitizeSuggestedCommitMessage} from '#src/release/commit-message.mjs'
+import {sanitizeSuggestedCommitMessage} from '#src/release/commit-message.mjs'
 
 describe('release shared helpers', () => {
     beforeEach(() => {
@@ -122,7 +122,6 @@ describe('release shared helpers', () => {
             return {stdout: '', stderr: ''}
         })
         const runPrompt = vi.fn()
-            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
             .mockResolvedValueOnce({commitMessage: 'fix: align release commit flow'})
         const suggestCommitMessage = vi.fn().mockResolvedValue('fix: align release commit flow')
         const logStep = vi.fn()
@@ -140,21 +139,16 @@ describe('release shared helpers', () => {
             runCommand,
             logStep
         }))
+        expect(runPrompt).toHaveBeenCalledTimes(1)
         expect(runPrompt).toHaveBeenNthCalledWith(1, [
-            expect.objectContaining({
-                type: 'confirm',
-                name: 'shouldCommitPendingChanges'
-            })
-        ])
-        expect(runPrompt.mock.calls[0][0][0].message).toContain('modified: src/index.mjs')
-        expect(runPrompt.mock.calls[0][0][0].message).toContain('untracked: tests/new.test.js')
-        expect(runPrompt).toHaveBeenNthCalledWith(2, [
             expect.objectContaining({
                 type: 'input',
                 name: 'commitMessage',
                 default: 'fix: align release commit flow'
             })
         ])
+        expect(runPrompt.mock.calls[0][0][0].message).toContain('modified: src/index.mjs')
+        expect(runPrompt.mock.calls[0][0][0].message).toContain('untracked: tests/new.test.js')
         expect(runCommand).toHaveBeenNthCalledWith(2, 'git', ['add', '-A'], {
             capture: true,
             cwd: '/workspace/demo'
@@ -166,7 +160,7 @@ describe('release shared helpers', () => {
         expect(logSuccess).toHaveBeenCalledWith('Committed pending changes with "fix: align release commit flow".')
     })
 
-    it('uses a more descriptive fallback message when no Codex suggestion is available', async () => {
+    it('asks for a manual message when no Codex suggestion is available', async () => {
         const runCommand = vi.fn(async (command, args) => {
             if (command === 'git' && args[0] === 'status') {
                 const invocationCount = runCommand.mock.calls.filter(([currentCommand, currentArgs]) => currentCommand === 'git' && currentArgs[0] === 'status').length
@@ -178,7 +172,6 @@ describe('release shared helpers', () => {
             return {stdout: '', stderr: ''}
         })
         const runPrompt = vi.fn()
-            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
             .mockResolvedValueOnce({commitMessage: 'chore: update release handling'})
 
         await ensureCleanWorkingTree('/workspace/demo', {
@@ -187,19 +180,27 @@ describe('release shared helpers', () => {
             suggestCommitMessage: vi.fn().mockResolvedValue(null)
         })
 
-        expect(runPrompt).toHaveBeenNthCalledWith(2, [
+        expect(runPrompt).toHaveBeenNthCalledWith(1, [
             expect.objectContaining({
-                default: 'chore: update release handling'
+                default: ''
             })
         ])
     })
 
-    it('builds a deploy-specific fallback message for deploy guard changes', () => {
-        expect(buildFallbackCommitMessage([
-            {indexStatus: ' ', worktreeStatus: 'M', path: 'src/application/deploy/prepare-local-deployment.mjs', previousPath: null},
-            {indexStatus: ' ', worktreeStatus: 'M', path: 'src/deploy/local-repo.mjs', previousPath: null},
-            {indexStatus: ' ', worktreeStatus: 'M', path: 'src/release/commit-message.mjs', previousPath: null}
-        ])).toBe('fix: prompt for dirty deploy changes before version bump')
+    it('cancels the release when the manual commit message is left blank', async () => {
+        const runCommand = vi.fn(async (command, args) => {
+            if (command === 'git' && args[0] === 'status') {
+                return {stdout: ' M src/release/shared.mjs', stderr: ''}
+            }
+
+            return {stdout: '', stderr: ''}
+        })
+
+        await expect(ensureCleanWorkingTree('/workspace/demo', {
+            runCommand,
+            runPrompt: vi.fn().mockResolvedValue({commitMessage: '   '}),
+            suggestCommitMessage: vi.fn().mockResolvedValue(null)
+        })).rejects.toThrow('Release cancelled: pending changes were not committed.')
     })
 
     it('rejects meta commit subjects about committing pending changes', () => {

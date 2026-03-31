@@ -10,7 +10,6 @@ import {
   getUpstreamRef
 } from '../utils/git.mjs'
 import {
-  buildFallbackCommitMessage,
   formatWorkingTreePreview,
   parseWorkingTreeEntries,
   parseWorkingTreeStatus,
@@ -117,34 +116,23 @@ export async function ensureCleanWorkingTree(rootDir = process.cwd(), {
     logStep,
     logWarning,
     statusEntries
-  }) ?? buildFallbackCommitMessage(statusEntries)
-
-  const changeLabel = statusEntries.length === 1 ? 'change' : 'changes'
-  const {shouldCommitPendingChanges} = await runPrompt([
-    {
-      type: 'confirm',
-      name: 'shouldCommitPendingChanges',
-      message:
-        `Pending ${changeLabel} detected before release:\n\n` +
-        `${formatWorkingTreePreview(statusEntries)}\n\n` +
-        'Stage and commit all current changes before continuing?',
-      default: true
-    }
-  ])
-
-  if (!shouldCommitPendingChanges) {
-    throw new Error(DIRTY_WORKING_TREE_CANCELLED_MESSAGE)
-  }
-
+  })
   const {commitMessage} = await runPrompt([
     {
       type: 'input',
       name: 'commitMessage',
-      message: 'Commit message for pending release changes',
-      default: suggestedCommitMessage,
-      validate: (value) => (value && value.trim().length > 0 ? true : 'Commit message cannot be empty.')
+      message:
+        'Pending changes detected before release:\n\n' +
+        `${formatWorkingTreePreview(statusEntries)}\n\n` +
+        'Enter a commit message to stage and commit all current changes before continuing.\n' +
+        'Leave blank to cancel.',
+      default: suggestedCommitMessage ?? ''
     }
   ])
+
+  if (!commitMessage || commitMessage.trim().length === 0) {
+    throw new Error(DIRTY_WORKING_TREE_CANCELLED_MESSAGE)
+  }
 
   const message = commitMessage.trim()
 
