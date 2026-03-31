@@ -108,7 +108,6 @@ describe('deploy/local-repo', () => {
         queueSpawnResponse({stdout: ''})
 
         mockPrompt
-            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
             .mockResolvedValueOnce({commitMessage: 'fix: align deployment dirty tree handling'})
 
         const ensureCommittedChangesPushed = async () => ({pushed: false, upstreamRef: 'origin/main'})
@@ -141,7 +140,7 @@ describe('deploy/local-repo', () => {
             suggestCommitMessage
         })
 
-        expect(mockPrompt).toHaveBeenCalledTimes(2)
+        expect(mockPrompt).toHaveBeenCalledTimes(1)
         expect(mockPrompt.mock.calls[0][0][0].message).toContain('modified: file.php')
         expect(
             mockSpawn.mock.calls.some(
@@ -164,7 +163,6 @@ describe('deploy/local-repo', () => {
         queueSpawnResponse({})
 
         mockPrompt
-            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
             .mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
         const suggestCommitMessage = vi.fn().mockResolvedValue('fix: stage pending deployment changes')
 
@@ -194,7 +192,7 @@ describe('deploy/local-repo', () => {
             suggestCommitMessage
         })
 
-        expect(mockPrompt).toHaveBeenCalledTimes(2)
+        expect(mockPrompt).toHaveBeenCalledTimes(1)
         expect(
             mockSpawn.mock.calls.some(
                 ([command, args]) => command === 'git' && args[0] === 'push' && args.includes('main')
@@ -211,7 +209,6 @@ describe('deploy/local-repo', () => {
         queueSpawnResponse({})
 
         mockPrompt
-            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
             .mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
         const suggestCommitMessage = vi.fn().mockResolvedValue('fix: stage pending deployment changes')
 
@@ -252,6 +249,40 @@ describe('deploy/local-repo', () => {
                 ([command, args]) => command === 'git' && args[0] === 'push' && args[1] === '--no-verify' && args.includes('main')
             )
         ).toBe(true)
+    })
+
+    it('cancels deployment commit flow when the message is left blank', async () => {
+        queueSpawnResponse({stdout: 'main\n'})
+        queueSpawnResponse({stdout: ' M file.php\n'})
+        queueSpawnResponse({stdout: ' M file.php\n'})
+
+        mockPrompt.mockResolvedValueOnce({commitMessage: '  '})
+
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
+        const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
+
+        await expect(ensureLocalRepositoryState('main', process.cwd(), {
+            runPrompt: mockPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing: () => {
+            },
+            logSuccess: () => {
+            },
+            logWarning: () => {
+            },
+            readUpstreamSyncState: async () => ({
+                upstreamRef: 'origin/main',
+                remoteName: 'origin',
+                upstreamBranch: 'main',
+                remoteExists: true,
+                aheadCount: 0,
+                behindCount: 0
+            }),
+            suggestCommitMessage: vi.fn().mockResolvedValue(null)
+        })).rejects.toThrow('Deployment cancelled: pending changes were not committed.')
     })
 
     it('announces the pre-push hook before pushing committed changes', async () => {

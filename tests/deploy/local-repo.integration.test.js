@@ -177,7 +177,6 @@ describe('deploy/local-repo integration', () => {
         await git(['add', 'README.md'], localDir)
 
         const runPrompt = vi.fn()
-            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
             .mockResolvedValueOnce({commitMessage: 'Prepare deployment'})
         const logSuccess = vi.fn()
         const suggestCommitMessage = vi.fn().mockResolvedValue('fix: align deployment dirty tree handling')
@@ -198,7 +197,7 @@ describe('deploy/local-repo integration', () => {
         const {stdout: remoteReadme} = await git(['show', 'main:README.md'], remoteDir)
         const {stdout: remoteMessage} = await git(['log', '-1', '--pretty=%s', 'main'], remoteDir)
 
-        expect(runPrompt).toHaveBeenCalledTimes(2)
+        expect(runPrompt).toHaveBeenCalledTimes(1)
         expect(localStatus).toBe('')
         expect(remoteReadme).toContain('updated locally')
         expect(remoteMessage).toBe('Prepare deployment')
@@ -212,7 +211,6 @@ describe('deploy/local-repo integration', () => {
         await writeFile(join(localDir, 'README.md'), '# zephyr\nupdated without staging\n')
 
         const runPrompt = vi.fn()
-            .mockResolvedValueOnce({shouldCommitPendingChanges: true})
             .mockResolvedValueOnce({commitMessage: 'Fix deployment guard'})
         const suggestCommitMessage = vi.fn().mockResolvedValue('fix: align deployment dirty tree handling')
 
@@ -232,7 +230,7 @@ describe('deploy/local-repo integration', () => {
         const {stdout: remoteReadme} = await git(['show', 'main:README.md'], remoteDir)
         const {stdout: remoteMessage} = await git(['log', '-1', '--pretty=%s', 'main'], remoteDir)
 
-        expect(runPrompt).toHaveBeenCalledTimes(2)
+        expect(runPrompt).toHaveBeenCalledTimes(1)
         expect(localStatus).toBe('')
         expect(remoteReadme).toContain('updated without staging')
         expect(remoteMessage).toBe('Fix deployment guard')
