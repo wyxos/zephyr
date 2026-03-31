@@ -20,9 +20,12 @@ const GENERIC_SUBJECT_PATTERNS = [
   /^update work$/i,
   /^misc(ellaneous)?( updates?)?$/i,
   /^changes$/i,
-  /^updates?$/i
+  /^updates?$/i,
+  /^(improve|update|adjust|refine|align|support|enable)\s+.+\s+(workflow|process|flow)$/i
 ]
 const MAX_WORKING_TREE_PREVIEW = 20
+const MAX_DIFF_EXCERPT_LINES = 60
+const MAX_DIFF_EXCERPT_CHARS = 4000
 const STATUS_LABELS = {
   A: 'added',
   C: 'copied',
@@ -261,10 +264,10 @@ export function buildFallbackCommitMessage(statusEntries = []) {
   }
 
   if (commitType === 'ci') {
-    return `ci: update ${primaryTopic} workflow`
+    return `ci: update ${primaryTopic} pipeline`
   }
 
-  return `chore: improve ${primaryTopic} workflow`
+  return `chore: update ${primaryTopic} handling`
 }
 
 async function collectDiffNumstat(rootDir, {runCommand} = {}) {
@@ -297,12 +300,68 @@ async function collectDiffNumstat(rootDir, {runCommand} = {}) {
   }
 }
 
+function shouldIncludeDiffExcerptLine(line = '') {
+  if (line.startsWith('diff --git ')) {
+    return true
+  }
+
+  if (line.startsWith('@@')) {
+    return true
+  }
+
+  return (line.startsWith('+') || line.startsWith('-')) && !line.startsWith('+++') && !line.startsWith('---')
+}
+
+function trimDiffExcerpt(diffText = '') {
+  const selectedLines = []
+  let totalChars = 0
+
+  for (const rawLine of diffText.split(/\r?\n/)) {
+    const line = rawLine.trimEnd()
+
+    if (!shouldIncludeDiffExcerptLine(line)) {
+      continue
+    }
+
+    const truncatedLine = line.length > 180 ? `${line.slice(0, 177)}...` : line
+    const nextTotal = totalChars + truncatedLine.length + 1
+
+    if (selectedLines.length >= MAX_DIFF_EXCERPT_LINES || nextTotal > MAX_DIFF_EXCERPT_CHARS) {
+      break
+    }
+
+    selectedLines.push(truncatedLine)
+    totalChars = nextTotal
+  }
+
+  return selectedLines.join('\n')
+}
+
+async function collectDiffExcerpt(rootDir, {runCommand} = {}) {
+  try {
+    const {stdout} = await runCommand('git', ['diff', '--unified=0', '--no-color', 'HEAD', '--'], {
+      capture: true,
+      cwd: rootDir
+    })
+
+    return trimDiffExcerpt(stdout)
+  } catch {
+    return ''
+  }
+}
+
 async function buildCommitMessageContext(rootDir, {
   runCommand,
   statusEntries = []
 } = {}) {
   const changeCountsByPath = await collectDiffNumstat(rootDir, {runCommand})
-  return statusEntries.map((entry) => `- ${summarizeWorkingTreeEntry(entry, {changeCountsByPath})}`).join('\n')
+  const summary = statusEntries.map((entry) => `- ${summarizeWorkingTreeEntry(entry, {changeCountsByPath})}`).join('\n')
+  const diffExcerpt = await collectDiffExcerpt(rootDir, {runCommand})
+
+  return {
+    summary,
+    diffExcerpt
+  }
 }
 
 export async function suggestCommitMessage(rootDir = process.cwd(), {
@@ -328,6 +387,21 @@ export async function suggestCommitMessage(rootDir = process.cwd(), {
 
     logStep?.('Generating a suggested commit message with Codex...')
 
+    const promptSections = [
+      'Write exactly one short conventional commit message for these pending changes.',
+      'Use the exact format "<type>: <subject>" with no scope, no exclamation mark, and no extra text.',
+      'Choose the most appropriate type from: fix, feat, chore, docs, refactor, test, style, perf, build, ci, revert.',
+      'Base the subject on the actual behavior, safeguard, bug fix, feature, or API change shown below.',
+      'Avoid generic nouns like "workflow", "process", "flow", "changes", or "updates" unless the diff truly changes CI or docs.',
+      'Do not describe the commit itself, staging, or "pending changes"; describe the underlying code or product change.',
+      'Pending change summary:',
+      commitContext.summary || '- changed files present'
+    ]
+
+    if (commitContext.diffExcerpt) {
+      promptSections.push('Diff excerpt:', commitContext.diffExcerpt)
+    }
+
     await runCommand('codex', [
       'exec',
       '--ephemeral',
@@ -338,15 +412,7 @@ export async function suggestCommitMessage(rootDir = process.cwd(), {
       '--skip-git-repo-check',
       '--output-last-message',
       outputPath,
-      [
-        'Write exactly one short conventional commit message for these pending changes.',
-        'Use the exact format "<type>: <subject>" with no scope, no exclamation mark, and no extra text.',
-        'Choose the most appropriate type from: fix, feat, chore, docs, refactor, test, style, perf, build, ci, revert.',
-        'Make the subject specific enough to describe the actual behavior or workflow change, not just that files changed.',
-        'Do not describe the commit itself, staging, or "pending changes"; describe the underlying behavior or workflow fix.',
-        'Pending change summary:',
-        commitContext || '- changed files present'
-      ].join('\n\n')
+      promptSections.join('\n\n')
     ], {
       capture: true,
       cwd: rootDir

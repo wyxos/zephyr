@@ -179,7 +179,7 @@ describe('release shared helpers', () => {
         })
         const runPrompt = vi.fn()
             .mockResolvedValueOnce({shouldCommitPendingChanges: true})
-            .mockResolvedValueOnce({commitMessage: 'chore: improve release workflow'})
+            .mockResolvedValueOnce({commitMessage: 'chore: update release handling'})
 
         await ensureCleanWorkingTree('/workspace/demo', {
             runCommand,
@@ -189,7 +189,7 @@ describe('release shared helpers', () => {
 
         expect(runPrompt).toHaveBeenNthCalledWith(2, [
             expect.objectContaining({
-                default: 'chore: improve release workflow'
+                default: 'chore: update release handling'
             })
         ])
     })
@@ -205,11 +205,24 @@ describe('release shared helpers', () => {
     it('rejects meta commit subjects about committing pending changes', () => {
         expect(sanitizeSuggestedCommitMessage('feat: commit pending changes before deployment')).toBeNull()
         expect(sanitizeSuggestedCommitMessage('fix: allow committing pending changes before release')).toBeNull()
+        expect(sanitizeSuggestedCommitMessage('chore: improve release workflow')).toBeNull()
     })
 
     it('asks Codex for a suggested conventional commit message when available', async () => {
         mockCommandExists.mockReturnValue(true)
-        const runCommand = vi.fn(async (_command, args) => {
+        const runCommand = vi.fn(async (command, args) => {
+            if (command === 'git' && args[0] === 'diff' && args.includes('--unified=0')) {
+                return {
+                    stdout: [
+                        'diff --git a/src/release/shared.mjs b/src/release/shared.mjs',
+                        '@@ -180 +180 @@',
+                        '-                default: \'chore: improve release workflow\'',
+                        '+                default: \'chore: update release handling\''
+                    ].join('\n'),
+                    stderr: ''
+                }
+            }
+
             const outputPath = args[args.indexOf('--output-last-message') + 1]
             await writeFile(outputPath, 'fix: prompt for dirty deploy changes before version bump\n')
             return {stdout: '', stderr: ''}
@@ -242,6 +255,9 @@ describe('release shared helpers', () => {
         const codexCall = runCommand.mock.calls.find(([command]) => command === 'codex')
         expect(codexCall?.[1].at(-1)).toContain('modified: src/release/shared.mjs')
         expect(codexCall?.[1].at(-1)).toContain('untracked: tests/release/shared.test.js')
+        expect(codexCall?.[1].at(-1)).toContain('Diff excerpt:')
+        expect(codexCall?.[1].at(-1)).toContain('+                default: \'chore: update release handling\'')
+        expect(codexCall?.[1].at(-1)).toContain('Avoid generic nouns like "workflow"')
         expect(codexCall?.[1].at(-1)).toContain('Do not describe the commit itself')
         expect(logStep).toHaveBeenCalledWith('Generating a suggested commit message with Codex...')
         expect(logWarning).not.toHaveBeenCalled()
