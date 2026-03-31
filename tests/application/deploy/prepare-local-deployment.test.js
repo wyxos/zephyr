@@ -68,7 +68,7 @@ describe('application/deploy/prepare-local-deployment', () => {
         mockRunLocalDeploymentChecks.mockResolvedValue(undefined)
     })
 
-    it('bumps version and delegates local checks for fresh Laravel deployments', async () => {
+    it('runs local checks before bumping version for fresh Laravel deployments', async () => {
         const runCommand = vi.fn()
         const runCommandCapture = vi.fn()
         const runPrompt = vi.fn()
@@ -97,6 +97,8 @@ describe('application/deploy/prepare-local-deployment', () => {
         expect(mockResolveLocalDeploymentCheckSupport).toHaveBeenCalledWith({
             rootDir: '/repo/demo',
             isLaravel: true,
+            skipTests: false,
+            skipLint: false,
             runCommandCapture
         })
         expect(mockEnsureLocalRepositoryState).toHaveBeenCalledWith('main', '/repo/demo', expect.objectContaining({
@@ -128,6 +130,9 @@ describe('application/deploy/prepare-local-deployment', () => {
             isLaravel: true,
             hasHook: false,
             skipGitHooks: false,
+            skipTests: false,
+            skipLint: false,
+            forceRunWhenHookPresent: true,
             runCommand,
             runCommandCapture,
             logProcessing,
@@ -145,7 +150,8 @@ describe('application/deploy/prepare-local-deployment', () => {
         }))
         expect(mockEnsureLocalRepositoryState.mock.invocationCallOrder[0]).toBeLessThan(mockResolveLocalDeploymentContext.mock.invocationCallOrder[0])
         expect(mockResolveLocalDeploymentContext.mock.invocationCallOrder[0]).toBeLessThan(mockResolveLocalDeploymentCheckSupport.mock.invocationCallOrder[0])
-        expect(mockEnsureLocalRepositoryState.mock.invocationCallOrder[0]).toBeLessThan(mockBumpLocalPackageVersion.mock.invocationCallOrder[0])
+        expect(mockResolveLocalDeploymentCheckSupport.mock.invocationCallOrder[0]).toBeLessThan(mockRunLocalDeploymentChecks.mock.invocationCallOrder[0])
+        expect(mockRunLocalDeploymentChecks.mock.invocationCallOrder[0]).toBeLessThan(mockBumpLocalPackageVersion.mock.invocationCallOrder[0])
         expect(mockBumpLocalPackageVersion.mock.invocationCallOrder[0]).toBeLessThan(mockEnsureCommittedChangesPushed.mock.invocationCallOrder[0])
     })
 
@@ -248,7 +254,38 @@ describe('application/deploy/prepare-local-deployment', () => {
             testCommand: expect.objectContaining({
                 command: 'php',
                 args: ['artisan', 'test', '--compact']
-            })
+            }),
+            forceRunWhenHookPresent: true
+        }))
+    })
+
+    it('passes deploy skip flags into support resolution and local checks', async () => {
+        const runCommandCapture = vi.fn()
+
+        await prepareLocalDeployment({
+            branch: 'main'
+        }, {
+            rootDir: '/repo/demo',
+            skipTests: true,
+            skipLint: true,
+            runPrompt: vi.fn(),
+            runCommand: vi.fn(),
+            runCommandCapture,
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })
+
+        expect(mockResolveLocalDeploymentCheckSupport).toHaveBeenCalledWith({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            skipTests: true,
+            skipLint: true,
+            runCommandCapture
+        })
+        expect(mockRunLocalDeploymentChecks).toHaveBeenCalledWith(expect.objectContaining({
+            skipTests: true,
+            skipLint: true
         }))
     })
 })

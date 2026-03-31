@@ -50,19 +50,23 @@ async function resolveSupportedLaravelTestCommand(rootDir, {runCommandCapture} =
 export async function resolveLocalDeploymentCheckSupport({
     rootDir,
     isLaravel,
+    skipTests = false,
+    skipLint = false,
     runCommandCapture
 } = {}) {
     let lintCommand = null
 
-    try {
-        lintCommand = await preflight.resolveSupportedLintCommand(rootDir, {commandExists})
-    } catch (error) {
-        if (error?.code !== 'ZEPHYR_LINT_COMMAND_NOT_FOUND') {
-            throw error
+    if (!skipLint) {
+        try {
+            lintCommand = await preflight.resolveSupportedLintCommand(rootDir, {commandExists})
+        } catch (error) {
+            if (error?.code !== 'ZEPHYR_LINT_COMMAND_NOT_FOUND') {
+                throw error
+            }
         }
     }
 
-    const testCommand = isLaravel
+    const testCommand = isLaravel && !skipTests
         ? await resolveSupportedLaravelTestCommand(rootDir, {runCommandCapture})
         : null
 
@@ -95,6 +99,9 @@ export async function runLocalDeploymentChecks({
     isLaravel,
     hasHook,
     skipGitHooks = false,
+    skipTests = false,
+    skipLint = false,
+    forceRunWhenHookPresent = false,
     runCommand,
     runCommandCapture,
     logProcessing,
@@ -108,6 +115,8 @@ export async function runLocalDeploymentChecks({
         : await resolveLocalDeploymentCheckSupport({
             rootDir,
             isLaravel,
+            skipTests,
+            skipLint,
             runCommandCapture
         })
 
@@ -115,6 +124,10 @@ export async function runLocalDeploymentChecks({
         if (skipGitHooks) {
             logWarning?.(
                 'Pre-push git hook detected. Zephyr will run its built-in release checks manually because --skip-git-hooks is enabled, and the hook will be bypassed during git push.'
+            )
+        } else if (forceRunWhenHookPresent) {
+            logProcessing?.(
+                'Pre-push git hook detected. Zephyr will run its built-in release checks now before bumping the deployment version. The hook will still run again during git push.'
             )
         } else {
             logProcessing?.(
@@ -124,11 +137,19 @@ export async function runLocalDeploymentChecks({
         }
     }
 
-    if (support.lintCommand === null) {
+    if (hasHook && !skipGitHooks && (skipLint || skipTests)) {
+        logWarning?.(
+            'Pre-push git hook detected. --skip-lint/--skip-tests only skip Zephyr\'s built-in checks; your hook may still run its own checks during git push.'
+        )
+    }
+
+    if (skipLint) {
+        logWarning?.('Skipping lint because --skip-lint flag was provided.')
+    } else if (support.lintCommand === null) {
         logWarning?.('No supported lint command was found. Skipping linting checks.')
     }
 
-    const lintRan = support.lintCommand === null
+    const lintRan = skipLint || support.lintCommand === null
         ? false
         : await preflight.runLinting(rootDir, {
             runCommand,
@@ -152,7 +173,9 @@ export async function runLocalDeploymentChecks({
         }
     }
 
-    if (isLaravel) {
+    if (isLaravel && skipTests) {
+        logWarning?.('Skipping tests because --skip-tests flag was provided.')
+    } else if (isLaravel) {
         await runLocalLaravelTests(rootDir, {
             runCommand,
             logProcessing,

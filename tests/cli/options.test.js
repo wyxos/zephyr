@@ -12,6 +12,8 @@ describe('cli/options', () => {
             '--resume-pending',
             '--maintenance',
             'on',
+            '--skip-tests',
+            '--skip-lint',
             '1.2.3'
         ])
 
@@ -25,8 +27,9 @@ describe('cli/options', () => {
             discardPending: false,
             maintenanceMode: true,
             skipGitHooks: false,
-            skipTests: false,
-            skipLint: false,
+            skipChecks: false,
+            skipTests: true,
+            skipLint: true,
             skipBuild: false,
             skipDeploy: false
         })
@@ -59,6 +62,27 @@ describe('cli/options', () => {
     it('parses skip-git-hooks for release and deploy workflows', () => {
         expect(parseCliOptions(['--skip-git-hooks']).skipGitHooks).toBe(true)
         expect(parseCliOptions(['--type=node', '--skip-git-hooks']).skipGitHooks).toBe(true)
+    })
+
+    it('allows skip-tests and skip-lint on app deployments', () => {
+        const options = parseCliOptions(['--skip-tests', '--skip-lint'])
+
+        expect(() => validateCliOptions(options)).not.toThrow()
+    })
+
+    it('treats skip-checks as shorthand for skip-lint and skip-tests', () => {
+        const options = parseCliOptions(['--skip-checks'])
+
+        expect(options.skipChecks).toBe(true)
+        expect(options.skipLint).toBe(true)
+        expect(options.skipTests).toBe(true)
+        expect(() => validateCliOptions(options)).not.toThrow()
+    })
+
+    it('rejects node/vue-only skip flags on app deployments', () => {
+        const options = parseCliOptions(['--skip-build'])
+
+        expect(() => validateCliOptions(options)).toThrow('--skip-build and --skip-deploy are only valid for node/vue release workflows.')
     })
 
     it('rejects conflicting pending snapshot flags', () => {

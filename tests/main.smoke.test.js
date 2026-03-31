@@ -143,6 +143,7 @@ describe('main smoke', () => {
                 workflow: 'deploy',
                 presetName: null,
                 maintenanceMode: null,
+                skipChecks: false,
                 skipGitHooks: false,
                 resumePending: false,
                 discardPending: false

@@ -122,6 +122,56 @@ describe('application/deploy/run-local-deployment-checks', () => {
         expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
     })
 
+    it('runs manual checks before bumping when a pre-push hook is present', async () => {
+        const logProcessing = vi.fn()
+        const runCommand = vi.fn()
+        const runCommandCapture = vi.fn().mockResolvedValue('test\nqueue:work\n')
+
+        await runLocalDeploymentChecks({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            hasHook: true,
+            forceRunWhenHookPresent: true,
+            runCommand,
+            runCommandCapture,
+            logProcessing,
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })
+
+        expect(logProcessing).toHaveBeenCalledWith(
+            'Pre-push git hook detected. Zephyr will run its built-in release checks now before bumping the deployment version. The hook will still run again during git push.'
+        )
+        expect(mockRunLinting).toHaveBeenCalledWith('/repo/demo', expect.objectContaining({
+            runCommand,
+            logProcessing,
+            logSuccess: expect.any(Function),
+            logWarning: expect.any(Function),
+            commandExists: mockCommandExists,
+            lintCommand: expect.objectContaining({
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'lint']
+            })
+        }))
+        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
+    })
+
+    it('skips resolving local lint and test support when skip flags are provided', async () => {
+        await expect(resolveLocalDeploymentCheckSupport({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            skipLint: true,
+            skipTests: true,
+            runCommandCapture: vi.fn()
+        })).resolves.toEqual({
+            lintCommand: null,
+            testCommand: null
+        })
+
+        expect(mockResolveSupportedLintCommand).not.toHaveBeenCalled()
+    })
+
     it('commits lint changes and runs local Laravel tests when needed', async () => {
         mockRunLinting.mockResolvedValue(true)
         mockHasUncommittedChanges.mockResolvedValue(true)
@@ -167,6 +217,56 @@ describe('application/deploy/run-local-deployment-checks', () => {
         }))
         expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
         expect(logSuccess).toHaveBeenCalledWith('Local tests passed.')
+    })
+
+    it('skips lint and tests when skip flags are provided', async () => {
+        const logWarning = vi.fn()
+        const runCommand = vi.fn()
+
+        await runLocalDeploymentChecks({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            hasHook: false,
+            skipLint: true,
+            skipTests: true,
+            runCommand,
+            runCommandCapture: vi.fn(),
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning
+        })
+
+        expect(mockRunLinting).not.toHaveBeenCalled()
+        expect(mockCommitLintingChanges).not.toHaveBeenCalled()
+        expect(runCommand).not.toHaveBeenCalled()
+        expect(logWarning).toHaveBeenCalledWith('Skipping lint because --skip-lint flag was provided.')
+        expect(logWarning).toHaveBeenCalledWith('Skipping tests because --skip-tests flag was provided.')
+    })
+
+    it('warns that skip flags do not bypass pre-push hooks', async () => {
+        const logProcessing = vi.fn()
+        const logWarning = vi.fn()
+
+        await runLocalDeploymentChecks({
+            rootDir: '/repo/demo',
+            isLaravel: true,
+            hasHook: true,
+            skipLint: true,
+            skipTests: true,
+            forceRunWhenHookPresent: true,
+            runCommand: vi.fn(),
+            runCommandCapture: vi.fn(),
+            logProcessing,
+            logSuccess: vi.fn(),
+            logWarning
+        })
+
+        expect(logProcessing).toHaveBeenCalledWith(
+            'Pre-push git hook detected. Zephyr will run its built-in release checks now before bumping the deployment version. The hook will still run again during git push.'
+        )
+        expect(logWarning).toHaveBeenCalledWith(
+            'Pre-push git hook detected. --skip-lint/--skip-tests only skip Zephyr\'s built-in checks; your hook may still run its own checks during git push.'
+        )
     })
 
     it('skips linting when no supported lint command exists', async () => {

@@ -10,6 +10,8 @@ export async function prepareLocalDeployment(config, {
     rootDir = process.cwd(),
     versionArg = null,
     skipGitHooks = false,
+    skipTests = false,
+    skipLint = false,
     runPrompt,
     runCommand,
     runCommandCapture,
@@ -31,10 +33,29 @@ export async function prepareLocalDeployment(config, {
     const checkSupport = await resolveLocalDeploymentCheckSupport({
         rootDir,
         isLaravel: context.isLaravel,
+        skipTests,
+        skipLint,
         runCommandCapture
     })
 
     if (!snapshot && context.isLaravel) {
+        await runLocalDeploymentChecks({
+            rootDir,
+            isLaravel: context.isLaravel,
+            hasHook: context.hasHook,
+            skipGitHooks,
+            skipTests,
+            skipLint,
+            forceRunWhenHookPresent: true,
+            runCommand,
+            runCommandCapture,
+            logProcessing,
+            logSuccess,
+            logWarning,
+            lintCommand: checkSupport.lintCommand,
+            testCommand: checkSupport.testCommand
+        })
+
         await bumpLocalPackageVersion(rootDir, {
             versionArg,
             skipGitHooks,
@@ -52,6 +73,8 @@ export async function prepareLocalDeployment(config, {
             logWarning,
             skipGitHooks
         })
+
+        return context
     }
 
     await runLocalDeploymentChecks({
@@ -59,6 +82,8 @@ export async function prepareLocalDeployment(config, {
         isLaravel: context.isLaravel,
         hasHook: context.hasHook,
         skipGitHooks,
+        skipTests,
+        skipLint,
         runCommand,
         runCommandCapture,
         logProcessing,

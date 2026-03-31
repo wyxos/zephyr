@@ -36,8 +36,9 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
             discardPending: firstArg.discardPending === true,
             maintenanceMode: firstArg.maintenanceMode ?? null,
             skipGitHooks: firstArg.skipGitHooks === true,
-            skipTests: firstArg.skipTests === true,
-            skipLint: firstArg.skipLint === true,
+            skipChecks: firstArg.skipChecks === true,
+            skipTests: firstArg.skipTests === true || firstArg.skipChecks === true,
+            skipLint: firstArg.skipLint === true || firstArg.skipChecks === true,
             skipBuild: firstArg.skipBuild === true,
             skipDeploy: firstArg.skipDeploy === true,
             context: firstArg.context ?? null
@@ -54,6 +55,7 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
         discardPending: false,
         maintenanceMode: null,
         skipGitHooks: false,
+        skipChecks: false,
         skipTests: false,
         skipLint: false,
         skipBuild: false,
@@ -109,6 +111,9 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         presetName: options.presetName,
         maintenanceMode: options.maintenanceMode,
         skipGitHooks: options.skipGitHooks === true,
+        skipChecks: options.skipChecks === true,
+        skipTests: options.skipTests === true,
+        skipLint: options.skipLint === true,
         resumePending: options.resumePending,
         discardPending: options.discardPending
     }
@@ -138,6 +143,9 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                     presetName: currentExecutionMode.presetName,
                     maintenanceMode: currentExecutionMode.maintenanceMode,
                     skipGitHooks: currentExecutionMode.skipGitHooks === true,
+                    skipChecks: currentExecutionMode.skipChecks === true,
+                    skipTests: currentExecutionMode.skipTests === true,
+                    skipLint: currentExecutionMode.skipLint === true,
                     resumePending: currentExecutionMode.resumePending,
                     discardPending: currentExecutionMode.discardPending
                 }

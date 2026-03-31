@@ -36,8 +36,9 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .option('--discard-pending', 'Discard a saved pending deployment snapshot without prompting.')
         .option('--maintenance <mode>', 'Laravel maintenance mode policy for app deployments (on|off).')
         .option('--skip-git-hooks', 'Bypass local git hooks for any commits and pushes Zephyr performs.')
-        .option('--skip-tests', 'Skip test execution in package release workflows.')
-        .option('--skip-lint', 'Skip lint execution in package release workflows.')
+        .option('--skip-checks', 'Skip Zephyr local lint and test execution.')
+        .option('--skip-tests', 'Skip Zephyr local test execution in package release and app deployment workflows.')
+        .option('--skip-lint', 'Skip Zephyr local lint execution in package release and app deployment workflows.')
         .option('--skip-build', 'Skip build execution in node/vue release workflows.')
         .option('--skip-deploy', 'Skip GitHub Pages deployment in node/vue release workflows.')
         .argument(
@@ -68,8 +69,9 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         discardPending: Boolean(options.discardPending),
         maintenanceMode: normalizeMaintenanceMode(options.maintenance),
         skipGitHooks: Boolean(options.skipGitHooks),
-        skipTests: Boolean(options.skipTests),
-        skipLint: Boolean(options.skipLint),
+        skipChecks: Boolean(options.skipChecks),
+        skipTests: Boolean(options.skipTests || options.skipChecks),
+        skipLint: Boolean(options.skipLint || options.skipChecks),
         skipBuild: Boolean(options.skipBuild),
         skipDeploy: Boolean(options.skipDeploy)
     }
@@ -84,8 +86,6 @@ export function validateCliOptions(options = {}) {
         resumePending = false,
         discardPending = false,
         maintenanceMode = null,
-        skipTests = false,
-        skipLint = false,
         skipBuild = false,
         skipDeploy = false
     } = options
@@ -113,8 +113,8 @@ export function validateCliOptions(options = {}) {
             throw new InvalidCliOptionsError('--maintenance is only valid for app deployments.')
         }
     } else {
-        if (skipTests || skipLint || skipBuild || skipDeploy) {
-            throw new InvalidCliOptionsError('Release-only skip flags are not valid for app deployments.')
+        if (skipBuild || skipDeploy) {
+            throw new InvalidCliOptionsError('--skip-build and --skip-deploy are only valid for node/vue release workflows.')
         }
 
         if (nonInteractive && !presetName) {
