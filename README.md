@@ -40,8 +40,11 @@ Common workflows:
 # Deploy an app using the saved preset or the interactive prompts
 zephyr
 
-# Deploy an app and bump the local npm package version first
+# Deploy an app with a local npm package version bump
 zephyr minor
+
+# Deploy an app while bypassing Zephyr's built-in local checks
+zephyr minor --skip-checks
 
 # Deploy a configured app non-interactively
 zephyr --non-interactive --preset wyxos-release --maintenance off
@@ -155,6 +158,8 @@ npm run release
 - `npm run release` is the recommended app/package entrypoint once the release script has been installed.
 - For `--type node` workflows, Zephyr runs your project's `lint` script when present.
 - For `--type node` workflows, Zephyr runs `test:run` or `test` when present.
+- For fresh Laravel app deploys, Zephyr runs local lint/test checks before creating the version-bump commit so failed checks do not force repeated bump retries.
+- For critical app deploys, `--skip-checks` is shorthand for `--skip-lint --skip-tests`. It skips Zephyr's built-in local checks, but any local `pre-push` hook can still run its own checks during git push unless you also opt into `--skip-git-hooks`.
 - For non-interactive app deploys, use a saved preset name instead of relying on prompt fallback.
 
 ## Features

@@ -25,6 +25,9 @@ export function createAppContext({
         presetName: executionMode.presetName ?? null,
         maintenanceMode: executionMode.maintenanceMode ?? null,
         skipGitHooks: executionMode.skipGitHooks === true,
+        skipChecks: executionMode.skipChecks === true,
+        skipTests: executionMode.skipTests === true || executionMode.skipChecks === true,
+        skipLint: executionMode.skipLint === true || executionMode.skipChecks === true,
         resumePending: executionMode.resumePending === true,
         discardPending: executionMode.discardPending === true
     }

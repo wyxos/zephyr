@@ -33,6 +33,7 @@ const {
             workflow: 'deploy',
             presetName: null,
             maintenanceMode: null,
+            skipChecks: false,
             skipGitHooks: false,
             resumePending: false,
             discardPending: false
@@ -143,6 +144,7 @@ describe('main entrypoint', () => {
             workflow: 'deploy',
             presetName: null,
             maintenanceMode: null,
+            skipChecks: false,
             skipGitHooks: false,
             resumePending: false,
             discardPending: false
@@ -169,6 +171,20 @@ describe('main entrypoint', () => {
             status: 'success',
             workflow: 'deploy',
             rootDir: process.cwd()
+        }))
+    })
+
+    it('treats skip-checks as shorthand for release lint and test skips', async () => {
+        const {main} = await import('#src/main.mjs')
+
+        await main({
+            workflowType: 'node',
+            skipChecks: true
+        })
+
+        expect(mockReleaseNode).toHaveBeenCalledWith(expect.objectContaining({
+            skipLint: true,
+            skipTests: true
         }))
     })
 
@@ -271,6 +287,7 @@ describe('main entrypoint', () => {
             workflow: 'deploy',
             presetName: 'production',
             maintenanceMode: false,
+            skipChecks: false,
             skipGitHooks: false,
             resumePending: false,
             discardPending: false
@@ -305,6 +322,7 @@ describe('main entrypoint', () => {
             workflow: 'release-packagist',
             presetName: null,
             maintenanceMode: null,
+            skipChecks: false,
             skipGitHooks: false,
             resumePending: false,
             discardPending: false

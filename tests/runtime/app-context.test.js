@@ -72,4 +72,18 @@ describe('runtime/app-context', () => {
             stdio: ['ignore', process.stderr, process.stderr]
         })
     })
+
+    it('treats skip-checks as shorthand for skip-lint and skip-tests in execution mode', () => {
+        const context = createAppContext({
+            executionMode: {
+                skipChecks: true
+            }
+        })
+
+        expect(context.executionMode).toEqual(expect.objectContaining({
+            skipChecks: true,
+            skipLint: true,
+            skipTests: true
+        }))
+    })
 })
