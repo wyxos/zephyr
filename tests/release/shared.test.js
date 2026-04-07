@@ -211,19 +211,7 @@ describe('release shared helpers', () => {
 
     it('asks Codex for a suggested conventional commit message when available', async () => {
         mockCommandExists.mockReturnValue(true)
-        const runCommand = vi.fn(async (command, args) => {
-            if (command === 'git' && args[0] === 'diff' && args.includes('--unified=0')) {
-                return {
-                    stdout: [
-                        'diff --git a/src/release/shared.mjs b/src/release/shared.mjs',
-                        '@@ -180 +180 @@',
-                        '-                default: \'chore: improve release workflow\'',
-                        '+                default: \'chore: update release handling\''
-                    ].join('\n'),
-                    stderr: ''
-                }
-            }
-
+        const runCommand = vi.fn(async (_command, args) => {
             const outputPath = args[args.indexOf('--output-last-message') + 1]
             await writeFile(outputPath, 'fix: prompt for dirty deploy changes before version bump\n')
             return {stdout: '', stderr: ''}
@@ -254,12 +242,11 @@ describe('release shared helpers', () => {
             cwd: '/workspace/demo'
         })
         const codexCall = runCommand.mock.calls.find(([command]) => command === 'codex')
-        expect(codexCall?.[1].at(-1)).toContain('modified: src/release/shared.mjs')
-        expect(codexCall?.[1].at(-1)).toContain('untracked: tests/release/shared.test.js')
-        expect(codexCall?.[1].at(-1)).toContain('Diff excerpt:')
-        expect(codexCall?.[1].at(-1)).toContain('+                default: \'chore: update release handling\'')
-        expect(codexCall?.[1].at(-1)).toContain('Avoid generic nouns like "workflow"')
-        expect(codexCall?.[1].at(-1)).toContain('Do not describe the commit itself')
+        expect(codexCall?.[1].at(-1)).toContain('Inspect the current repository and pending git changes yourself before answering.')
+        expect(codexCall?.[1].at(-1)).toContain('Run whatever read-only commands you need')
+        expect(codexCall?.[1].at(-1)).toContain('Do not use scopes like "fix(scope): ...".')
+        expect(codexCall?.[1].at(-1)).toContain('Keep it to one line if possible.')
+        expect(codexCall?.[1].at(-1)).toContain('Reply with only the commit message and no extra text.')
         expect(logStep).toHaveBeenCalledWith('Generating a suggested commit message with Codex...')
         expect(logWarning).not.toHaveBeenCalled()
     })
