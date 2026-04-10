@@ -106,11 +106,45 @@ describe('selectDeploymentTarget', () => {
       {
         name: 'Production',
         appId: 'app-1',
-        branch: 'main'
+        branch: 'main',
+        options: {
+          maintenanceMode: null,
+          skipGitHooks: false,
+          skipTests: false,
+          skipLint: false,
+          skipVersioning: false,
+          autoCommit: false
+        }
       }
     ])
     expect(mockSaveProjectConfig).toHaveBeenCalledWith('/workspace/project', projectConfig)
     expect(logSuccess).toHaveBeenCalledWith('Saved preset "Production" to .zephyr/config.json')
+  })
+
+  it('stores preset auto-commit as enabled when the save prompt is non-blank', async () => {
+    const { projectConfig, server, configurationService } = createSelectionScenario()
+
+    mockLoadServers.mockResolvedValue([server])
+    mockLoadProjectConfig.mockResolvedValue(projectConfig)
+
+    const runPrompt = vi.fn()
+      .mockResolvedValueOnce({ presetName: 'Production' })
+      .mockResolvedValueOnce({ autoCommitPreference: 'yes' })
+
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
+
+    await selectDeploymentTarget('/workspace/project', {
+      configurationService,
+      runPrompt,
+      logProcessing: vi.fn(),
+      logSuccess: vi.fn(),
+      logWarning: vi.fn(),
+      executionMode: {
+        interactive: true
+      }
+    })
+
+    expect(projectConfig.presets[0].options.autoCommit).toBe(true)
   })
 
   it('removes an invalid preset before creating a replacement configuration', async () => {
@@ -272,7 +306,7 @@ describe('selectDeploymentTarget', () => {
         presetName: 'Legacy preset'
       }
     })).rejects.toMatchObject({
-      code: 'ZEPHYR_PRESET_REPAIR_REQUIRED'
+      code: 'ZEPHYR_PRESET_INVALID'
     })
   })
 })

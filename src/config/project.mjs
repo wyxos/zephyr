@@ -1,6 +1,10 @@
 import fs from 'node:fs/promises'
 
 import {ZephyrError} from '../runtime/errors.mjs'
+import {
+  normalizePresetOptions,
+  presetOptionsEqual
+} from './preset-options.mjs'
 import { ensureDirectory, getProjectConfigDir, getProjectConfigPath } from '../utils/paths.mjs'
 import { generateId } from '../utils/id.mjs'
 
@@ -44,27 +48,58 @@ export function migratePresets(presets, apps) {
     return { presets: [], needsMigration: false }
   }
 
-  const keyToAppId = new Map()
+  const appLookup = new Map()
   apps.forEach((app) => {
     if (app.id && app.serverName && app.projectPath) {
       const key = `${app.serverName}:${app.projectPath}`
-      keyToAppId.set(key, app.id)
+      appLookup.set(key, app)
     }
   })
 
   let needsMigration = false
-  const migrated = presets.map((preset) => {
-    const updated = { ...preset }
+  const migrated = presets.flatMap((preset) => {
+    if (!preset || typeof preset !== 'object') {
+      needsMigration = true
+      return []
+    }
 
-    if (preset.key && !preset.appId) {
-      const appId = keyToAppId.get(preset.key)
-      if (appId) {
-        needsMigration = true
-        updated.appId = appId
+    const updated = {
+      name: typeof preset.name === 'string' ? preset.name : '',
+      appId: typeof preset.appId === 'string' ? preset.appId : null,
+      branch: typeof preset.branch === 'string' ? preset.branch : null,
+      options: normalizePresetOptions(preset.options)
+    }
+
+    if (!presetOptionsEqual(updated.options, preset.options)) {
+      needsMigration = true
+    }
+
+    if (preset.key) {
+      needsMigration = true
+      const [serverName = null, projectPath = null, legacyBranch = null] = String(preset.key).split(':')
+      const app = serverName && projectPath
+        ? appLookup.get(`${serverName}:${projectPath}`)
+        : null
+
+      if (app?.id) {
+        updated.appId = app.id
+      }
+
+      if (!updated.branch && legacyBranch) {
+        updated.branch = legacyBranch
       }
     }
 
-    return updated
+    if (!updated.name) {
+      needsMigration = true
+      return []
+    }
+
+    if (!preset.appId || preset.key || preset.branch !== updated.branch) {
+      needsMigration = true
+    }
+
+    return [updated]
   })
 
   return { presets: migrated, needsMigration }

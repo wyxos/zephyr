@@ -9,6 +9,7 @@ function hasExplicitReleaseOptions(options = {}) {
         'skipGitHooks',
         'skipTests',
         'skipLint',
+        'skipVersioning',
         'skipBuild',
         'skipDeploy'
     ].some((key) => key in options)
@@ -21,12 +22,17 @@ export async function releaseNode(options = {}) {
             skipGitHooks: options.skipGitHooks === true,
             skipTests: options.skipTests === true,
             skipLint: options.skipLint === true,
+            skipVersioning: options.skipVersioning === true,
             skipBuild: options.skipBuild === true,
             skipDeploy: options.skipDeploy === true
         }
         : parseReleaseArgs({
-            booleanFlags: ['--skip-git-hooks', '--skip-tests', '--skip-lint', '--skip-build', '--skip-deploy']
+            booleanFlags: ['--skip-git-hooks', '--skip-tests', '--skip-lint', '--skip-versioning', '--skip-build', '--skip-deploy']
         })
+
+    if (parsed.skipVersioning && parsed.releaseType) {
+        throw new Error('--skip-versioning cannot be used together with an explicit version or bump argument.')
+    }
     const rootDir = options.rootDir ?? process.cwd()
     const context = options.context ?? createAppContext({
         executionMode: {
@@ -42,6 +48,7 @@ export async function releaseNode(options = {}) {
         skipGitHooks: parsed.skipGitHooks === true || executionMode?.skipGitHooks === true,
         skipTests: parsed.skipTests === true,
         skipLint: parsed.skipLint === true,
+        skipVersioning: parsed.skipVersioning === true,
         skipBuild: parsed.skipBuild === true,
         skipDeploy: parsed.skipDeploy === true,
         rootDir,

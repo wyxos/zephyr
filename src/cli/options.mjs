@@ -5,6 +5,11 @@ import {Command} from 'commander'
 import {InvalidCliOptionsError} from '../runtime/errors.mjs'
 
 const WORKFLOW_TYPES = new Set(['node', 'vue', 'packagist'])
+
+function hasFlag(args = [], flag) {
+    return args.some((arg) => arg === flag || arg.startsWith(`${flag}=`))
+}
+
 function normalizeMaintenanceMode(value) {
     if (value == null) {
         return null
@@ -35,6 +40,8 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .option('--resume-pending', 'Resume a saved pending deployment snapshot without prompting.')
         .option('--discard-pending', 'Discard a saved pending deployment snapshot without prompting.')
         .option('--maintenance <mode>', 'Laravel maintenance mode policy for app deployments (on|off).')
+        .option('--auto-commit', 'Automatically commit dirty deploy changes with a Codex-generated message.')
+        .option('--skip-versioning', 'Skip updating package/composer version files before continuing.')
         .option('--skip-git-hooks', 'Bypass local git hooks for any commits and pushes Zephyr performs.')
         .option('--skip-checks', 'Skip Zephyr local lint and test execution.')
         .option('--skip-tests', 'Skip Zephyr local test execution in package release and app deployment workflows.')
@@ -54,6 +61,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
 
     const options = program.opts()
     const workflowType = options.type ?? null
+    const explicitSkipChecks = hasFlag(args, '--skip-checks')
 
     if (workflowType && !WORKFLOW_TYPES.has(workflowType)) {
         throw new InvalidCliOptionsError('Invalid value for --type. Use one of: node, vue, packagist.')
@@ -68,12 +76,21 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         resumePending: Boolean(options.resumePending),
         discardPending: Boolean(options.discardPending),
         maintenanceMode: normalizeMaintenanceMode(options.maintenance),
+        autoCommit: Boolean(options.autoCommit),
+        skipVersioning: Boolean(options.skipVersioning),
         skipGitHooks: Boolean(options.skipGitHooks),
         skipChecks: Boolean(options.skipChecks),
         skipTests: Boolean(options.skipTests || options.skipChecks),
         skipLint: Boolean(options.skipLint || options.skipChecks),
         skipBuild: Boolean(options.skipBuild),
-        skipDeploy: Boolean(options.skipDeploy)
+        skipDeploy: Boolean(options.skipDeploy),
+        explicitMaintenanceMode: hasFlag(args, '--maintenance'),
+        explicitAutoCommit: hasFlag(args, '--auto-commit'),
+        explicitSkipVersioning: hasFlag(args, '--skip-versioning'),
+        explicitSkipGitHooks: hasFlag(args, '--skip-git-hooks'),
+        explicitSkipChecks,
+        explicitSkipTests: hasFlag(args, '--skip-tests') || explicitSkipChecks,
+        explicitSkipLint: hasFlag(args, '--skip-lint') || explicitSkipChecks
     }
 }
 
@@ -86,6 +103,8 @@ export function validateCliOptions(options = {}) {
         resumePending = false,
         discardPending = false,
         maintenanceMode = null,
+        autoCommit = false,
+        skipVersioning = false,
         skipBuild = false,
         skipDeploy = false
     } = options
@@ -112,6 +131,10 @@ export function validateCliOptions(options = {}) {
         if (maintenanceMode !== null) {
             throw new InvalidCliOptionsError('--maintenance is only valid for app deployments.')
         }
+
+        if (autoCommit) {
+            throw new InvalidCliOptionsError('--auto-commit is only valid for app deployments.')
+        }
     } else {
         if (skipBuild || skipDeploy) {
             throw new InvalidCliOptionsError('--skip-build and --skip-deploy are only valid for node/vue release workflows.')
@@ -120,5 +143,9 @@ export function validateCliOptions(options = {}) {
         if (nonInteractive && !presetName) {
             throw new InvalidCliOptionsError('--non-interactive app deployments require --preset <name>.')
         }
+    }
+
+    if (skipVersioning && options.versionArg) {
+        throw new InvalidCliOptionsError('--skip-versioning cannot be used together with an explicit version or bump argument.')
     }
 }

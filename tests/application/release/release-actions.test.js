@@ -244,6 +244,86 @@ describe('release application actions', () => {
         expect(commandLog.map(({command, args}) => [command, ...args])).toContainEqual(['npm', 'version', 'minor'])
     })
 
+    it('can release the current package version without mutating package.json', async () => {
+        await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+            name: '@wyxos/zephyr-test',
+            version: '1.0.0'
+        }, null, 2) + '\n')
+
+        const commandLog = []
+
+        mockRunReleaseCommand.mockImplementation(async (command, args, options = {}) => {
+            commandLog.push({command, args, options})
+
+            if (command === 'git' && args[0] === 'status') {
+                return {stdout: '', stderr: ''}
+            }
+
+            if (command === 'git' && args[0] === 'tag' && args[1] === '-l') {
+                return {stdout: '', stderr: ''}
+            }
+
+            return options.capture ? {stdout: '', stderr: ''} : undefined
+        })
+
+        const logWarning = vi.fn()
+
+        await releaseNodePackage({
+            skipVersioning: true,
+            skipTests: true,
+            skipLint: true,
+            skipBuild: true,
+            skipDeploy: true,
+            rootDir,
+            logStep: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning
+        })
+
+        expect(mockResolveReleaseType).not.toHaveBeenCalled()
+        expect(commandLog.map(({command, args}) => [command, ...args])).toEqual([
+            ['git', 'tag', '-l', 'v1.0.0'],
+            ['git', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'],
+            ['git', 'push', '--follow-tags']
+        ])
+        expect(logWarning).toHaveBeenCalledWith(
+            'Skipping package.json version update because --skip-versioning flag was provided. Releasing current version 1.0.0.'
+        )
+    })
+
+    it('fails node skip-versioning when the target release tag already exists', async () => {
+        await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+            name: '@wyxos/zephyr-test',
+            version: '1.0.0'
+        }, null, 2) + '\n')
+
+        mockRunReleaseCommand.mockImplementation(async (command, args, options = {}) => {
+            if (command === 'git' && args[0] === 'status') {
+                return {stdout: '', stderr: ''}
+            }
+
+            if (command === 'git' && args[0] === 'tag' && args[1] === '-l') {
+                return {stdout: 'v1.0.0\n', stderr: ''}
+            }
+
+            return options.capture ? {stdout: '', stderr: ''} : undefined
+        })
+
+        await expect(releaseNodePackage({
+            skipVersioning: true,
+            skipTests: true,
+            skipLint: true,
+            skipBuild: true,
+            skipDeploy: true,
+            rootDir,
+            logStep: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })).rejects.toThrow(
+            'Release tag v1.0.0 already exists. Remove the existing tag or update package.json before using --skip-versioning.'
+        )
+    })
+
     it('handles lib artifacts and GitHub Pages deployment in the node release action', async () => {
         await mkdir(join(rootDir, 'dist'), {recursive: true})
         await mkdir(join(rootDir, 'lib'), {recursive: true})
@@ -381,6 +461,65 @@ describe('release application actions', () => {
         ]))
 
         expect(commandLog.some(({command, args}) => command === 'composer' && args[0] === 'test')).toBe(false)
+    })
+
+    it('can release the current composer version without mutating composer.json', async () => {
+        await writeFile(join(rootDir, 'composer.json'), JSON.stringify({
+            name: 'wyxos/test-package',
+            version: '1.0.0'
+        }, null, 2) + '\n')
+
+        const commandLog = []
+
+        mockRunReleaseCommand.mockImplementation(async (command, args, options = {}) => {
+            commandLog.push({command, args, options})
+
+            if (command === 'git' && args[0] === 'tag' && args[1] === '-l') {
+                return {stdout: '', stderr: ''}
+            }
+
+            return options.capture ? {stdout: '', stderr: ''} : undefined
+        })
+
+        const logWarning = vi.fn()
+
+        await releasePackagistPackage({
+            skipVersioning: true,
+            skipTests: true,
+            skipLint: true,
+            rootDir,
+            logStep: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning
+        })
+
+        expect(mockResolveReleaseType).not.toHaveBeenCalled()
+        expect(commandLog.map(({command, args}) => [command, ...args])).toEqual([
+            ['git', 'tag', '-l', 'v1.0.0'],
+            ['git', 'tag', 'v1.0.0'],
+            ['git', 'push'],
+            ['git', 'push', 'origin', '--tags']
+        ])
+        expect(logWarning).toHaveBeenCalledWith(
+            'Skipping composer.json version update because --skip-versioning flag was provided. Releasing current version 1.0.0.'
+        )
+    })
+
+    it('fails packagist skip-versioning when composer.json uses an invalid version', async () => {
+        await writeFile(join(rootDir, 'composer.json'), JSON.stringify({
+            name: 'wyxos/test-package',
+            version: 'banana'
+        }, null, 2) + '\n')
+
+        await expect(releasePackagistPackage({
+            skipVersioning: true,
+            skipTests: true,
+            skipLint: true,
+            rootDir,
+            logStep: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })).rejects.toThrow('Invalid current version "banana" in composer.json. Must be a valid semver.')
     })
 
     it('passes non-interactive dependency validation through the node release workflow', async () => {

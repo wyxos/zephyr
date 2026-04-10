@@ -8,7 +8,8 @@ function hasExplicitReleaseOptions(options = {}) {
         'releaseType',
         'skipGitHooks',
         'skipTests',
-        'skipLint'
+        'skipLint',
+        'skipVersioning'
     ].some((key) => key in options)
 }
 
@@ -18,11 +19,16 @@ export async function releasePackagist(options = {}) {
             releaseType: 'releaseType' in options ? (options.releaseType ?? null) : null,
             skipGitHooks: options.skipGitHooks === true,
             skipTests: options.skipTests === true,
-            skipLint: options.skipLint === true
+            skipLint: options.skipLint === true,
+            skipVersioning: options.skipVersioning === true
         }
         : parseReleaseArgs({
-            booleanFlags: ['--skip-git-hooks', '--skip-tests', '--skip-lint']
+            booleanFlags: ['--skip-git-hooks', '--skip-tests', '--skip-lint', '--skip-versioning']
         })
+
+    if (parsed.skipVersioning && parsed.releaseType) {
+        throw new Error('--skip-versioning cannot be used together with an explicit version or bump argument.')
+    }
     const rootDir = options.rootDir ?? process.cwd()
     const context = options.context ?? createAppContext({
         executionMode: {
@@ -38,6 +44,7 @@ export async function releasePackagist(options = {}) {
         skipGitHooks: parsed.skipGitHooks === true || executionMode?.skipGitHooks === true,
         skipTests: parsed.skipTests === true,
         skipLint: parsed.skipLint === true,
+        skipVersioning: parsed.skipVersioning === true,
         rootDir,
         logStep,
         logSuccess,

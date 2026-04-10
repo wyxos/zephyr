@@ -12,6 +12,8 @@ export async function prepareLocalDeployment(config, {
     skipGitHooks = false,
     skipTests = false,
     skipLint = false,
+    skipVersioning = false,
+    autoCommit = false,
     runPrompt,
     runCommand,
     runCommandCapture,
@@ -26,7 +28,8 @@ export async function prepareLocalDeployment(config, {
         logProcessing,
         logSuccess,
         logWarning,
-        skipGitHooks
+        skipGitHooks,
+        autoCommit
     })
 
     const context = await resolveLocalDeploymentContext(rootDir)
@@ -56,14 +59,18 @@ export async function prepareLocalDeployment(config, {
             testCommand: checkSupport.testCommand
         })
 
-        await bumpLocalPackageVersion(rootDir, {
-            versionArg,
-            skipGitHooks,
-            runCommand,
-            logProcessing,
-            logSuccess,
-            logWarning
-        })
+        if (skipVersioning) {
+            logWarning?.('Skipping deployment version update because --skip-versioning flag was provided.')
+        } else {
+            await bumpLocalPackageVersion(rootDir, {
+                versionArg,
+                skipGitHooks,
+                runCommand,
+                logProcessing,
+                logSuccess,
+                logWarning
+            })
+        }
 
         await ensureCommittedChangesPushed(config.branch, rootDir, {
             runCommand,

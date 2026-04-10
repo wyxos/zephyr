@@ -251,6 +251,85 @@ describe('deploy/local-repo', () => {
         ).toBe(true)
     })
 
+    it('can auto-commit dirty deploy changes without prompting for a message', async () => {
+        queueSpawnResponse({stdout: 'main\n'})
+        queueSpawnResponse({stdout: ' M file.php\n'})
+        queueSpawnResponse({stdout: ' M file.php\n'})
+        queueSpawnResponse({})
+        queueSpawnResponse({})
+        queueSpawnResponse({})
+        queueSpawnResponse({stdout: ''})
+
+        const suggestCommitMessage = vi.fn().mockResolvedValue('fix: align deployment dirty tree handling')
+
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
+        const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
+
+        await ensureLocalRepositoryState('main', process.cwd(), {
+            runPrompt: mockPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing: () => {
+            },
+            logSuccess: () => {
+            },
+            logWarning: () => {
+            },
+            autoCommit: true,
+            readUpstreamSyncState: async () => ({
+                upstreamRef: 'origin/main',
+                remoteName: 'origin',
+                upstreamBranch: 'main',
+                remoteExists: true,
+                aheadCount: 0,
+                behindCount: 0
+            }),
+            suggestCommitMessage
+        })
+
+        expect(mockPrompt).not.toHaveBeenCalled()
+        expect(
+            mockSpawn.mock.calls.some(
+                ([command, args]) => command === 'git' && args[0] === 'commit' && args.includes('fix: align deployment dirty tree handling')
+            )
+        ).toBe(true)
+    })
+
+    it('fails auto-commit mode when Codex cannot determine a usable message', async () => {
+        queueSpawnResponse({stdout: 'main\n'})
+        queueSpawnResponse({stdout: ' M file.php\n'})
+        queueSpawnResponse({stdout: ' M file.php\n'})
+
+        const {ensureLocalRepositoryState} = await import('#src/deploy/local-repo.mjs')
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
+        const {runCommand, runCommandCapture} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
+
+        await expect(ensureLocalRepositoryState('main', process.cwd(), {
+            runPrompt: mockPrompt,
+            runCommand,
+            runCommandCapture,
+            logProcessing: () => {
+            },
+            logSuccess: () => {
+            },
+            logWarning: () => {
+            },
+            autoCommit: true,
+            readUpstreamSyncState: async () => ({
+                upstreamRef: 'origin/main',
+                remoteName: 'origin',
+                upstreamBranch: 'main',
+                remoteExists: true,
+                aheadCount: 0,
+                behindCount: 0
+            }),
+            suggestCommitMessage: vi.fn().mockResolvedValue(null)
+        })).rejects.toThrow('Deployment auto-commit failed because Codex could not determine a usable commit message.')
+    })
+
     it('cancels deployment commit flow when the message is left blank', async () => {
         queueSpawnResponse({stdout: 'main\n'})
         queueSpawnResponse({stdout: ' M file.php\n'})

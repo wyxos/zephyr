@@ -24,12 +24,21 @@ export function createAppContext({
         workflow: executionMode.workflow ?? 'deploy',
         presetName: executionMode.presetName ?? null,
         maintenanceMode: executionMode.maintenanceMode ?? null,
+        autoCommit: executionMode.autoCommit === true,
+        skipVersioning: executionMode.skipVersioning === true,
         skipGitHooks: executionMode.skipGitHooks === true,
         skipChecks: executionMode.skipChecks === true,
         skipTests: executionMode.skipTests === true || executionMode.skipChecks === true,
         skipLint: executionMode.skipLint === true || executionMode.skipChecks === true,
         resumePending: executionMode.resumePending === true,
-        discardPending: executionMode.discardPending === true
+        discardPending: executionMode.discardPending === true,
+        explicitMaintenanceMode: executionMode.explicitMaintenanceMode === true,
+        explicitAutoCommit: executionMode.explicitAutoCommit === true,
+        explicitSkipVersioning: executionMode.explicitSkipVersioning === true,
+        explicitSkipGitHooks: executionMode.explicitSkipGitHooks === true,
+        explicitSkipChecks: executionMode.explicitSkipChecks === true,
+        explicitSkipTests: executionMode.explicitSkipTests === true || executionMode.explicitSkipChecks === true,
+        explicitSkipLint: executionMode.explicitSkipLint === true || executionMode.explicitSkipChecks === true
     }
     const emitEvent = normalizedExecutionMode.json
         ? createJsonEventEmitter({workflow: normalizedExecutionMode.workflow})

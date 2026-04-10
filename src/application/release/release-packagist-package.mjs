@@ -20,6 +20,30 @@ async function readComposer(rootDir = process.cwd()) {
     return JSON.parse(raw)
 }
 
+async function ensureReleaseTagMissing(version, rootDir = process.cwd(), {
+    runCommand = runReleaseCommand
+} = {}) {
+    const tagName = `v${version}`
+    const {stdout} = await runCommand('git', ['tag', '-l', tagName], {capture: true, cwd: rootDir})
+
+    if (stdout.trim() === tagName) {
+        throw new Error(
+            `Release tag ${tagName} already exists. Remove the existing tag or update composer.json before using --skip-versioning.`
+        )
+    }
+
+    return tagName
+}
+
+async function createReleaseTag(version, rootDir = process.cwd(), {
+    logStep,
+    runCommand = runReleaseCommand
+} = {}) {
+    const tagName = `v${version}`
+    logStep?.(`Creating git tag ${tagName}...`)
+    await runCommand('git', ['tag', tagName], {cwd: rootDir})
+}
+
 async function writeComposer(rootDir, composer, composerPath = null) {
     const pathToUse = composerPath || join(rootDir, 'composer.json')
     const content = JSON.stringify(composer, null, 2) + '\n'
@@ -218,6 +242,7 @@ export async function releasePackagistPackage({
                                                   skipGitHooks = false,
                                                   skipTests = false,
                                                   skipLint = false,
+                                                  skipVersioning = false,
                                                   rootDir = process.cwd(),
                                                   logStep,
                                                   logSuccess,
@@ -241,6 +266,10 @@ export async function releasePackagistPackage({
         throw new Error('composer.json does not have a version field. Add "version": "0.0.0" to composer.json.')
     }
 
+    if (skipVersioning && !semver.valid(composer.version)) {
+        throw new Error(`Invalid current version "${composer.version}" in composer.json. Must be a valid semver.`)
+    }
+
     logStep?.('Validating dependencies...')
     await validateReleaseDependencies(rootDir, {
         prompt: runPrompt,
@@ -260,22 +289,37 @@ export async function releasePackagistPackage({
         skipGitHooks
     })
     await ensureReleaseBranchReady({rootDir, branchMethod: 'show-current', logStep, logWarning})
-    const resolvedReleaseType = await resolveReleaseType({
-        releaseType,
-        currentVersion: composer.version,
-        packageName: composer.name,
-        rootDir,
-        interactive,
-        runPrompt,
-        runCommand,
-        logStep,
-        logWarning
-    })
+
+    if (skipVersioning) {
+        await ensureReleaseTagMissing(composer.version, rootDir, {runCommand})
+        logWarning?.(
+            `Skipping composer.json version update because --skip-versioning flag was provided. Releasing current version ${composer.version}.`
+        )
+    }
+
+    const resolvedReleaseType = skipVersioning
+        ? null
+        : await resolveReleaseType({
+            releaseType,
+            currentVersion: composer.version,
+            packageName: composer.name,
+            rootDir,
+            interactive,
+            runPrompt,
+            runCommand,
+            logStep,
+            logWarning
+        })
 
     await runLint(skipLint, rootDir, {logStep, logSuccess, logWarning, runCommand, progressWriter})
     await runTests(skipTests, composer, rootDir, {logStep, logSuccess, logWarning, runCommand, progressWriter})
 
-    const updatedComposer = await bumpVersion(resolvedReleaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
+    const updatedComposer = skipVersioning
+        ? {...composer}
+        : await bumpVersion(resolvedReleaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
+    if (skipVersioning) {
+        await createReleaseTag(updatedComposer.version, rootDir, {logStep, runCommand})
+    }
     await pushChanges(rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
 
     logSuccess?.(`Release workflow completed for ${composer.name}@${updatedComposer.version}.`)

@@ -248,7 +248,8 @@ export async function runDeployment(config, options = {}) {
         snapshot = null,
         rootDir = process.cwd(),
         versionArg = null,
-        context
+        context,
+        presetState = null
     } = options
 
     const {
@@ -368,6 +369,8 @@ export async function runDeployment(config, options = {}) {
             skipGitHooks: executionMode?.skipGitHooks === true,
             skipTests: executionMode?.skipTests === true,
             skipLint: executionMode?.skipLint === true,
+            skipVersioning: executionMode?.skipVersioning === true,
+            autoCommit: executionMode?.autoCommit === true,
             runPrompt,
             runCommand,
             runCommandCapture: context.runCommandCapture,
@@ -412,6 +415,7 @@ export async function runDeployment(config, options = {}) {
             rootDir,
             requiredPhpVersion,
             executionMode,
+            persistPresetOptions: presetState?.saveOptions,
             remoteIsLaravel: remoteState?.remoteIsLaravel,
             maintenanceModeEnabled: remoteState?.maintenanceModeEnabled,
             ssh,

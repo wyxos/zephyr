@@ -16,10 +16,17 @@ describe('config/project', () => {
         teardownRuntimeTestEnv()
     })
 
-    it('loads presets from project config', async () => {
+    it('migrates legacy presets into the canonical preset format', async () => {
         mockReadFile.mockResolvedValueOnce(
             JSON.stringify({
-                apps: [],
+                apps: [
+                    {
+                        id: 'app-1',
+                        serverName: 'prod-server',
+                        projectPath: '~/webapps/app',
+                        branch: 'main'
+                    }
+                ],
                 presets: [
                     {
                         name: 'production',
@@ -35,11 +42,19 @@ describe('config/project', () => {
 
         expect(config.presets).toHaveLength(1)
         expect(config.presets[0].name).toBe('production')
-        expect(config.presets[0].key).toBe('prod-server:~/webapps/app')
+        expect(config.presets[0].appId).toBe('app-1')
         expect(config.presets[0].branch).toBe('main')
+        expect(config.presets[0].options).toEqual({
+            maintenanceMode: null,
+            skipGitHooks: false,
+            skipTests: false,
+            skipLint: false,
+            skipVersioning: false,
+            autoCommit: false
+        })
     })
 
-    it('saves presets to project config with unique key', async () => {
+    it('saves presets to project config with canonical options', async () => {
         mockReadFile.mockResolvedValueOnce(
             JSON.stringify({
                 apps: [],
@@ -51,8 +66,16 @@ describe('config/project', () => {
         const config = await loadProjectConfig(process.cwd())
         config.presets.push({
             name: 'staging',
-            key: 'staging-server:~/webapps/staging',
-            branch: 'develop'
+            appId: 'app-1',
+            branch: 'develop',
+            options: {
+                maintenanceMode: true,
+                skipGitHooks: true,
+                skipTests: false,
+                skipLint: true,
+                skipVersioning: false,
+                autoCommit: true
+            }
         })
 
         await saveProjectConfig(process.cwd(), config)
@@ -62,10 +85,16 @@ describe('config/project', () => {
         const saved = JSON.parse(payload)
         expect(saved.presets).toHaveLength(1)
         expect(saved.presets[0].name).toBe('staging')
-        expect(saved.presets[0].key).toBe('staging-server:~/webapps/staging')
+        expect(saved.presets[0].appId).toBe('app-1')
         expect(saved.presets[0].branch).toBe('develop')
-        expect(saved.presets[0].serverName).toBeUndefined()
-        expect(saved.presets[0].projectPath).toBeUndefined()
+        expect(saved.presets[0].options).toEqual({
+            maintenanceMode: true,
+            skipGitHooks: true,
+            skipTests: false,
+            skipLint: true,
+            skipVersioning: false,
+            autoCommit: true
+        })
     })
 
     it('removes a preset from project config when requested', async () => {

@@ -11,6 +11,7 @@ import * as bootstrap from './project/bootstrap.mjs'
 import {getErrorCode, ZephyrError} from './runtime/errors.mjs'
 import {PROJECT_CONFIG_DIR} from './utils/paths.mjs'
 import {writeStderrLine} from './utils/output.mjs'
+import {mergeDeployOptions} from './config/preset-options.mjs'
 import {createAppContext} from './runtime/app-context.mjs'
 import {createConfigurationService} from './application/configuration/service.mjs'
 import {selectDeploymentTarget} from './application/configuration/select-deployment-target.mjs'
@@ -35,12 +36,21 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
             resumePending: firstArg.resumePending === true,
             discardPending: firstArg.discardPending === true,
             maintenanceMode: firstArg.maintenanceMode ?? null,
+            autoCommit: firstArg.autoCommit === true,
+            skipVersioning: firstArg.skipVersioning === true,
             skipGitHooks: firstArg.skipGitHooks === true,
             skipChecks: firstArg.skipChecks === true,
             skipTests: firstArg.skipTests === true || firstArg.skipChecks === true,
             skipLint: firstArg.skipLint === true || firstArg.skipChecks === true,
             skipBuild: firstArg.skipBuild === true,
             skipDeploy: firstArg.skipDeploy === true,
+            explicitMaintenanceMode: firstArg.explicitMaintenanceMode === true || 'maintenanceMode' in firstArg,
+            explicitAutoCommit: firstArg.explicitAutoCommit === true || 'autoCommit' in firstArg,
+            explicitSkipVersioning: firstArg.explicitSkipVersioning === true || 'skipVersioning' in firstArg,
+            explicitSkipGitHooks: firstArg.explicitSkipGitHooks === true || 'skipGitHooks' in firstArg,
+            explicitSkipChecks: firstArg.explicitSkipChecks === true || 'skipChecks' in firstArg,
+            explicitSkipTests: firstArg.explicitSkipTests === true || 'skipTests' in firstArg || 'skipChecks' in firstArg,
+            explicitSkipLint: firstArg.explicitSkipLint === true || 'skipLint' in firstArg || 'skipChecks' in firstArg,
             context: firstArg.context ?? null
         }
     }
@@ -54,12 +64,21 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
         resumePending: false,
         discardPending: false,
         maintenanceMode: null,
+        autoCommit: false,
+        skipVersioning: false,
         skipGitHooks: false,
         skipChecks: false,
         skipTests: false,
         skipLint: false,
         skipBuild: false,
         skipDeploy: false,
+        explicitMaintenanceMode: false,
+        explicitAutoCommit: false,
+        explicitSkipVersioning: false,
+        explicitSkipGitHooks: false,
+        explicitSkipChecks: false,
+        explicitSkipTests: false,
+        explicitSkipLint: false,
         context: null
     }
 }
@@ -110,12 +129,21 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         workflow: resolveWorkflowName(options.workflowType),
         presetName: options.presetName,
         maintenanceMode: options.maintenanceMode,
+        autoCommit: options.autoCommit === true,
+        skipVersioning: options.skipVersioning === true,
         skipGitHooks: options.skipGitHooks === true,
         skipChecks: options.skipChecks === true,
         skipTests: options.skipTests === true,
         skipLint: options.skipLint === true,
         resumePending: options.resumePending,
-        discardPending: options.discardPending
+        discardPending: options.discardPending,
+        explicitMaintenanceMode: options.explicitMaintenanceMode === true,
+        explicitAutoCommit: options.explicitAutoCommit === true,
+        explicitSkipVersioning: options.explicitSkipVersioning === true,
+        explicitSkipGitHooks: options.explicitSkipGitHooks === true,
+        explicitSkipChecks: options.explicitSkipChecks === true,
+        explicitSkipTests: options.explicitSkipTests === true,
+        explicitSkipLint: options.explicitSkipLint === true
     }
     const appContext = options.context ?? createAppContext({executionMode})
     const {
@@ -127,7 +155,11 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         runCommand,
         emitEvent
     } = appContext
-    const currentExecutionMode = appContext.executionMode ?? executionMode
+    let currentExecutionMode = {
+        ...executionMode,
+        ...(appContext.executionMode ?? {})
+    }
+    appContext.executionMode = currentExecutionMode
     const configurationService = createConfigurationService(appContext)
 
     try {
@@ -142,6 +174,8 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                     nonInteractive: currentExecutionMode.interactive === false,
                     presetName: currentExecutionMode.presetName,
                     maintenanceMode: currentExecutionMode.maintenanceMode,
+                    autoCommit: currentExecutionMode.autoCommit === true,
+                    skipVersioning: currentExecutionMode.skipVersioning === true,
                     skipGitHooks: currentExecutionMode.skipGitHooks === true,
                     skipChecks: currentExecutionMode.skipChecks === true,
                     skipTests: currentExecutionMode.skipTests === true,
@@ -170,6 +204,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                 skipGitHooks: options.skipGitHooks,
                 skipTests: options.skipTests,
                 skipLint: options.skipLint,
+                skipVersioning: options.skipVersioning,
                 skipBuild: options.skipBuild,
                 skipDeploy: options.skipDeploy,
                 context: appContext
@@ -198,6 +233,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                 skipGitHooks: options.skipGitHooks,
                 skipTests: options.skipTests,
                 skipLint: options.skipLint,
+                skipVersioning: options.skipVersioning,
                 context: appContext
             })
             emitEvent?.('run_completed', {
@@ -249,7 +285,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             })
         }
 
-        const {deploymentConfig} = await selectDeploymentTarget(rootDir, {
+        const {deploymentConfig, presetState} = await selectDeploymentTarget(rootDir, {
             configurationService,
             runPrompt,
             logProcessing,
@@ -258,6 +294,19 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             emitEvent,
             executionMode: currentExecutionMode
         })
+
+        if (presetState) {
+            const effectiveDeployOptions = mergeDeployOptions(currentExecutionMode, presetState.options)
+            currentExecutionMode = {
+                ...currentExecutionMode,
+                presetName: presetState.name,
+                ...effectiveDeployOptions,
+                skipChecks: currentExecutionMode.skipChecks === true ||
+                    (effectiveDeployOptions.skipTests === true && effectiveDeployOptions.skipLint === true)
+            }
+            appContext.executionMode = currentExecutionMode
+            await presetState.applyExecutionMode(currentExecutionMode)
+        }
 
         const snapshotToUse = await resolvePendingSnapshot(rootDir, deploymentConfig, {
             runPrompt,
@@ -270,7 +319,8 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             rootDir,
             snapshot: snapshotToUse,
             versionArg: options.versionArg,
-            context: appContext
+            context: appContext,
+            presetState
         })
 
         emitEvent?.('run_completed', {

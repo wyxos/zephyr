@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import semver from 'semver'
 
 import {writeStderr} from '../../utils/output.mjs'
 import {
@@ -18,6 +19,44 @@ async function readPackage(rootDir = process.cwd()) {
     const packagePath = join(rootDir, 'package.json')
     const raw = await readFile(packagePath, 'utf8')
     return JSON.parse(raw)
+}
+
+function ensureValidPackageVersion(pkg) {
+    const version = pkg?.version
+
+    if (!version) {
+        throw new Error('package.json does not have a version field. Add a valid semver version before using --skip-versioning.')
+    }
+
+    if (!semver.valid(version)) {
+        throw new Error(`Invalid current version "${version}" in package.json. Must be a valid semver.`)
+    }
+
+    return version
+}
+
+async function ensureReleaseTagMissing(version, rootDir = process.cwd(), {
+    runCommand = runReleaseCommand
+} = {}) {
+    const tagName = `v${version}`
+    const {stdout} = await runCommand('git', ['tag', '-l', tagName], {capture: true, cwd: rootDir})
+
+    if (stdout.trim() === tagName) {
+        throw new Error(
+            `Release tag ${tagName} already exists. Remove the existing tag or update package.json before using --skip-versioning.`
+        )
+    }
+
+    return tagName
+}
+
+async function createReleaseTag(version, rootDir = process.cwd(), {
+    logStep,
+    runCommand = runReleaseCommand
+} = {}) {
+    const tagName = `v${version}`
+    logStep?.(`Creating release tag ${tagName}...`)
+    await runCommand('git', ['tag', '-a', tagName, '-m', tagName], {capture: true, cwd: rootDir})
 }
 
 function hasScript(pkg, scriptName) {
@@ -354,6 +393,7 @@ export async function releaseNodePackage({
                                              skipGitHooks = false,
                                              skipTests = false,
                                              skipLint = false,
+                                             skipVersioning = false,
                                              skipBuild = false,
                                              skipDeploy = false,
                                              rootDir = process.cwd(),
@@ -373,6 +413,7 @@ export async function releaseNodePackage({
 
     logStep?.('Reading package metadata...')
     const pkg = await readPackage(rootDir)
+    const currentVersion = skipVersioning ? ensureValidPackageVersion(pkg) : null
 
     logStep?.('Validating dependencies...')
     await validateReleaseDependencies(rootDir, {
@@ -393,24 +434,39 @@ export async function releaseNodePackage({
         skipGitHooks
     })
     await ensureReleaseBranchReady({rootDir, branchMethod: 'show-current', logStep, logWarning})
-    const resolvedReleaseType = await resolveReleaseType({
-        releaseType,
-        currentVersion: pkg.version,
-        packageName: pkg.name,
-        rootDir,
-        interactive,
-        runPrompt,
-        runCommand,
-        logStep,
-        logWarning
-    })
+
+    if (skipVersioning) {
+        await ensureReleaseTagMissing(currentVersion, rootDir, {runCommand})
+        logWarning?.(
+            `Skipping package.json version update because --skip-versioning flag was provided. Releasing current version ${currentVersion}.`
+        )
+    }
+
+    const resolvedReleaseType = skipVersioning
+        ? null
+        : await resolveReleaseType({
+            releaseType,
+            currentVersion: pkg.version,
+            packageName: pkg.name,
+            rootDir,
+            interactive,
+            runPrompt,
+            runCommand,
+            logStep,
+            logWarning
+        })
 
     await runLint(skipLint, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
     await runTests(skipTests, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
     await runLibBuild(skipBuild, pkg, rootDir, {logStep, logSuccess, logWarning, runCommand, skipGitHooks})
 
-    const updatedPkg = await bumpVersion(resolvedReleaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
+    const updatedPkg = skipVersioning
+        ? {...pkg, version: currentVersion}
+        : await bumpVersion(resolvedReleaseType, rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
     await runBuild(skipBuild, updatedPkg, rootDir, {logStep, logSuccess, logWarning, runCommand})
+    if (skipVersioning) {
+        await createReleaseTag(updatedPkg.version, rootDir, {logStep, runCommand})
+    }
     await pushChanges(rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
     await deployGHPages(skipDeploy, updatedPkg, rootDir, {logStep, logSuccess, logWarning, runCommand, skipGitHooks})
 

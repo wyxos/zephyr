@@ -176,15 +176,11 @@ export async function suggestCommitMessage(rootDir = process.cwd(), {
       '--output-last-message',
       outputPath,
       [
-        'Inspect the current repository and pending git changes yourself before answering.',
-        'Run whatever read-only commands you need, such as git status, git diff, git diff --cached, and reading relevant files.',
-        'Then write exactly one conventional commit message for the current pending changes.',
-        'Use the exact format "<type>: <subject>".',
+        'Inspect the current repository and decide the best conventional commit message for the pending changes.',
+        'Use whatever read-only inspection you need.',
+        'Reply with exactly one line in the format "<type>: <subject>".',
         'Do not use scopes like "fix(scope): ...".',
-        'Keep it to one line if possible.',
-        'Choose the most appropriate type from: fix, feat, chore, docs, refactor, test, style, perf, build, ci, revert.',
-        'Base the subject on the underlying code or product change, not on staging, committing, pending changes, or generic workflow/process wording.',
-        'Reply with only the commit message and no extra text.'
+        'Do not include extra text.'
       ].join('\n\n')
     ], {
       capture: true,

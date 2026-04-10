@@ -49,6 +49,12 @@ zephyr minor --skip-checks
 # Deploy a configured app non-interactively
 zephyr --non-interactive --preset wyxos-release --maintenance off
 
+# Deploy a configured app non-interactively and auto-commit dirty changes
+zephyr --non-interactive --preset wyxos-release --auto-commit
+
+# Deploy without mutating the local package version
+zephyr --non-interactive --preset wyxos-release --skip-versioning
+
 # Resume a pending non-interactive deployment
 zephyr --non-interactive --preset wyxos-release --resume-pending --maintenance off
 
@@ -63,6 +69,10 @@ zephyr --type node minor
 
 # Release a Packagist package
 zephyr --type packagist patch
+
+# Release the current package/composer version without bumping version files
+zephyr --type node --skip-versioning
+zephyr --type packagist --skip-versioning
 ```
 
 When `--type node` or `--type vue` is used without a bump argument, Zephyr defaults to `patch`.
@@ -77,7 +87,7 @@ Non-interactive mode is strict and is intended for already-configured projects:
 
 - `--non-interactive` fails instead of prompting
 - app deployments require `--preset <name>`
-- Laravel app deployments require `--maintenance on|off` unless resuming a saved snapshot that already contains the choice
+- Laravel app deployments require either a saved preset maintenance preference, `--maintenance on|off`, or a resumable snapshot that already contains the choice
 - pending deployment snapshots require either `--resume-pending` or `--discard-pending`
 - stale remote locks are never auto-removed in non-interactive mode
 - `--json` is only supported together with `--non-interactive`
@@ -94,7 +104,11 @@ If Zephyr would normally prompt to:
 
 then non-interactive mode stops immediately with a clear error instead.
 
-For Laravel app deployments, `--maintenance on|off` overrides the maintenance prompt when you want an explicit choice instead of an interactive confirm.
+For Laravel app deployments, `--maintenance on|off` overrides both the saved preset preference and the maintenance prompt when you want an explicit choice for the current run.
+
+`--auto-commit` is available for app deployments and tells Zephyr to let local Codex inspect the repo and generate the dirty-tree commit message instead of prompting for one.
+
+`--skip-versioning` keeps Zephyr from mutating `package.json` or `composer.json`. On app deploys it skips the local npm version bump step. On package release workflows it releases the version already present in the manifest and creates the release tag from the current `HEAD`.
 
 ## AI Agents and Automation
 
@@ -214,7 +228,15 @@ Deployment targets are stored per-project at `.zephyr/config.json`:
     {
       "name": "prod-main",
       "appId": "app_def456",
-      "branch": "main"
+      "branch": "main",
+      "options": {
+        "maintenanceMode": true,
+        "skipGitHooks": false,
+        "skipTests": false,
+        "skipLint": false,
+        "skipVersioning": false,
+        "autoCommit": true
+      }
     }
   ],
   "apps": [
@@ -230,6 +252,8 @@ Deployment targets are stored per-project at `.zephyr/config.json`:
   ]
 }
 ```
+
+Preset `options` capture repeatable deploy behavior so Zephyr can reuse the same maintenance, dirty-tree, and deploy-check preferences on later runs.
 
 ### Project Directory Structure
 

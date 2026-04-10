@@ -238,6 +238,7 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             return {stdout: '', stderr: '', code: 0}
         })
         const runPrompt = vi.fn().mockResolvedValue({enableMaintenanceMode: true})
+        const persistPresetOptions = vi.fn().mockResolvedValue(true)
 
         const result = await buildRemoteDeploymentPlan({
             config: {
@@ -253,6 +254,7 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             logProcessing: vi.fn(),
             logSuccess: vi.fn(),
             runPrompt,
+            persistPresetOptions,
             logWarning: vi.fn()
         })
 
@@ -280,6 +282,11 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             maintenanceUpCommand: 'php artisan up'
         })
         expect(runPrompt).toHaveBeenCalledTimes(1)
+        expect(persistPresetOptions).toHaveBeenCalledWith({
+            maintenanceMode: true
+        }, {
+            message: 'Saved maintenance mode preference to the selected preset.'
+        })
         expect(result.pendingSnapshot).toEqual(expect.objectContaining({
             serverName: 'production',
             branch: 'main',

@@ -26,12 +26,21 @@ describe('cli/options', () => {
             resumePending: true,
             discardPending: false,
             maintenanceMode: true,
+            autoCommit: false,
+            skipVersioning: false,
             skipGitHooks: false,
             skipChecks: false,
             skipTests: true,
             skipLint: true,
             skipBuild: false,
-            skipDeploy: false
+            skipDeploy: false,
+            explicitMaintenanceMode: true,
+            explicitAutoCommit: false,
+            explicitSkipVersioning: false,
+            explicitSkipGitHooks: false,
+            explicitSkipChecks: false,
+            explicitSkipTests: true,
+            explicitSkipLint: true
         })
     })
 
@@ -64,6 +73,15 @@ describe('cli/options', () => {
         expect(parseCliOptions(['--type=node', '--skip-git-hooks']).skipGitHooks).toBe(true)
     })
 
+    it('parses auto-commit and skip-versioning flags', () => {
+        const options = parseCliOptions(['--auto-commit', '--skip-versioning'])
+
+        expect(options.autoCommit).toBe(true)
+        expect(options.skipVersioning).toBe(true)
+        expect(options.explicitAutoCommit).toBe(true)
+        expect(options.explicitSkipVersioning).toBe(true)
+    })
+
     it('allows skip-tests and skip-lint on app deployments', () => {
         const options = parseCliOptions(['--skip-tests', '--skip-lint'])
 
@@ -83,6 +101,20 @@ describe('cli/options', () => {
         const options = parseCliOptions(['--skip-build'])
 
         expect(() => validateCliOptions(options)).toThrow('--skip-build and --skip-deploy are only valid for node/vue release workflows.')
+    })
+
+    it('rejects auto-commit on package release workflows', () => {
+        const options = parseCliOptions(['--type=node', '--auto-commit'])
+
+        expect(() => validateCliOptions(options)).toThrow('--auto-commit is only valid for app deployments.')
+    })
+
+    it('rejects skip-versioning when a bump argument is also provided', () => {
+        const options = parseCliOptions(['--skip-versioning', 'minor'])
+
+        expect(() => validateCliOptions(options)).toThrow(
+            '--skip-versioning cannot be used together with an explicit version or bump argument.'
+        )
     })
 
     it('rejects conflicting pending snapshot flags', () => {

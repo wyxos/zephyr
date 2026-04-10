@@ -235,6 +235,7 @@ async function resolveMaintenanceMode({
                                          snapshot,
                                          remoteIsLaravel,
                                          runPrompt,
+                                         persistPresetOptions,
                                          executionMode = {}
                                      } = {}) {
     if (!remoteIsLaravel) {
@@ -269,7 +270,14 @@ async function resolveMaintenanceMode({
         }
     ])
 
-    return Boolean(answers?.enableMaintenanceMode)
+    const maintenanceModeEnabled = Boolean(answers?.enableMaintenanceMode)
+    await persistPresetOptions?.({
+        maintenanceMode: maintenanceModeEnabled
+    }, {
+        message: 'Saved maintenance mode preference to the selected preset.'
+    })
+
+    return maintenanceModeEnabled
 }
 
 async function resolveMaintenanceModePlan({
@@ -333,6 +341,7 @@ async function resolveMaintenanceModePlan({
 export async function resolveRemoteDeploymentState({
                                                        snapshot,
                                                        executionMode = {},
+                                                       persistPresetOptions,
                                                        ssh,
                                                        remoteCwd,
                                                        runPrompt,
@@ -351,6 +360,7 @@ export async function resolveRemoteDeploymentState({
         snapshot,
         remoteIsLaravel,
         runPrompt,
+        persistPresetOptions,
         executionMode
     })
 
@@ -365,6 +375,7 @@ export async function buildRemoteDeploymentPlan({
                                                     snapshot = null,
                                                     requiredPhpVersion = null,
                                                     executionMode = {},
+                                                    persistPresetOptions,
                                                     remoteIsLaravel = null,
                                                     maintenanceModeEnabled = null,
                                                     ssh,
@@ -384,6 +395,7 @@ export async function buildRemoteDeploymentPlan({
         : await resolveRemoteDeploymentState({
             snapshot,
             executionMode,
+            persistPresetOptions,
             ssh,
             remoteCwd,
             runPrompt,

@@ -23,12 +23,6 @@ export async function selectPreset({
                 const branch = preset.branch || app.branch || 'unknown'
                 displayName = `${preset.name} (${serverName} → ${app.projectPath} [${branch}])`
             }
-        } else if (preset.key) {
-            const keyParts = preset.key.split(':')
-            const serverName = keyParts[0]
-            const projectPath = keyParts[1]
-            const branch = preset.branch || (keyParts.length === 3 ? keyParts[2] : 'unknown')
-            displayName = `${preset.name} (${serverName} → ${projectPath} [${branch}])`
         }
 
         return {

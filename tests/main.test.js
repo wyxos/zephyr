@@ -267,6 +267,65 @@ describe('main entrypoint', () => {
         }))
     })
 
+    it('merges preset-backed deploy options into the execution mode before running deployment', async () => {
+        const deploymentConfig = {
+            serverIp: '203.0.113.10',
+            branch: 'main',
+            projectPath: '~/webapps/demo'
+        }
+        const applyExecutionMode = vi.fn().mockResolvedValue(false)
+
+        mockAccess.mockImplementation(async () => {
+            throw new Error('ENOENT')
+        })
+        mockSelectDeploymentTarget.mockResolvedValue({
+            deploymentConfig,
+            presetState: {
+                name: 'Production',
+                options: {
+                    maintenanceMode: true,
+                    skipGitHooks: false,
+                    skipTests: true,
+                    skipLint: true,
+                    skipVersioning: true,
+                    autoCommit: true
+                },
+                applyExecutionMode
+            }
+        })
+
+        const {main} = await import('#src/main.mjs')
+
+        await main({
+            nonInteractive: true,
+            presetName: 'Production'
+        })
+
+        expect(applyExecutionMode).toHaveBeenCalledWith(expect.objectContaining({
+            presetName: 'Production',
+            maintenanceMode: true,
+            skipTests: true,
+            skipLint: true,
+            skipVersioning: true,
+            autoCommit: true
+        }))
+        expect(mockRunDeployment).toHaveBeenCalledWith(deploymentConfig, expect.objectContaining({
+            presetState: expect.objectContaining({
+                name: 'Production'
+            }),
+            context: expect.objectContaining({
+                executionMode: expect.objectContaining({
+                    presetName: 'Production',
+                    maintenanceMode: true,
+                    skipTests: true,
+                    skipLint: true,
+                    skipVersioning: true,
+                    autoCommit: true
+                })
+            })
+        }))
+    })
+
     it('emits JSON lifecycle events for a successful non-interactive deployment', async () => {
         const deploymentConfig = {
             serverName: 'production',

@@ -177,6 +177,7 @@ async function commitAndPushPendingChanges(targetBranch, rootDir, {
   logProcessing,
   logSuccess,
   logWarning,
+  autoCommit = false,
   skipGitHooks = false,
   suggestCommitMessage = suggestCommitMessageImpl
 } = {}) {
@@ -186,7 +187,7 @@ async function commitAndPushPendingChanges(targetBranch, rootDir, {
     return
   }
 
-  if (typeof runPrompt !== 'function') {
+  if (!autoCommit && typeof runPrompt !== 'function') {
     throw new Error(DIRTY_DEPLOYMENT_MESSAGE)
   }
 
@@ -213,24 +214,34 @@ async function commitAndPushPendingChanges(targetBranch, rootDir, {
     logWarning,
     statusEntries
   })
-  const { commitMessage } = await runPrompt([
-    {
-      type: 'input',
-      name: 'commitMessage',
-      message:
-        'Pending changes detected before deployment:\n\n' +
-        `${formatWorkingTreePreview(statusEntries)}\n\n` +
-        'Enter a commit message to stage and commit all current changes before continuing.\n' +
-        'Leave blank to cancel.',
-      default: suggestedCommitMessage ?? ''
+  let message = suggestedCommitMessage?.trim() ?? ''
+
+  if (autoCommit) {
+    if (!message) {
+      throw new Error('Deployment auto-commit failed because Codex could not determine a usable commit message.')
     }
-  ])
 
-  if (!commitMessage || commitMessage.trim().length === 0) {
-    throw new Error(DIRTY_DEPLOYMENT_CANCELLED_MESSAGE)
+    logProcessing?.(`Auto-commit enabled. Using Codex-generated commit message "${message}".`)
+  } else {
+    const { commitMessage } = await runPrompt([
+      {
+        type: 'input',
+        name: 'commitMessage',
+        message:
+          'Pending changes detected before deployment:\n\n' +
+          `${formatWorkingTreePreview(statusEntries)}\n\n` +
+          'Enter a commit message to stage and commit all current changes before continuing.\n' +
+          'Leave blank to cancel.',
+        default: message
+      }
+    ])
+
+    if (!commitMessage || commitMessage.trim().length === 0) {
+      throw new Error(DIRTY_DEPLOYMENT_CANCELLED_MESSAGE)
+    }
+
+    message = commitMessage.trim()
   }
-
-  const message = commitMessage.trim()
 
   logProcessing?.('Staging all pending changes before deployment...')
   await runCommand('git', ['add', '-A'], { cwd: rootDir })
@@ -357,6 +368,7 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
   logProcessing,
   logSuccess,
   logWarning,
+  autoCommit = false,
   skipGitHooks = false,
   suggestCommitMessage: suggestCommitMessageFn = suggestCommitMessageImpl,
   getCurrentBranch: getCurrentBranchFn = getCurrentBranch,
@@ -436,6 +448,7 @@ export async function ensureLocalRepositoryState(targetBranch, rootDir = process
     logProcessing,
     logSuccess,
     logWarning,
+    autoCommit,
     skipGitHooks,
     suggestCommitMessage: suggestCommitMessageFn
   })

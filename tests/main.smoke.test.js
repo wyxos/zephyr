@@ -196,7 +196,8 @@ describe('main smoke', () => {
             rootDir: effectiveProjectDir,
             snapshot: null,
             versionArg: null,
-            context: smokeContext
+            context: smokeContext,
+            presetState: null
         })
 
         const packageJson = JSON.parse(await readFile(path.join(projectDir, 'package.json'), 'utf8'))
