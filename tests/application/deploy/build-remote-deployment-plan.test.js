@@ -201,6 +201,55 @@ describe('application/deploy/build-remote-deployment-plan', () => {
         }))
     })
 
+    it('treats changed frontend asset files as build-worthy when planning Laravel deploys', async () => {
+        mockPlanLaravelDeploymentTasks.mockReturnValue([
+            {label: 'Pull latest changes for main', command: 'git pull origin main'},
+            {label: 'Compile frontend assets', command: 'npm run build'}
+        ])
+
+        const ssh = {
+            execCommand: vi.fn(async (command) => {
+                if (command.includes('grep -q "laravel/framework"')) {
+                    return {stdout: 'yes', code: 0}
+                }
+
+                if (command.includes('config/horizon.php')) {
+                    return {stdout: 'no', code: 0}
+                }
+
+                return {stdout: '', code: 0}
+            })
+        }
+
+        const executeRemote = vi.fn(async (label) => {
+            if (label === 'Inspect pending changes') {
+                return {stdout: 'resources/images/logo.svg\nresources/images/banner.png\n', code: 0}
+            }
+
+            return {stdout: '', stderr: '', code: 0}
+        })
+
+        await buildRemoteDeploymentPlan({
+            config: {
+                branch: 'main',
+                serverName: 'production',
+                projectPath: '~/webapps/demo',
+                sshUser: 'forge'
+            },
+            ssh,
+            remoteCwd: '/home/runcloud/webapps/demo',
+            executeRemote,
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            runPrompt: vi.fn(),
+            logWarning: vi.fn()
+        })
+
+        expect(mockPlanLaravelDeploymentTasks).toHaveBeenCalledWith(expect.objectContaining({
+            changedFiles: ['resources/images/logo.svg', 'resources/images/banner.png']
+        }))
+    })
+
     it('uses prerendered maintenance mode when the remote Laravel app supports it', async () => {
         mockFindPhpBinary.mockResolvedValue('php')
         mockPlanLaravelDeploymentTasks.mockReturnValue([

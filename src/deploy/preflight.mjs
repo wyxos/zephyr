@@ -25,12 +25,25 @@ export async function hasPrePushHook(rootDir) {
   return false
 }
 
+async function readPackageJson(rootDir) {
+  const packageJsonPath = path.join(rootDir, 'package.json')
+  const raw = await fs.readFile(packageJsonPath, 'utf8')
+  return JSON.parse(raw)
+}
+
 export async function hasLintScript(rootDir) {
   try {
-    const packageJsonPath = path.join(rootDir, 'package.json')
-    const raw = await fs.readFile(packageJsonPath, 'utf8')
-    const packageJson = JSON.parse(raw)
+    const packageJson = await readPackageJson(rootDir)
     return packageJson.scripts && typeof packageJson.scripts.lint === 'string'
+  } catch {
+    return false
+  }
+}
+
+export async function hasBuildScript(rootDir) {
+  try {
+    const packageJson = await readPackageJson(rootDir)
+    return packageJson.scripts && typeof packageJson.scripts.build === 'string'
   } catch {
     return false
   }
@@ -91,6 +104,28 @@ export async function resolveSupportedLintCommand(rootDir, {commandExists} = {})
   throw error
 }
 
+export async function resolveSupportedBuildCommand(rootDir, {commandExists} = {}) {
+  const hasNpmBuild = await hasBuildScript(rootDir)
+
+  if (!hasNpmBuild) {
+    return null
+  }
+
+  if (commandExists && !commandExists('npm')) {
+    throw new Error(
+      'Release cannot run because `npm run build` is configured but npm is not available in PATH.\n' +
+      'Install npm or fix your PATH before deploying.'
+    )
+  }
+
+  return {
+    type: 'npm',
+    command: 'npm',
+    args: ['run', 'build'],
+    label: 'npm build'
+  }
+}
+
 export async function runLinting(rootDir, {
   runCommand,
   logProcessing,
@@ -115,6 +150,25 @@ export async function runLinting(rootDir, {
   }
 
   return false
+}
+
+export async function runBuild(rootDir, {
+  runCommand,
+  logProcessing,
+  logSuccess,
+  commandExists,
+  buildCommand = null
+} = {}) {
+  const selectedBuildCommand = buildCommand ?? await resolveSupportedBuildCommand(rootDir, {commandExists})
+
+  if (selectedBuildCommand === null) {
+    return false
+  }
+
+  logProcessing?.('Running local frontend build...')
+  await runCommand(selectedBuildCommand.command, selectedBuildCommand.args, {cwd: rootDir})
+  logSuccess?.('Local frontend build completed.')
+  return true
 }
 
 export function hasStagedChanges(statusOutput) {

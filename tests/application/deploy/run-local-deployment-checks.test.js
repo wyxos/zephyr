@@ -5,14 +5,18 @@ const {
     mockCommitLintingChanges,
     mockGetGitStatus,
     mockHasUncommittedChanges,
+    mockResolveSupportedBuildCommand,
     mockResolveSupportedLintCommand,
+    mockRunBuild,
     mockRunLinting
 } = vi.hoisted(() => ({
     mockCommandExists: vi.fn(),
     mockCommitLintingChanges: vi.fn(),
     mockGetGitStatus: vi.fn(),
     mockHasUncommittedChanges: vi.fn(),
+    mockResolveSupportedBuildCommand: vi.fn(),
     mockResolveSupportedLintCommand: vi.fn(),
+    mockRunBuild: vi.fn(),
     mockRunLinting: vi.fn()
 }))
 
@@ -27,7 +31,9 @@ vi.mock('#src/deploy/local-repo.mjs', () => ({
 
 vi.mock('#src/deploy/preflight.mjs', () => ({
     commitLintingChanges: mockCommitLintingChanges,
+    resolveSupportedBuildCommand: mockResolveSupportedBuildCommand,
     resolveSupportedLintCommand: mockResolveSupportedLintCommand,
+    runBuild: mockRunBuild,
     runLinting: mockRunLinting
 }))
 
@@ -42,19 +48,28 @@ describe('application/deploy/run-local-deployment-checks', () => {
         mockCommitLintingChanges.mockReset()
         mockGetGitStatus.mockReset()
         mockHasUncommittedChanges.mockReset()
+        mockResolveSupportedBuildCommand.mockReset()
         mockResolveSupportedLintCommand.mockReset()
+        mockRunBuild.mockReset()
         mockRunLinting.mockReset()
 
         mockCommandExists.mockImplementation((command) => command === 'php')
         mockCommitLintingChanges.mockResolvedValue(undefined)
         mockGetGitStatus.mockResolvedValue(' M package.json')
         mockHasUncommittedChanges.mockResolvedValue(false)
+        mockResolveSupportedBuildCommand.mockResolvedValue({
+            type: 'npm',
+            command: 'npm',
+            args: ['run', 'build'],
+            label: 'npm build'
+        })
         mockResolveSupportedLintCommand.mockResolvedValue({
             type: 'npm',
             command: 'npm',
             args: ['run', 'lint'],
             label: 'npm lint'
         })
+        mockRunBuild.mockResolvedValue(false)
         mockRunLinting.mockResolvedValue(false)
     })
 
@@ -79,6 +94,7 @@ describe('application/deploy/run-local-deployment-checks', () => {
         })
         expect(runCommandCapture).toHaveBeenCalledWith('php', ['artisan', 'list'], {cwd: '/repo/demo'})
         expect(mockRunLinting).not.toHaveBeenCalled()
+        expect(mockRunBuild).not.toHaveBeenCalled()
         expect(mockCommitLintingChanges).not.toHaveBeenCalled()
         expect(runCommand).not.toHaveBeenCalled()
         expect(logProcessing).toHaveBeenCalledWith(
@@ -119,6 +135,17 @@ describe('application/deploy/run-local-deployment-checks', () => {
             })
         }))
         expect(mockCommitLintingChanges).not.toHaveBeenCalled()
+        expect(mockRunBuild).toHaveBeenCalledWith('/repo/demo', expect.objectContaining({
+            runCommand,
+            logProcessing: expect.any(Function),
+            logSuccess: expect.any(Function),
+            commandExists: mockCommandExists,
+            buildCommand: expect.objectContaining({
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'build']
+            })
+        }))
         expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
     })
 
@@ -154,6 +181,17 @@ describe('application/deploy/run-local-deployment-checks', () => {
                 args: ['run', 'lint']
             })
         }))
+        expect(mockRunBuild).toHaveBeenCalledWith('/repo/demo', expect.objectContaining({
+            runCommand,
+            logProcessing: expect.any(Function),
+            logSuccess: expect.any(Function),
+            commandExists: mockCommandExists,
+            buildCommand: expect.objectContaining({
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'build']
+            })
+        }))
         expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
     })
 
@@ -166,6 +204,7 @@ describe('application/deploy/run-local-deployment-checks', () => {
             runCommandCapture: vi.fn()
         })).resolves.toEqual({
             lintCommand: null,
+            buildCommand: null,
             testCommand: null
         })
 
@@ -215,6 +254,18 @@ describe('application/deploy/run-local-deployment-checks', () => {
             getGitStatus: expect.any(Function),
             skipGitHooks: false
         }))
+        expect(mockRunBuild).toHaveBeenCalledWith('/repo/demo', expect.objectContaining({
+            runCommand,
+            logProcessing,
+            logSuccess,
+            commandExists: mockCommandExists,
+            buildCommand: expect.objectContaining({
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'build']
+            })
+        }))
+        expect(mockRunBuild.mock.invocationCallOrder[0]).toBeLessThan(runCommand.mock.invocationCallOrder[0])
         expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
         expect(logSuccess).toHaveBeenCalledWith('Local tests passed.')
     })
@@ -357,6 +408,12 @@ describe('application/deploy/run-local-deployment-checks', () => {
             runCommandCapture: vi.fn().mockResolvedValue('test\nqueue:work\n')
         })).resolves.toEqual({
             lintCommand: null,
+            buildCommand: {
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'build'],
+                label: 'npm build'
+            },
             testCommand: {
                 command: 'php',
                 args: ['artisan', 'test', '--compact']

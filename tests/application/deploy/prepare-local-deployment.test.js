@@ -55,6 +55,12 @@ describe('application/deploy/prepare-local-deployment', () => {
                 args: ['run', 'lint'],
                 label: 'npm lint'
             },
+            buildCommand: {
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'build'],
+                label: 'npm build'
+            },
             testCommand: {
                 command: 'php',
                 args: ['artisan', 'test', '--compact']
@@ -142,6 +148,11 @@ describe('application/deploy/prepare-local-deployment', () => {
                 type: 'npm',
                 command: 'npm',
                 args: ['run', 'lint']
+            }),
+            buildCommand: expect.objectContaining({
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'build']
             }),
             testCommand: expect.objectContaining({
                 command: 'php',

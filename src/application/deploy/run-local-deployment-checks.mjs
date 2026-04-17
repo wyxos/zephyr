@@ -66,13 +66,39 @@ export async function resolveLocalDeploymentCheckSupport({
         }
     }
 
+    const buildCommand = isLaravel && !skipTests
+        ? await preflight.resolveSupportedBuildCommand(rootDir, {commandExists})
+        : null
+
     const testCommand = isLaravel && !skipTests
         ? await resolveSupportedLaravelTestCommand(rootDir, {runCommandCapture})
         : null
 
     return {
         lintCommand,
+        buildCommand,
         testCommand
+    }
+}
+
+async function runLocalLaravelBuild(rootDir, {runCommand, logProcessing, logSuccess, buildCommand} = {}) {
+    try {
+        await preflight.runBuild(rootDir, {
+            runCommand,
+            logProcessing,
+            logSuccess,
+            commandExists,
+            buildCommand
+        })
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            throw new Error(
+                'Failed to run local frontend build: npm executable not found.\n' +
+                'Make sure npm is installed and available in your PATH.'
+            )
+        }
+
+        throw new Error(`Local frontend build failed. Fix build failures before deploying.\n${error.message}`)
     }
 }
 
@@ -108,10 +134,11 @@ export async function runLocalDeploymentChecks({
     logSuccess,
     logWarning,
     lintCommand = undefined,
+    buildCommand = undefined,
     testCommand = undefined
 } = {}) {
-    const support = lintCommand !== undefined || testCommand !== undefined
-        ? {lintCommand, testCommand}
+    const support = lintCommand !== undefined || buildCommand !== undefined || testCommand !== undefined
+        ? {lintCommand, buildCommand, testCommand}
         : await resolveLocalDeploymentCheckSupport({
             rootDir,
             isLaravel,
@@ -176,6 +203,15 @@ export async function runLocalDeploymentChecks({
     if (isLaravel && skipTests) {
         logWarning?.('Skipping tests because --skip-tests flag was provided.')
     } else if (isLaravel) {
+        if (support.buildCommand) {
+            await runLocalLaravelBuild(rootDir, {
+                runCommand,
+                logProcessing,
+                logSuccess,
+                buildCommand: support.buildCommand
+            })
+        }
+
         await runLocalLaravelTests(rootDir, {
             runCommand,
             logProcessing,

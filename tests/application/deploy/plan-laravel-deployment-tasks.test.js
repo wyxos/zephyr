@@ -35,6 +35,16 @@ describe('application/deploy/plan-laravel-deployment-tasks', () => {
     expect(steps.some((s) => s.command === 'npm run build')).toBe(true)
   })
 
+  it('schedules npm run build when frontend asset files change (Laravel)', () => {
+    const steps = planLaravelDeploymentTasks({
+      branch: 'main',
+      isLaravel: true,
+      changedFiles: ['resources/images/logo.svg', 'resources/images/hero.webp']
+    })
+
+    expect(steps.some((s) => s.command === 'npm run build')).toBe(true)
+  })
+
   it('schedules npm run build when npm install is scheduled (Laravel)', () => {
     const steps = planLaravelDeploymentTasks({
       branch: 'main',

@@ -56,6 +56,7 @@ export async function prepareLocalDeployment(config, {
             logSuccess,
             logWarning,
             lintCommand: checkSupport.lintCommand,
+            buildCommand: checkSupport.buildCommand,
             testCommand: checkSupport.testCommand
         })
 
@@ -97,6 +98,7 @@ export async function prepareLocalDeployment(config, {
         logSuccess,
         logWarning,
         lintCommand: checkSupport.lintCommand,
+        buildCommand: checkSupport.buildCommand,
         testCommand: checkSupport.testCommand
     })
 

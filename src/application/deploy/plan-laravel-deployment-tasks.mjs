@@ -1,3 +1,24 @@
+const FRONTEND_BUILD_EXTENSIONS = [
+  '.vue',
+  '.css',
+  '.scss',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.tsx',
+  '.less',
+  '.svg',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.avif',
+  '.ico'
+]
+
 export function planLaravelDeploymentTasks({
   branch,
   isLaravel,
@@ -39,7 +60,7 @@ export function planLaravelDeploymentTasks({
   const hasFrontendChanges =
     isLaravel &&
     safeChangedFiles.some((file) =>
-      ['.vue', '.css', '.scss', '.js', '.ts', '.tsx', '.less'].some((ext) => file.endsWith(ext))
+      FRONTEND_BUILD_EXTENSIONS.some((ext) => file.endsWith(ext))
     )
 
   const shouldRunBuild = isLaravel && (hasFrontendChanges || shouldRunNpmInstall)
