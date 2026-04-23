@@ -109,6 +109,7 @@ export async function selectDeploymentTarget(rootDir, {
     logSuccess,
     logWarning,
     emitEvent,
+    promptPresetOptions = true,
     executionMode = {}
 } = {}) {
     const nonInteractive = executionMode?.interactive === false
@@ -247,24 +248,25 @@ export async function selectDeploymentTarget(rootDir, {
                 logWarning?.('Cannot save preset: app configuration missing ID.')
             } else {
                 const existingPreset = findPresetByName(projectConfig, trimmedName)
-                const autoCommitEnabled = await promptPresetAutoCommit(
-                    runPrompt,
-                    executionMode.autoCommit === true || existingPreset?.options?.autoCommit === true
-                )
                 const nextPreset = existingPreset ?? {
                     name: trimmedName,
                     appId,
                     branch: deploymentConfig.branch,
                     options: normalizePresetOptions()
                 }
+                const nextOptions = buildPresetOptionsFromExecutionMode(executionMode, nextPreset.options)
+
+                if (promptPresetOptions) {
+                    nextOptions.autoCommit = await promptPresetAutoCommit(
+                        runPrompt,
+                        executionMode.autoCommit === true || existingPreset?.options?.autoCommit === true
+                    )
+                }
 
                 nextPreset.name = trimmedName
                 nextPreset.appId = appId
                 nextPreset.branch = deploymentConfig.branch
-                nextPreset.options = normalizePresetOptions({
-                    ...buildPresetOptionsFromExecutionMode(executionMode, nextPreset.options),
-                    autoCommit: autoCommitEnabled
-                })
+                nextPreset.options = normalizePresetOptions(nextOptions)
 
                 if (!existingPreset) {
                     projectConfig.presets = [...(projectConfig.presets ?? []), nextPreset]

@@ -64,7 +64,27 @@ describe('targets public API', () => {
             runPrompt: appContext.runPrompt,
             logProcessing: appContext.logProcessing,
             logSuccess: appContext.logSuccess,
-            logWarning: appContext.logWarning
+            logWarning: appContext.logWarning,
+            promptPresetOptions: false
         })
+    })
+
+    it('allows callers to opt into deploy preset option prompts', async () => {
+        const selection = {
+            deploymentConfig: {serverName: 'production'},
+            projectConfig: {apps: [], presets: []}
+        }
+
+        mockSelectDeploymentTargetImpl.mockResolvedValue(selection)
+
+        const {selectDeploymentTarget} = await import('#src/targets/index.mjs')
+        await selectDeploymentTarget({
+            rootDir: '/workspace/project',
+            promptPresetOptions: true
+        })
+
+        expect(mockSelectDeploymentTargetImpl).toHaveBeenCalledWith('/workspace/project', expect.objectContaining({
+            promptPresetOptions: true
+        }))
     })
 })

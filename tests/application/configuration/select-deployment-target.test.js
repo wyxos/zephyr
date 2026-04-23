@@ -147,6 +147,29 @@ describe('selectDeploymentTarget', () => {
     expect(projectConfig.presets[0].options.autoCommit).toBe(true)
   })
 
+  it('does not ask for deploy preset options when disabled by the caller', async () => {
+    const { projectConfig, server, configurationService } = createSelectionScenario()
+
+    mockLoadServers.mockResolvedValue([server])
+    mockLoadProjectConfig.mockResolvedValue(projectConfig)
+
+    const runPrompt = vi.fn().mockResolvedValueOnce({ presetName: 'Production' })
+
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
+
+    await selectDeploymentTarget('/workspace/project', {
+      configurationService,
+      runPrompt,
+      logProcessing: vi.fn(),
+      logSuccess: vi.fn(),
+      logWarning: vi.fn(),
+      promptPresetOptions: false
+    })
+
+    expect(runPrompt).toHaveBeenCalledTimes(1)
+    expect(projectConfig.presets[0].options.autoCommit).toBe(false)
+  })
+
   it('removes an invalid preset before creating a replacement configuration', async () => {
     const { projectConfig, server, configurationService } = createSelectionScenario()
     const invalidPreset = {

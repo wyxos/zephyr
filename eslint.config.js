@@ -27,6 +27,6 @@ export default [
     }
   },
   {
-    ignores: ['node_modules/**', 'dist/**', 'build/**', '.zephyr/**', 'tests/**']
+    ignores: ['node_modules/**', '**/node_modules/**', 'dist/**', '**/dist/**', 'build/**', '**/build/**', '.zephyr/**', 'tests/**']
   }
 ]

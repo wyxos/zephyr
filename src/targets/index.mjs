@@ -13,12 +13,13 @@ const {
 } = appContext
 const configurationService = createConfigurationService(appContext)
 
-export async function selectDeploymentTarget({rootDir = process.cwd()} = {}) {
+export async function selectDeploymentTarget({rootDir = process.cwd(), promptPresetOptions = false} = {}) {
     return selectDeploymentTargetImpl(rootDir, {
         configurationService,
         runPrompt,
         logProcessing,
         logSuccess,
-        logWarning
+        logWarning,
+        promptPresetOptions
     })
 }
