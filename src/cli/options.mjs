@@ -36,6 +36,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .option('--type <type>', 'Workflow type (node|vue|packagist). Omit for normal app deployments.')
         .option('--non-interactive', 'Fail instead of prompting when Zephyr needs user input.')
         .option('--json', 'Emit NDJSON events to stdout. Requires --non-interactive.')
+        .option('--setup', 'Configure an app deployment target and verify SSH connectivity without deploying.')
         .option('--preset <name>', 'Preset name to use for non-interactive app deployments.')
         .option('--resume-pending', 'Resume a saved pending deployment snapshot without prompting.')
         .option('--discard-pending', 'Discard a saved pending deployment snapshot without prompting.')
@@ -72,6 +73,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         versionArg: program.args[0] ?? null,
         nonInteractive: Boolean(options.nonInteractive),
         json: Boolean(options.json),
+        setup: Boolean(options.setup),
         presetName: options.preset ?? null,
         resumePending: Boolean(options.resumePending),
         discardPending: Boolean(options.discardPending),
@@ -99,14 +101,19 @@ export function validateCliOptions(options = {}) {
         workflowType = null,
         nonInteractive = false,
         json = false,
+        setup = false,
         presetName = null,
         resumePending = false,
         discardPending = false,
         maintenanceMode = null,
         autoCommit = false,
         skipVersioning = false,
+        skipChecks = false,
+        skipTests = false,
+        skipLint = false,
         skipBuild = false,
-        skipDeploy = false
+        skipDeploy = false,
+        versionArg = null
     } = options
 
     if (json && !nonInteractive) {
@@ -120,6 +127,10 @@ export function validateCliOptions(options = {}) {
     const isPackageRelease = workflowType === 'node' || workflowType === 'vue' || workflowType === 'packagist'
 
     if (isPackageRelease) {
+        if (setup) {
+            throw new InvalidCliOptionsError('--setup is only valid for app deployments.')
+        }
+
         if (presetName) {
             throw new InvalidCliOptionsError('--preset is only valid for app deployments.')
         }
@@ -140,12 +151,34 @@ export function validateCliOptions(options = {}) {
             throw new InvalidCliOptionsError('--skip-build and --skip-deploy are only valid for node/vue release workflows.')
         }
 
+        if (setup) {
+            if (versionArg) {
+                throw new InvalidCliOptionsError('--setup cannot be used with a version or bump argument.')
+            }
+
+            if (resumePending || discardPending) {
+                throw new InvalidCliOptionsError('--setup cannot be used with pending deployment snapshot flags.')
+            }
+
+            if (maintenanceMode !== null) {
+                throw new InvalidCliOptionsError('--setup cannot be used with --maintenance.')
+            }
+
+            if (autoCommit) {
+                throw new InvalidCliOptionsError('--setup cannot be used with --auto-commit.')
+            }
+
+            if (skipVersioning || skipChecks || skipTests || skipLint) {
+                throw new InvalidCliOptionsError('--setup cannot be used with deployment skip flags.')
+            }
+        }
+
         if (nonInteractive && !presetName) {
             throw new InvalidCliOptionsError('--non-interactive app deployments require --preset <name>.')
         }
     }
 
-    if (skipVersioning && options.versionArg) {
+    if (skipVersioning && versionArg) {
         throw new InvalidCliOptionsError('--skip-versioning cannot be used together with an explicit version or bump argument.')
     }
 }

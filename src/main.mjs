@@ -17,6 +17,7 @@ import {createConfigurationService} from './application/configuration/service.mj
 import {selectDeploymentTarget} from './application/configuration/select-deployment-target.mjs'
 import {resolvePendingSnapshot} from './application/deploy/resolve-pending-snapshot.mjs'
 import {runDeployment} from './application/deploy/run-deployment.mjs'
+import {assertLaravelSetupProject} from './application/deploy/verify-laravel-setup.mjs'
 import {SKIP_GIT_HOOKS_WARNING} from './utils/git-hooks.mjs'
 import {notifyWorkflowResult} from './utils/notifications.mjs'
 
@@ -32,6 +33,7 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
             versionArg: firstArg.versionArg ?? null,
             nonInteractive: firstArg.nonInteractive === true,
             json: firstArg.json === true,
+            setup: firstArg.setup === true,
             presetName: firstArg.presetName ?? null,
             resumePending: firstArg.resumePending === true,
             discardPending: firstArg.discardPending === true,
@@ -60,6 +62,7 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
         versionArg: secondArg ?? null,
         nonInteractive: false,
         json: false,
+        setup: false,
         presetName: null,
         resumePending: false,
         discardPending: false,
@@ -127,6 +130,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         interactive: !options.nonInteractive,
         json: options.json === true && options.nonInteractive === true,
         workflow: resolveWorkflowName(options.workflowType),
+        setup: options.setup === true,
         presetName: options.presetName,
         maintenanceMode: options.maintenanceMode,
         autoCommit: options.autoCommit === true,
@@ -157,7 +161,8 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
     } = appContext
     let currentExecutionMode = {
         ...executionMode,
-        ...(appContext.executionMode ?? {})
+        ...(appContext.executionMode ?? {}),
+        setup: executionMode.setup === true || appContext.executionMode?.setup === true
     }
     appContext.executionMode = currentExecutionMode
     const configurationService = createConfigurationService(appContext)
@@ -171,6 +176,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                 data: {
                     version: ZEPHYR_VERSION,
                     workflow: currentExecutionMode.workflow,
+                    setup: currentExecutionMode.setup === true,
                     nonInteractive: currentExecutionMode.interactive === false,
                     presetName: currentExecutionMode.presetName,
                     maintenanceMode: currentExecutionMode.maintenanceMode,
@@ -197,6 +203,10 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             executionMode: currentExecutionMode,
             appContext
         })
+
+        if (currentExecutionMode.setup) {
+            await assertLaravelSetupProject(rootDir)
+        }
 
         if (options.workflowType === 'node' || options.workflowType === 'vue') {
             await releaseNode({
@@ -277,7 +287,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         const hasPackageJson = await fs.access(packageJsonPath).then(() => true).catch(() => false)
         const hasComposerJson = await fs.access(composerJsonPath).then(() => true).catch(() => false)
 
-        if (hasPackageJson || hasComposerJson) {
+        if (!currentExecutionMode.setup && (hasPackageJson || hasComposerJson)) {
             logProcessing('Validating dependencies...')
             await validateLocalDependencies(rootDir, runPrompt, logSuccess, {
                 interactive: currentExecutionMode.interactive,
@@ -292,7 +302,8 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             logSuccess,
             logWarning,
             emitEvent,
-            executionMode: currentExecutionMode
+            executionMode: currentExecutionMode,
+            promptPresetOptions: currentExecutionMode.setup !== true
         })
 
         if (presetState) {
@@ -308,12 +319,14 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             await presetState.applyExecutionMode(currentExecutionMode)
         }
 
-        const snapshotToUse = await resolvePendingSnapshot(rootDir, deploymentConfig, {
-            runPrompt,
-            logProcessing,
-            logWarning,
-            executionMode: currentExecutionMode
-        })
+        const snapshotToUse = currentExecutionMode.setup
+            ? null
+            : await resolvePendingSnapshot(rootDir, deploymentConfig, {
+                runPrompt,
+                logProcessing,
+                logWarning,
+                executionMode: currentExecutionMode
+            })
 
         await runRemoteTasks(deploymentConfig, {
             rootDir,

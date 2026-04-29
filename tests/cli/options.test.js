@@ -22,6 +22,7 @@ describe('cli/options', () => {
             versionArg: '1.2.3',
             nonInteractive: true,
             json: true,
+            setup: false,
             presetName: 'production',
             resumePending: true,
             discardPending: false,
@@ -54,6 +55,31 @@ describe('cli/options', () => {
         const options = parseCliOptions(['--type=node', '--preset', 'production'])
 
         expect(() => validateCliOptions(options)).toThrow('--preset is only valid for app deployments.')
+    })
+
+    it('parses setup mode for app deployments', () => {
+        const options = parseCliOptions(['--setup'])
+
+        expect(options.setup).toBe(true)
+        expect(() => validateCliOptions(options)).not.toThrow()
+    })
+
+    it('rejects setup mode on package release workflows', () => {
+        const options = parseCliOptions(['--type=node', '--setup'])
+
+        expect(() => validateCliOptions(options)).toThrow('--setup is only valid for app deployments.')
+    })
+
+    it('rejects setup mode with deploy-only flags', () => {
+        expect(() => validateCliOptions(parseCliOptions(['--setup', 'minor']))).toThrow(
+            '--setup cannot be used with a version or bump argument.'
+        )
+        expect(() => validateCliOptions(parseCliOptions(['--setup', '--maintenance', 'off']))).toThrow(
+            '--setup cannot be used with --maintenance.'
+        )
+        expect(() => validateCliOptions(parseCliOptions(['--setup', '--skip-checks']))).toThrow(
+            '--setup cannot be used with deployment skip flags.'
+        )
     })
 
     it('rejects non-interactive app deploys without a preset', () => {

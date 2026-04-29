@@ -15,6 +15,7 @@ import {resolveRemotePath} from '../../utils/remote-path.mjs'
 import {buildRemoteDeploymentPlan, resolveRemoteDeploymentState} from './build-remote-deployment-plan.mjs'
 import {executeRemoteDeploymentPlan} from './execute-remote-deployment-plan.mjs'
 import {prepareLocalDeployment} from './prepare-local-deployment.mjs'
+import {verifyLaravelSetup} from './verify-laravel-setup.mjs'
 
 async function resolveRemoteHome(ssh, sshUser) {
     const remoteHomeResult = await ssh.execCommand('printf "%s" "$HOME"')
@@ -263,9 +264,22 @@ export async function runDeployment(config, options = {}) {
         executionMode
     } = context
 
+    const sshUser = config.sshUser || os.userInfo().username
+
+    if (executionMode?.setup === true) {
+        await verifyLaravelSetup({
+            config,
+            rootDir,
+            createSshClient,
+            sshUser,
+            logProcessing,
+            logSuccess
+        })
+        return
+    }
+
     await cleanupOldLogs(rootDir)
 
-    const sshUser = config.sshUser || os.userInfo().username
     const privateKeyPath = await resolveSshKeyPath(config.sshKey)
     const privateKey = await fs.readFile(privateKeyPath, 'utf8')
     let ssh = null

@@ -10,6 +10,7 @@ const {
     mockNotifyWorkflowResult,
     mockReleaseNode,
     mockReleasePackagist,
+    mockAssertLaravelSetupProject,
     mockResolvePendingSnapshot,
     mockRunDeployment,
     mockSelectDeploymentTarget,
@@ -52,6 +53,7 @@ const {
     mockNotifyWorkflowResult: vi.fn(),
     mockReleaseNode: vi.fn(),
     mockReleasePackagist: vi.fn(),
+    mockAssertLaravelSetupProject: vi.fn(),
     mockResolvePendingSnapshot: vi.fn(),
     mockRunDeployment: vi.fn(),
     mockSelectDeploymentTarget: vi.fn(),
@@ -111,6 +113,10 @@ vi.mock('#src/application/deploy/run-deployment.mjs', () => ({
     runDeployment: mockRunDeployment
 }))
 
+vi.mock('#src/application/deploy/verify-laravel-setup.mjs', () => ({
+    assertLaravelSetupProject: mockAssertLaravelSetupProject
+}))
+
 describe('main entrypoint', () => {
     beforeEach(() => {
         vi.resetModules()
@@ -122,6 +128,7 @@ describe('main entrypoint', () => {
         mockNotifyWorkflowResult.mockReset()
         mockReleaseNode.mockReset()
         mockReleasePackagist.mockReset()
+        mockAssertLaravelSetupProject.mockReset()
         mockResolvePendingSnapshot.mockReset()
         mockRunDeployment.mockReset()
         mockSelectDeploymentTarget.mockReset()
@@ -156,6 +163,7 @@ describe('main entrypoint', () => {
         mockEnsureGitignoreEntry.mockResolvedValue(undefined)
         mockEnsureProjectReleaseScript.mockResolvedValue(false)
         mockNotifyWorkflowResult.mockResolvedValue(true)
+        mockAssertLaravelSetupProject.mockResolvedValue(undefined)
         mockValidateLocalDependencies.mockResolvedValue(undefined)
     })
 
@@ -265,6 +273,63 @@ describe('main entrypoint', () => {
             workflow: 'deploy',
             rootDir: process.cwd()
         }))
+    })
+
+    it('runs setup mode without dependency validation or pending deployment snapshots', async () => {
+        const deploymentConfig = {
+            serverIp: '203.0.113.10',
+            branch: 'main',
+            projectPath: '~/webapps/demo'
+        }
+
+        mockAccess.mockImplementation(async (filePath) => {
+            if (/[\\/]package\.json$/.test(String(filePath))) {
+                return undefined
+            }
+
+            throw new Error('ENOENT')
+        })
+        mockSelectDeploymentTarget.mockResolvedValue({deploymentConfig})
+
+        const {main} = await import('#src/main.mjs')
+
+        await main({setup: true})
+
+        expect(mockAssertLaravelSetupProject).toHaveBeenCalledWith(process.cwd())
+        expect(mockValidateLocalDependencies).not.toHaveBeenCalled()
+        expect(mockResolvePendingSnapshot).not.toHaveBeenCalled()
+        expect(mockSelectDeploymentTarget).toHaveBeenCalledWith(process.cwd(), expect.objectContaining({
+            promptPresetOptions: false,
+            executionMode: expect.objectContaining({
+                setup: true
+            })
+        }))
+        expect(mockRunDeployment).toHaveBeenCalledWith(deploymentConfig, expect.objectContaining({
+            snapshot: null,
+            context: expect.objectContaining({
+                executionMode: expect.objectContaining({
+                    setup: true
+                })
+            })
+        }))
+    })
+
+    it('fails setup mode before local bootstrap when the project is not Laravel', async () => {
+        mockAssertLaravelSetupProject.mockRejectedValue(Object.assign(
+            new Error('Zephyr setup is only supported for Laravel app projects.'),
+            {code: 'ZEPHYR_SETUP_REQUIRES_LARAVEL'}
+        ))
+
+        const {main} = await import('#src/main.mjs')
+
+        await expect(main({setup: true})).rejects.toMatchObject({
+            code: 'ZEPHYR_SETUP_REQUIRES_LARAVEL'
+        })
+
+        expect(mockEnsureGitignoreEntry).not.toHaveBeenCalled()
+        expect(mockEnsureProjectReleaseScript).not.toHaveBeenCalled()
+        expect(mockSelectDeploymentTarget).not.toHaveBeenCalled()
+        expect(mockRunDeployment).not.toHaveBeenCalled()
     })
 
     it('merges preset-backed deploy options into the execution mode before running deployment', async () => {

@@ -22,6 +22,7 @@ export function createAppContext({
         interactive: executionMode.interactive !== false,
         json: executionMode.json === true,
         workflow: executionMode.workflow ?? 'deploy',
+        setup: executionMode.setup === true,
         presetName: executionMode.presetName ?? null,
         maintenanceMode: executionMode.maintenanceMode ?? null,
         autoCommit: executionMode.autoCommit === true,

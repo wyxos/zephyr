@@ -329,6 +329,84 @@ describe('application/deploy/run-deployment', () => {
         expect(executedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
     })
 
+    it('verifies setup for a Laravel app without running remote commands', async () => {
+        mockAccess.mockResolvedValue(undefined)
+        mockReadFile.mockImplementation(async (filePath) => {
+            if (String(filePath).endsWith('composer.json')) {
+                return JSON.stringify({
+                    require: {
+                        'laravel/framework': '^11.0'
+                    }
+                })
+            }
+
+            return '-----BEGIN RSA PRIVATE KEY-----'
+        })
+        mockConnect.mockResolvedValue()
+        mockDispose.mockResolvedValue()
+
+        const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
+        const {createAppContext} = await import('#src/runtime/app-context.mjs')
+
+        await runDeployment({
+            serverIp: '127.0.0.1',
+            projectPath: '~/app',
+            branch: 'main',
+            sshUser: 'forge',
+            sshKey: '~/.ssh/id_rsa'
+        }, {
+            context: createAppContext({
+                executionMode: {
+                    workflow: 'deploy',
+                    setup: true
+                }
+            })
+        })
+
+        expect(mockConnect).toHaveBeenCalledWith({
+            host: '127.0.0.1',
+            username: 'forge',
+            privateKey: '-----BEGIN RSA PRIVATE KEY-----'
+        })
+        expect(mockExecCommand).not.toHaveBeenCalled()
+        expect(mockPrepareLocalDeployment).not.toHaveBeenCalled()
+        expect(mockWriteFile).not.toHaveBeenCalledWith(expect.stringContaining('deploy.lock'), expect.anything())
+    })
+
+    it('fails setup before connecting when the local project is not Laravel', async () => {
+        mockAccess.mockImplementation(async (filePath) => {
+            if (String(filePath).endsWith('artisan')) {
+                throw new Error('ENOENT')
+            }
+
+            return undefined
+        })
+
+        const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
+        const {createAppContext} = await import('#src/runtime/app-context.mjs')
+
+        await expect(runDeployment({
+            serverIp: '127.0.0.1',
+            projectPath: '~/app',
+            branch: 'main',
+            sshUser: 'forge',
+            sshKey: '~/.ssh/id_rsa'
+        }, {
+            context: createAppContext({
+                executionMode: {
+                    workflow: 'deploy',
+                    setup: true
+                }
+            })
+        })).rejects.toMatchObject({
+            code: 'ZEPHYR_SETUP_REQUIRES_LARAVEL'
+        })
+
+        expect(mockConnect).not.toHaveBeenCalled()
+        expect(mockExecCommand).not.toHaveBeenCalled()
+        expect(mockPrepareLocalDeployment).not.toHaveBeenCalled()
+    })
+
     it('fails before local preparation when a non-interactive Laravel deploy omits maintenance mode', async () => {
         mockReadFile.mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----')
         mockReaddir.mockResolvedValueOnce([])

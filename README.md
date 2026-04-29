@@ -49,6 +49,9 @@ zephyr minor --skip-checks
 # Deploy a configured app non-interactively
 zephyr --non-interactive --preset wyxos-release --maintenance off
 
+# Configure a Laravel app target and verify SSH without deploying
+zephyr --setup
+
 # Deploy a configured app non-interactively and auto-commit dirty changes
 zephyr --non-interactive --preset wyxos-release --auto-commit
 
@@ -105,6 +108,8 @@ If Zephyr would normally prompt to:
 then non-interactive mode stops immediately with a clear error instead.
 
 For Laravel app deployments, `--maintenance on|off` overrides both the saved preset preference and the maintenance prompt when you want an explicit choice for the current run.
+
+`--setup` is Laravel-only. It first verifies that the current project is a local Laravel app, then runs the normal local configuration prompts, tests SSH authentication to the selected server, and exits before local deploy preparation, pending snapshot handling, maintenance-mode decisions, locks, or remote deployment commands. On non-Laravel projects it fails before local setup changes are written.
 
 `--auto-commit` is available for app deployments and tells Zephyr to let local Codex inspect the repo and generate the dirty-tree commit message instead of prompting for one.
 
