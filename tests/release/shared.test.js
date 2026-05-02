@@ -110,6 +110,65 @@ describe('release shared helpers', () => {
         })).rejects.toThrow('Working tree has uncommitted changes. Commit or stash them before releasing.')
     })
 
+    it('auto-commits pending release changes in non-interactive mode when Codex provides a message', async () => {
+        const runCommand = vi.fn(async (command, args) => {
+            if (command === 'git' && args[0] === 'status') {
+                const invocationCount = runCommand.mock.calls.filter(([currentCommand, currentArgs]) => currentCommand === 'git' && currentArgs[0] === 'status').length
+                return invocationCount === 1
+                    ? {stdout: ' M src/index.mjs', stderr: ''}
+                    : {stdout: '', stderr: ''}
+            }
+
+            return {stdout: '', stderr: ''}
+        })
+        const runPrompt = vi.fn()
+        const suggestCommitMessage = vi.fn().mockResolvedValue('fix: update release workflow')
+        const logStep = vi.fn()
+        const logSuccess = vi.fn()
+
+        await ensureCleanWorkingTree('/workspace/demo', {
+            runCommand,
+            runPrompt,
+            logStep,
+            logSuccess,
+            suggestCommitMessage,
+            interactive: false,
+            autoCommit: true
+        })
+
+        expect(runPrompt).not.toHaveBeenCalled()
+        expect(logStep).toHaveBeenCalledWith('Auto-commit enabled. Using Codex-generated commit message "fix: update release workflow".')
+        expect(runCommand).toHaveBeenNthCalledWith(2, 'git', ['add', '-A'], {
+            capture: true,
+            cwd: '/workspace/demo'
+        })
+        expect(runCommand).toHaveBeenNthCalledWith(3, 'git', ['commit', '-m', 'fix: update release workflow'], {
+            capture: true,
+            cwd: '/workspace/demo'
+        })
+        expect(logSuccess).toHaveBeenCalledWith('Committed pending changes with "fix: update release workflow".')
+    })
+
+    it('fails release auto-commit when Codex cannot provide a usable message', async () => {
+        const runCommand = vi.fn(async (command, args) => {
+            if (command === 'git' && args[0] === 'status') {
+                return {stdout: ' M src/index.mjs', stderr: ''}
+            }
+
+            return {stdout: '', stderr: ''}
+        })
+
+        await expect(ensureCleanWorkingTree('/workspace/demo', {
+            runCommand,
+            runPrompt: vi.fn(),
+            suggestCommitMessage: vi.fn().mockResolvedValue(null),
+            interactive: false,
+            autoCommit: true
+        })).rejects.toThrow('Release auto-commit failed because Codex could not determine a usable commit message.')
+
+        expect(runCommand).toHaveBeenCalledTimes(1)
+    })
+
     it('commits pending changes after confirmation when the working tree is dirty', async () => {
         const runCommand = vi.fn(async (command, args) => {
             if (command === 'git' && args[0] === 'status') {

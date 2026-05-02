@@ -94,6 +94,7 @@ export async function ensureCleanWorkingTree(rootDir = process.cwd(), {
   logSuccess,
   logWarning,
   interactive = true,
+  autoCommit = false,
   skipGitHooks = false,
   suggestCommitMessage = suggestReleaseCommitMessage
 } = {}) {
@@ -107,7 +108,7 @@ export async function ensureCleanWorkingTree(rootDir = process.cwd(), {
     return
   }
 
-  if (!interactive || typeof runPrompt !== 'function') {
+  if (!autoCommit && (!interactive || typeof runPrompt !== 'function')) {
     throw new Error(DIRTY_WORKING_TREE_MESSAGE)
   }
 
@@ -117,24 +118,34 @@ export async function ensureCleanWorkingTree(rootDir = process.cwd(), {
     logWarning,
     statusEntries
   })
-  const {commitMessage} = await runPrompt([
-    {
-      type: 'input',
-      name: 'commitMessage',
-      message:
-        'Pending changes detected before release:\n\n' +
-        `${formatWorkingTreePreview(statusEntries)}\n\n` +
-        'Enter a commit message to stage and commit all current changes before continuing.\n' +
-        'Leave blank to cancel.',
-      default: suggestedCommitMessage ?? ''
+  let message = suggestedCommitMessage?.trim() ?? ''
+
+  if (autoCommit) {
+    if (!message) {
+      throw new Error('Release auto-commit failed because Codex could not determine a usable commit message.')
     }
-  ])
 
-  if (!commitMessage || commitMessage.trim().length === 0) {
-    throw new Error(DIRTY_WORKING_TREE_CANCELLED_MESSAGE)
+    logStep?.(`Auto-commit enabled. Using Codex-generated commit message "${message}".`)
+  } else {
+    const {commitMessage} = await runPrompt([
+      {
+        type: 'input',
+        name: 'commitMessage',
+        message:
+          'Pending changes detected before release:\n\n' +
+          `${formatWorkingTreePreview(statusEntries)}\n\n` +
+          'Enter a commit message to stage and commit all current changes before continuing.\n' +
+          'Leave blank to cancel.',
+        default: message
+      }
+    ])
+
+    if (!commitMessage || commitMessage.trim().length === 0) {
+      throw new Error(DIRTY_WORKING_TREE_CANCELLED_MESSAGE)
+    }
+
+    message = commitMessage.trim()
   }
-
-  const message = commitMessage.trim()
 
   logStep?.('Staging all pending changes before release...')
   await runCommand('git', ['add', '-A'], {

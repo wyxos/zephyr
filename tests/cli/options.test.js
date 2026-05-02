@@ -21,6 +21,7 @@ describe('cli/options', () => {
             workflowType: null,
             versionArg: '1.2.3',
             nonInteractive: true,
+            thenDeploy: null,
             json: true,
             setup: false,
             presetName: 'production',
@@ -35,13 +36,29 @@ describe('cli/options', () => {
             skipLint: true,
             skipBuild: false,
             skipDeploy: false,
+            consumerPackage: null,
+            consumerPresetName: null,
+            consumerMaintenanceMode: null,
+            consumerSkipChecks: false,
+            consumerSkipTests: false,
+            consumerSkipLint: false,
+            consumerSkipVersioning: false,
+            consumerSkipGitHooks: false,
+            consumerAutoCommit: false,
             explicitMaintenanceMode: true,
             explicitAutoCommit: false,
             explicitSkipVersioning: false,
             explicitSkipGitHooks: false,
             explicitSkipChecks: false,
             explicitSkipTests: true,
-            explicitSkipLint: true
+            explicitSkipLint: true,
+            explicitConsumerMaintenanceMode: false,
+            explicitConsumerSkipChecks: false,
+            explicitConsumerSkipTests: false,
+            explicitConsumerSkipLint: false,
+            explicitConsumerSkipVersioning: false,
+            explicitConsumerSkipGitHooks: false,
+            explicitConsumerAutoCommit: false
         })
     })
 
@@ -129,10 +146,81 @@ describe('cli/options', () => {
         expect(() => validateCliOptions(options)).toThrow('--skip-build and --skip-deploy are only valid for node/vue release workflows.')
     })
 
-    it('rejects auto-commit on package release workflows', () => {
+    it('allows auto-commit on package release workflows', () => {
         const options = parseCliOptions(['--type=node', '--auto-commit'])
 
-        expect(() => validateCliOptions(options)).toThrow('--auto-commit is only valid for app deployments.')
+        expect(options.autoCommit).toBe(true)
+        expect(options.explicitAutoCommit).toBe(true)
+        expect(() => validateCliOptions(options)).not.toThrow()
+    })
+
+    it('parses package-to-consumer release and deploy flags', () => {
+        const options = parseCliOptions([
+            '--type=node',
+            '--then-deploy',
+            '../php/atlas',
+            '--consumer-preset',
+            'wyxos-release',
+            '--consumer-package',
+            '@wyxos/vibe',
+            '--consumer-maintenance',
+            'off',
+            '--consumer-skip-checks',
+            '--consumer-skip-versioning',
+            '--consumer-skip-git-hooks',
+            '--consumer-auto-commit'
+        ])
+
+        expect(options).toEqual(expect.objectContaining({
+            workflowType: 'node',
+            thenDeploy: '../php/atlas',
+            consumerPresetName: 'wyxos-release',
+            consumerPackage: '@wyxos/vibe',
+            consumerMaintenanceMode: false,
+            consumerSkipChecks: true,
+            consumerSkipTests: true,
+            consumerSkipLint: true,
+            consumerSkipVersioning: true,
+            consumerSkipGitHooks: true,
+            consumerAutoCommit: true,
+            explicitConsumerMaintenanceMode: true,
+            explicitConsumerSkipChecks: true,
+            explicitConsumerSkipTests: true,
+            explicitConsumerSkipLint: true,
+            explicitConsumerSkipVersioning: true,
+            explicitConsumerSkipGitHooks: true,
+            explicitConsumerAutoCommit: true
+        }))
+        expect(() => validateCliOptions(options)).not.toThrow()
+    })
+
+    it('rejects package-to-consumer release and deploy flags without a consumer preset', () => {
+        const options = parseCliOptions(['--type=node', '--then-deploy', '../php/atlas'])
+
+        expect(() => validateCliOptions(options)).toThrow('--then-deploy requires --consumer-preset <name>.')
+    })
+
+    it('rejects package-to-consumer deploys outside node and vue package releases', () => {
+        expect(() => validateCliOptions(parseCliOptions([
+            '--type=packagist',
+            '--then-deploy',
+            '../php/atlas',
+            '--consumer-preset',
+            'wyxos-release'
+        ]))).toThrow('--then-deploy is only valid for node/vue package release workflows.')
+
+        expect(() => validateCliOptions(parseCliOptions([
+            '--then-deploy',
+            '../php/atlas',
+            '--consumer-preset',
+            'wyxos-release'
+        ]))).toThrow('--then-deploy is only valid for node/vue package release workflows.')
+    })
+
+    it('rejects consumer options without then-deploy', () => {
+        const options = parseCliOptions(['--type=node', '--consumer-preset', 'wyxos-release'])
+
+        expect(() => validateCliOptions(options)).toThrow('--consumer-* options require --then-deploy <path>.')
     })
 
     it('rejects skip-versioning when a bump argument is also provided', () => {

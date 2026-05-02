@@ -240,6 +240,7 @@ async function pushChanges(rootDir = process.cwd(), {
 export async function releasePackagistPackage({
                                                   releaseType,
                                                   skipGitHooks = false,
+                                                  autoCommit = false,
                                                   skipTests = false,
                                                   skipLint = false,
                                                   skipVersioning = false,
@@ -286,6 +287,7 @@ export async function releasePackagistPackage({
         logSuccess,
         logWarning,
         interactive,
+        autoCommit,
         skipGitHooks
     })
     await ensureReleaseBranchReady({rootDir, branchMethod: 'show-current', logStep, logWarning})
@@ -324,4 +326,5 @@ export async function releasePackagistPackage({
 
     logSuccess?.(`Release workflow completed for ${composer.name}@${updatedComposer.version}.`)
     logStep?.('Note: Packagist will automatically detect the new git tag and update the package.')
+    return updatedComposer
 }

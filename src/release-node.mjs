@@ -10,6 +10,7 @@ function hasExplicitReleaseOptions(options = {}) {
         'skipTests',
         'skipLint',
         'skipVersioning',
+        'autoCommit',
         'skipBuild',
         'skipDeploy'
     ].some((key) => key in options)
@@ -23,11 +24,12 @@ export async function releaseNode(options = {}) {
             skipTests: options.skipTests === true,
             skipLint: options.skipLint === true,
             skipVersioning: options.skipVersioning === true,
+            autoCommit: options.autoCommit === true,
             skipBuild: options.skipBuild === true,
             skipDeploy: options.skipDeploy === true
         }
         : parseReleaseArgs({
-            booleanFlags: ['--skip-git-hooks', '--skip-tests', '--skip-lint', '--skip-versioning', '--skip-build', '--skip-deploy']
+            booleanFlags: ['--skip-git-hooks', '--auto-commit', '--skip-tests', '--skip-lint', '--skip-versioning', '--skip-build', '--skip-deploy']
         })
 
     if (parsed.skipVersioning && parsed.releaseType) {
@@ -43,10 +45,11 @@ export async function releaseNode(options = {}) {
     })
     const {logProcessing: logStep, logSuccess, logWarning, runPrompt, runCommand, runCommandCapture, executionMode} = context
 
-    await releaseNodePackage({
+    return await releaseNodePackage({
         releaseType: parsed.releaseType,
         skipGitHooks: parsed.skipGitHooks === true || executionMode?.skipGitHooks === true,
         skipTests: parsed.skipTests === true,
+        autoCommit: parsed.autoCommit === true,
         skipLint: parsed.skipLint === true,
         skipVersioning: parsed.skipVersioning === true,
         skipBuild: parsed.skipBuild === true,

@@ -70,6 +70,9 @@ zephyr --type node
 # Release a Node/Vue package with an explicit bump
 zephyr --type node minor
 
+# Release a Node/Vue package, update a local consumer app, then deploy that app
+zephyr --type node --then-deploy ../php/atlas --consumer-preset wyxos-release --consumer-package @wyxos/vibe
+
 # Release a Packagist package
 zephyr --type packagist patch
 
@@ -111,9 +114,11 @@ For Laravel app deployments, `--maintenance on|off` overrides both the saved pre
 
 `--setup` is Laravel-only. It first verifies that the current project is a local Laravel app, then runs the normal local configuration prompts, tests SSH authentication to the selected server, and exits before local deploy preparation, pending snapshot handling, maintenance-mode decisions, locks, or remote deployment commands. On non-Laravel projects it fails before local setup changes are written.
 
-`--auto-commit` is available for app deployments and tells Zephyr to let local Codex inspect the repo and generate the dirty-tree commit message instead of prompting for one.
+`--auto-commit` is available for app deployments and package releases. It tells Zephyr to let local Codex inspect the repo and generate the dirty-tree commit message instead of prompting for one.
 
 `--skip-versioning` keeps Zephyr from mutating `package.json` or `composer.json`. On app deploys it skips the local npm version bump step. On package release workflows it releases the version already present in the manifest and creates the release tag from the current `HEAD`.
+
+`--then-deploy <path>` is available for `--type node` and `--type vue` package releases. After the package release succeeds and the published version is visible on npm, Zephyr updates the local consumer repository, commits the consumer dependency change, and deploys that consumer through its normal Zephyr app-deploy preset. Use `--consumer-preset <name>` to choose the app preset and `--consumer-package <name>` when the consumer dependency name differs from the released package name. Consumer lockfiles are refreshed only when the consumer repository already tracks an npm lockfile; Zephyr does not create or commit server-side lockfiles.
 
 ## AI Agents and Automation
 
@@ -131,6 +136,14 @@ Recommended pattern for package releases:
 zephyr --type node --non-interactive --json minor
 zephyr --type packagist --non-interactive --json patch
 ```
+
+Recommended pattern for releasing a package and immediately deploying a consumer app:
+
+```bash
+zephyr --type node --non-interactive --json --then-deploy ../php/atlas --consumer-preset wyxos-release --consumer-package @wyxos/vibe minor
+```
+
+The consumer update happens in the local consumer repository before deployment. Production receives the committed consumer state through the normal deployment path.
 
 In `--json` mode Zephyr emits NDJSON events on `stdout` with a stable shape:
 

@@ -391,6 +391,7 @@ async function deployGHPages(skipDeploy, pkg, rootDir = process.cwd(), {
 export async function releaseNodePackage({
                                              releaseType,
                                              skipGitHooks = false,
+                                             autoCommit = false,
                                              skipTests = false,
                                              skipLint = false,
                                              skipVersioning = false,
@@ -431,6 +432,7 @@ export async function releaseNodePackage({
         logSuccess,
         logWarning,
         interactive,
+        autoCommit,
         skipGitHooks
     })
     await ensureReleaseBranchReady({rootDir, branchMethod: 'show-current', logStep, logWarning})
@@ -472,4 +474,5 @@ export async function releaseNodePackage({
 
     logStep?.('Publishing will be handled by GitHub Actions via trusted publishing.')
     logSuccess?.(`Release workflow completed for ${updatedPkg.name}@${updatedPkg.version}.`)
+    return updatedPkg
 }

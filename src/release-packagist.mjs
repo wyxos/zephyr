@@ -9,6 +9,7 @@ function hasExplicitReleaseOptions(options = {}) {
         'skipGitHooks',
         'skipTests',
         'skipLint',
+        'autoCommit',
         'skipVersioning'
     ].some((key) => key in options)
 }
@@ -20,10 +21,11 @@ export async function releasePackagist(options = {}) {
             skipGitHooks: options.skipGitHooks === true,
             skipTests: options.skipTests === true,
             skipLint: options.skipLint === true,
+            autoCommit: options.autoCommit === true,
             skipVersioning: options.skipVersioning === true
         }
         : parseReleaseArgs({
-            booleanFlags: ['--skip-git-hooks', '--skip-tests', '--skip-lint', '--skip-versioning']
+            booleanFlags: ['--skip-git-hooks', '--auto-commit', '--skip-tests', '--skip-lint', '--skip-versioning']
         })
 
     if (parsed.skipVersioning && parsed.releaseType) {
@@ -39,9 +41,10 @@ export async function releasePackagist(options = {}) {
     })
     const {logProcessing: logStep, logSuccess, logWarning, runPrompt, runCommand, runCommandCapture, executionMode} = context
 
-    await releasePackagistPackage({
+    return await releasePackagistPackage({
         releaseType: parsed.releaseType,
         skipGitHooks: parsed.skipGitHooks === true || executionMode?.skipGitHooks === true,
+        autoCommit: parsed.autoCommit === true,
         skipTests: parsed.skipTests === true,
         skipLint: parsed.skipLint === true,
         skipVersioning: parsed.skipVersioning === true,

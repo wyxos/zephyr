@@ -35,13 +35,17 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .exitOverride()
         .option('--type <type>', 'Workflow type (node|vue|packagist). Omit for normal app deployments.')
         .option('--non-interactive', 'Fail instead of prompting when Zephyr needs user input.')
+        .option('--then-deploy <path>', 'After a node/vue package release, update and deploy a local consumer app repo.')
+        .option('--consumer-package <name>', 'Package name to update in the --then-deploy consumer. Defaults to the released package name.')
+        .option('--consumer-preset <name>', 'Preset name to use for the --then-deploy consumer app deployment.')
+        .option('--consumer-maintenance <mode>', 'Laravel maintenance mode policy for the --then-deploy consumer app deployment (on|off).')
         .option('--json', 'Emit NDJSON events to stdout. Requires --non-interactive.')
         .option('--setup', 'Configure an app deployment target and verify SSH connectivity without deploying.')
         .option('--preset <name>', 'Preset name to use for non-interactive app deployments.')
         .option('--resume-pending', 'Resume a saved pending deployment snapshot without prompting.')
         .option('--discard-pending', 'Discard a saved pending deployment snapshot without prompting.')
         .option('--maintenance <mode>', 'Laravel maintenance mode policy for app deployments (on|off).')
-        .option('--auto-commit', 'Automatically commit dirty deploy changes with a Codex-generated message.')
+        .option('--auto-commit', 'Automatically commit dirty changes with a Codex-generated message.')
         .option('--skip-versioning', 'Skip updating package/composer version files before continuing.')
         .option('--skip-git-hooks', 'Bypass local git hooks for any commits and pushes Zephyr performs.')
         .option('--skip-checks', 'Skip Zephyr local lint and test execution.')
@@ -49,6 +53,12 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .option('--skip-lint', 'Skip Zephyr local lint execution in package release and app deployment workflows.')
         .option('--skip-build', 'Skip build execution in node/vue release workflows.')
         .option('--skip-deploy', 'Skip GitHub Pages deployment in node/vue release workflows.')
+        .option('--consumer-skip-checks', 'Skip Zephyr local lint and test execution in the --then-deploy consumer deployment.')
+        .option('--consumer-skip-tests', 'Skip Zephyr local test execution in the --then-deploy consumer deployment.')
+        .option('--consumer-skip-lint', 'Skip Zephyr local lint execution in the --then-deploy consumer deployment.')
+        .option('--consumer-skip-versioning', 'Skip local version bumping in the --then-deploy consumer deployment.')
+        .option('--consumer-skip-git-hooks', 'Bypass local git hooks for commits and pushes in the --then-deploy consumer repo.')
+        .option('--consumer-auto-commit', 'Automatically commit dirty deploy changes in the --then-deploy consumer repo.')
         .argument(
             '[version]',
             'Version or npm bump type for deployments (e.g. 1.2.3, patch, minor, major).'
@@ -63,6 +73,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
     const options = program.opts()
     const workflowType = options.type ?? null
     const explicitSkipChecks = hasFlag(args, '--skip-checks')
+    const explicitConsumerSkipChecks = hasFlag(args, '--consumer-skip-checks')
 
     if (workflowType && !WORKFLOW_TYPES.has(workflowType)) {
         throw new InvalidCliOptionsError('Invalid value for --type. Use one of: node, vue, packagist.')
@@ -72,6 +83,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         workflowType,
         versionArg: program.args[0] ?? null,
         nonInteractive: Boolean(options.nonInteractive),
+        thenDeploy: options.thenDeploy ?? null,
         json: Boolean(options.json),
         setup: Boolean(options.setup),
         presetName: options.preset ?? null,
@@ -86,13 +98,29 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         skipLint: Boolean(options.skipLint || options.skipChecks),
         skipBuild: Boolean(options.skipBuild),
         skipDeploy: Boolean(options.skipDeploy),
+        consumerPackage: options.consumerPackage ?? null,
+        consumerPresetName: options.consumerPreset ?? null,
+        consumerMaintenanceMode: normalizeMaintenanceMode(options.consumerMaintenance),
+        consumerSkipChecks: Boolean(options.consumerSkipChecks),
+        consumerSkipTests: Boolean(options.consumerSkipTests || options.consumerSkipChecks),
+        consumerSkipLint: Boolean(options.consumerSkipLint || options.consumerSkipChecks),
+        consumerSkipVersioning: Boolean(options.consumerSkipVersioning),
+        consumerSkipGitHooks: Boolean(options.consumerSkipGitHooks),
+        consumerAutoCommit: Boolean(options.consumerAutoCommit),
         explicitMaintenanceMode: hasFlag(args, '--maintenance'),
         explicitAutoCommit: hasFlag(args, '--auto-commit'),
         explicitSkipVersioning: hasFlag(args, '--skip-versioning'),
         explicitSkipGitHooks: hasFlag(args, '--skip-git-hooks'),
         explicitSkipChecks,
         explicitSkipTests: hasFlag(args, '--skip-tests') || explicitSkipChecks,
-        explicitSkipLint: hasFlag(args, '--skip-lint') || explicitSkipChecks
+        explicitSkipLint: hasFlag(args, '--skip-lint') || explicitSkipChecks,
+        explicitConsumerMaintenanceMode: hasFlag(args, '--consumer-maintenance'),
+        explicitConsumerSkipChecks,
+        explicitConsumerSkipTests: hasFlag(args, '--consumer-skip-tests') || explicitConsumerSkipChecks,
+        explicitConsumerSkipLint: hasFlag(args, '--consumer-skip-lint') || explicitConsumerSkipChecks,
+        explicitConsumerSkipVersioning: hasFlag(args, '--consumer-skip-versioning'),
+        explicitConsumerSkipGitHooks: hasFlag(args, '--consumer-skip-git-hooks'),
+        explicitConsumerAutoCommit: hasFlag(args, '--consumer-auto-commit')
     }
 }
 
@@ -102,6 +130,7 @@ export function validateCliOptions(options = {}) {
         nonInteractive = false,
         json = false,
         setup = false,
+        thenDeploy = null,
         presetName = null,
         resumePending = false,
         discardPending = false,
@@ -113,7 +142,16 @@ export function validateCliOptions(options = {}) {
         skipLint = false,
         skipBuild = false,
         skipDeploy = false,
-        versionArg = null
+        versionArg = null,
+        consumerPackage = null,
+        consumerPresetName = null,
+        consumerMaintenanceMode = null,
+        consumerSkipChecks = false,
+        consumerSkipTests = false,
+        consumerSkipLint = false,
+        consumerSkipVersioning = false,
+        consumerSkipGitHooks = false,
+        consumerAutoCommit = false
     } = options
 
     if (json && !nonInteractive) {
@@ -125,6 +163,31 @@ export function validateCliOptions(options = {}) {
     }
 
     const isPackageRelease = workflowType === 'node' || workflowType === 'vue' || workflowType === 'packagist'
+    const isNodePackageRelease = workflowType === 'node' || workflowType === 'vue'
+    const hasConsumerOptions = Boolean(
+        thenDeploy ||
+        consumerPackage ||
+        consumerPresetName ||
+        consumerMaintenanceMode !== null ||
+        consumerSkipChecks ||
+        consumerSkipTests ||
+        consumerSkipLint ||
+        consumerSkipVersioning ||
+        consumerSkipGitHooks ||
+        consumerAutoCommit
+    )
+
+    if (hasConsumerOptions && !thenDeploy) {
+        throw new InvalidCliOptionsError('--consumer-* options require --then-deploy <path>.')
+    }
+
+    if (thenDeploy && !isNodePackageRelease) {
+        throw new InvalidCliOptionsError('--then-deploy is only valid for node/vue package release workflows.')
+    }
+
+    if (thenDeploy && !consumerPresetName) {
+        throw new InvalidCliOptionsError('--then-deploy requires --consumer-preset <name>.')
+    }
 
     if (isPackageRelease) {
         if (setup) {
@@ -141,10 +204,6 @@ export function validateCliOptions(options = {}) {
 
         if (maintenanceMode !== null) {
             throw new InvalidCliOptionsError('--maintenance is only valid for app deployments.')
-        }
-
-        if (autoCommit) {
-            throw new InvalidCliOptionsError('--auto-commit is only valid for app deployments.')
         }
     } else {
         if (skipBuild || skipDeploy) {

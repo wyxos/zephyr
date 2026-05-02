@@ -9,6 +9,7 @@ const {
     mockEnsureProjectReleaseScript,
     mockNotifyWorkflowResult,
     mockReleaseNode,
+    mockReleasePackageThenDeployConsumer,
     mockReleasePackagist,
     mockAssertLaravelSetupProject,
     mockResolvePendingSnapshot,
@@ -52,6 +53,7 @@ const {
     mockEnsureProjectReleaseScript: vi.fn(),
     mockNotifyWorkflowResult: vi.fn(),
     mockReleaseNode: vi.fn(),
+    mockReleasePackageThenDeployConsumer: vi.fn(),
     mockReleasePackagist: vi.fn(),
     mockAssertLaravelSetupProject: vi.fn(),
     mockResolvePendingSnapshot: vi.fn(),
@@ -74,6 +76,10 @@ vi.mock('#src/release-node.mjs', () => ({
 
 vi.mock('#src/release-packagist.mjs', () => ({
     releasePackagist: mockReleasePackagist
+}))
+
+vi.mock('#src/application/consumer/release-package-then-deploy-consumer.mjs', () => ({
+    releasePackageThenDeployConsumer: mockReleasePackageThenDeployConsumer
 }))
 
 vi.mock('#src/dependency-scanner.mjs', () => ({
@@ -127,6 +133,7 @@ describe('main entrypoint', () => {
         mockEnsureProjectReleaseScript.mockReset()
         mockNotifyWorkflowResult.mockReset()
         mockReleaseNode.mockReset()
+        mockReleasePackageThenDeployConsumer.mockReset()
         mockReleasePackagist.mockReset()
         mockAssertLaravelSetupProject.mockReset()
         mockResolvePendingSnapshot.mockReset()
@@ -165,6 +172,9 @@ describe('main entrypoint', () => {
         mockNotifyWorkflowResult.mockResolvedValue(true)
         mockAssertLaravelSetupProject.mockResolvedValue(undefined)
         mockValidateLocalDependencies.mockResolvedValue(undefined)
+        mockReleaseNode.mockResolvedValue({name: '@wyxos/vibe', version: '3.1.23'})
+        mockReleasePackagist.mockResolvedValue({name: 'wyxos/shift-php', version: '1.2.3'})
+        mockReleasePackageThenDeployConsumer.mockResolvedValue(undefined)
     })
 
     it('delegates node releases to the node release command', async () => {
@@ -193,6 +203,48 @@ describe('main entrypoint', () => {
         expect(mockReleaseNode).toHaveBeenCalledWith(expect.objectContaining({
             skipLint: true,
             skipTests: true
+        }))
+    })
+
+    it('updates and deploys a consumer app after a node package release', async () => {
+        const {main} = await import('#src/main.mjs')
+
+        await main({
+            workflowType: 'node',
+            versionArg: 'patch',
+            thenDeploy: '../php/atlas',
+            consumerPackage: '@wyxos/vibe',
+            consumerPresetName: 'wyxos-release',
+            consumerMaintenanceMode: false,
+            consumerSkipChecks: true,
+            consumerSkipVersioning: true,
+            consumerSkipGitHooks: true,
+            consumerAutoCommit: true
+        })
+
+        expect(mockReleaseNode).toHaveBeenCalledWith(expect.objectContaining({
+            releaseType: 'patch'
+        }))
+        expect(mockReleasePackageThenDeployConsumer).toHaveBeenCalledWith(expect.objectContaining({
+            producerRootDir: process.cwd(),
+            consumerRootDir: '../php/atlas',
+            releasedPackage: {name: '@wyxos/vibe', version: '3.1.23'},
+            packageName: '@wyxos/vibe',
+            presetName: 'wyxos-release',
+            maintenanceMode: false,
+            skipChecks: true,
+            skipTests: true,
+            skipLint: true,
+            skipVersioning: true,
+            skipGitHooks: true,
+            autoCommit: true,
+            explicitMaintenanceMode: true,
+            explicitSkipChecks: true,
+            explicitSkipTests: true,
+            explicitSkipLint: true,
+            explicitSkipVersioning: true,
+            explicitSkipGitHooks: true,
+            explicitAutoCommit: true
         }))
     })
 

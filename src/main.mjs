@@ -18,6 +18,7 @@ import {selectDeploymentTarget} from './application/configuration/select-deploym
 import {resolvePendingSnapshot} from './application/deploy/resolve-pending-snapshot.mjs'
 import {runDeployment} from './application/deploy/run-deployment.mjs'
 import {assertLaravelSetupProject} from './application/deploy/verify-laravel-setup.mjs'
+import {releasePackageThenDeployConsumer} from './application/consumer/release-package-then-deploy-consumer.mjs'
 import {SKIP_GIT_HOOKS_WARNING} from './utils/git-hooks.mjs'
 import {notifyWorkflowResult} from './utils/notifications.mjs'
 
@@ -32,6 +33,7 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
             workflowType: firstArg.workflowType ?? firstArg.type ?? null,
             versionArg: firstArg.versionArg ?? null,
             nonInteractive: firstArg.nonInteractive === true,
+            thenDeploy: firstArg.thenDeploy ?? null,
             json: firstArg.json === true,
             setup: firstArg.setup === true,
             presetName: firstArg.presetName ?? null,
@@ -46,6 +48,22 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
             skipLint: firstArg.skipLint === true || firstArg.skipChecks === true,
             skipBuild: firstArg.skipBuild === true,
             skipDeploy: firstArg.skipDeploy === true,
+            consumerPackage: firstArg.consumerPackage ?? null,
+            consumerPresetName: firstArg.consumerPresetName ?? null,
+            consumerMaintenanceMode: firstArg.consumerMaintenanceMode ?? null,
+            consumerSkipChecks: firstArg.consumerSkipChecks === true,
+            consumerSkipTests: firstArg.consumerSkipTests === true || firstArg.consumerSkipChecks === true,
+            consumerSkipLint: firstArg.consumerSkipLint === true || firstArg.consumerSkipChecks === true,
+            consumerSkipVersioning: firstArg.consumerSkipVersioning === true,
+            consumerSkipGitHooks: firstArg.consumerSkipGitHooks === true,
+            consumerAutoCommit: firstArg.consumerAutoCommit === true,
+            explicitConsumerMaintenanceMode: firstArg.explicitConsumerMaintenanceMode === true || 'consumerMaintenanceMode' in firstArg,
+            explicitConsumerSkipChecks: firstArg.explicitConsumerSkipChecks === true || 'consumerSkipChecks' in firstArg,
+            explicitConsumerSkipTests: firstArg.explicitConsumerSkipTests === true || 'consumerSkipTests' in firstArg || 'consumerSkipChecks' in firstArg,
+            explicitConsumerSkipLint: firstArg.explicitConsumerSkipLint === true || 'consumerSkipLint' in firstArg || 'consumerSkipChecks' in firstArg,
+            explicitConsumerSkipVersioning: firstArg.explicitConsumerSkipVersioning === true || 'consumerSkipVersioning' in firstArg,
+            explicitConsumerSkipGitHooks: firstArg.explicitConsumerSkipGitHooks === true || 'consumerSkipGitHooks' in firstArg,
+            explicitConsumerAutoCommit: firstArg.explicitConsumerAutoCommit === true || 'consumerAutoCommit' in firstArg,
             explicitMaintenanceMode: firstArg.explicitMaintenanceMode === true || 'maintenanceMode' in firstArg,
             explicitAutoCommit: firstArg.explicitAutoCommit === true || 'autoCommit' in firstArg,
             explicitSkipVersioning: firstArg.explicitSkipVersioning === true || 'skipVersioning' in firstArg,
@@ -61,6 +79,7 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
         workflowType: firstArg ?? null,
         versionArg: secondArg ?? null,
         nonInteractive: false,
+        thenDeploy: null,
         json: false,
         setup: false,
         presetName: null,
@@ -75,6 +94,22 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
         skipLint: false,
         skipBuild: false,
         skipDeploy: false,
+        consumerPackage: null,
+        consumerPresetName: null,
+        consumerMaintenanceMode: null,
+        consumerSkipChecks: false,
+        consumerSkipTests: false,
+        consumerSkipLint: false,
+        consumerSkipVersioning: false,
+        consumerSkipGitHooks: false,
+        consumerAutoCommit: false,
+        explicitConsumerMaintenanceMode: false,
+        explicitConsumerSkipChecks: false,
+        explicitConsumerSkipTests: false,
+        explicitConsumerSkipLint: false,
+        explicitConsumerSkipVersioning: false,
+        explicitConsumerSkipGitHooks: false,
+        explicitConsumerAutoCommit: false,
         explicitMaintenanceMode: false,
         explicitAutoCommit: false,
         explicitSkipVersioning: false,
@@ -209,8 +244,9 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         }
 
         if (options.workflowType === 'node' || options.workflowType === 'vue') {
-            await releaseNode({
+            const releasedPackage = await releaseNode({
                 releaseType: options.versionArg,
+                autoCommit: options.autoCommit,
                 skipGitHooks: options.skipGitHooks,
                 skipTests: options.skipTests,
                 skipLint: options.skipLint,
@@ -219,6 +255,32 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                 skipDeploy: options.skipDeploy,
                 context: appContext
             })
+
+            if (options.thenDeploy) {
+                await releasePackageThenDeployConsumer({
+                    producerRootDir: rootDir,
+                    consumerRootDir: options.thenDeploy,
+                    releasedPackage,
+                    packageName: options.consumerPackage,
+                    presetName: options.consumerPresetName,
+                    maintenanceMode: options.consumerMaintenanceMode,
+                    skipChecks: options.consumerSkipChecks,
+                    skipTests: options.consumerSkipTests,
+                    skipLint: options.consumerSkipLint,
+                    skipVersioning: options.consumerSkipVersioning,
+                    skipGitHooks: options.consumerSkipGitHooks,
+                    autoCommit: options.consumerAutoCommit,
+                    explicitMaintenanceMode: options.explicitConsumerMaintenanceMode,
+                    explicitSkipChecks: options.explicitConsumerSkipChecks,
+                    explicitSkipTests: options.explicitConsumerSkipTests,
+                    explicitSkipLint: options.explicitConsumerSkipLint,
+                    explicitSkipVersioning: options.explicitConsumerSkipVersioning,
+                    explicitSkipGitHooks: options.explicitConsumerSkipGitHooks,
+                    explicitAutoCommit: options.explicitConsumerAutoCommit,
+                    json: currentExecutionMode.json
+                })
+            }
+
             emitEvent?.('run_completed', {
                 message: 'Zephyr workflow completed successfully.',
                 data: {
@@ -240,12 +302,14 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         if (options.workflowType === 'packagist') {
             await releasePackagist({
                 releaseType: options.versionArg,
+                autoCommit: options.autoCommit,
                 skipGitHooks: options.skipGitHooks,
                 skipTests: options.skipTests,
                 skipLint: options.skipLint,
                 skipVersioning: options.skipVersioning,
                 context: appContext
             })
+
             emitEvent?.('run_completed', {
                 message: 'Zephyr workflow completed successfully.',
                 data: {
