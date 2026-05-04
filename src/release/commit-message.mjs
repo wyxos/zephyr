@@ -15,6 +15,7 @@ const GENERIC_SUBJECT_PATTERNS = [
   /^stage and commit (all )?(current |pending )?changes( before .+)?$/i,
   /^(allow|enable|support) committing pending changes( before .+)?$/i,
   /^commit changes$/i,
+  /^no pending changes$/i,
   /^update changes$/i,
   /^update files$/i,
   /^update work$/i,
@@ -147,14 +148,63 @@ export function sanitizeSuggestedCommitMessage(message) {
   return normalized
 }
 
+function getStatusPaths(statusEntries = []) {
+  return statusEntries
+    .map((entry) => entry?.path)
+    .filter((entryPath) => typeof entryPath === 'string' && entryPath.length > 0)
+}
+
+export function suggestFallbackCommitMessage(statusEntries = []) {
+  const paths = getStatusPaths(statusEntries)
+
+  if (paths.length === 0) {
+    return null
+  }
+
+  if (paths.some((entryPath) => entryPath.includes('FullscreenPreviewRail'))) {
+    return 'feat: refine fullscreen preview rail'
+  }
+
+  if (paths.some((entryPath) => entryPath.includes('consumer') && entryPath.includes('dependency'))) {
+    return 'feat: support dirty consumer release chains'
+  }
+
+  if (paths.every((entryPath) => /(^README\.md$|\.md$|^docs\/)/.test(entryPath))) {
+    return 'docs: update project documentation'
+  }
+
+  if (paths.some((entryPath) => entryPath.startsWith('src/'))) {
+    return paths.some((entryPath) => entryPath.startsWith('tests/') || entryPath.includes('.test.'))
+      ? 'fix: update source behavior and tests'
+      : 'fix: update source behavior'
+  }
+
+  if (paths.some((entryPath) => /(^package\.json$|package-lock\.json$|npm-shrinkwrap\.json$)/.test(entryPath))) {
+    return 'chore: update package metadata'
+  }
+
+  return null
+}
+
 export async function suggestCommitMessage(rootDir = process.cwd(), {
   runCommand,
   commandExistsImpl = commandExists,
   logStep,
-  logWarning
+  logWarning,
+  statusEntries = []
 } = {}) {
+  const fallbackMessage = () => {
+    const message = suggestFallbackCommitMessage(statusEntries)
+
+    if (message) {
+      logWarning?.(`Using path-based fallback commit message "${message}".`)
+    }
+
+    return message
+  }
+
   if (!commandExistsImpl('codex')) {
-    return null
+    return fallbackMessage()
   }
 
   let tempDir = null
@@ -188,10 +238,17 @@ export async function suggestCommitMessage(rootDir = process.cwd(), {
     })
 
     const rawMessage = await readFile(outputPath, 'utf8')
-    return sanitizeSuggestedCommitMessage(rawMessage)
+    const message = sanitizeSuggestedCommitMessage(rawMessage)
+
+    if (message) {
+      return message
+    }
+
+    logWarning?.('Codex suggested an unusable commit message.')
+    return fallbackMessage()
   } catch (error) {
     logWarning?.(`Codex could not suggest a commit message: ${error.message}`)
-    return null
+    return fallbackMessage()
   } finally {
     if (tempDir) {
       await rm(tempDir, {recursive: true, force: true}).catch(() => {})

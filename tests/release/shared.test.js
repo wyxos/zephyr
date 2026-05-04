@@ -266,6 +266,7 @@ describe('release shared helpers', () => {
         expect(sanitizeSuggestedCommitMessage('feat: commit pending changes before deployment')).toBeNull()
         expect(sanitizeSuggestedCommitMessage('fix: allow committing pending changes before release')).toBeNull()
         expect(sanitizeSuggestedCommitMessage('chore: improve release workflow')).toBeNull()
+        expect(sanitizeSuggestedCommitMessage('chore: no pending changes')).toBeNull()
     })
 
     it('asks Codex for a suggested conventional commit message when available', async () => {
@@ -308,6 +309,31 @@ describe('release shared helpers', () => {
         expect(codexCall?.[1].at(-1)).toContain('Do not include extra text.')
         expect(logStep).toHaveBeenCalledWith('Generating a suggested commit message with Codex...')
         expect(logWarning).not.toHaveBeenCalled()
+    })
+
+    it('uses a path-based fallback when Codex suggests a stale no-op message', async () => {
+        mockCommandExists.mockReturnValue(true)
+        const runCommand = vi.fn(async (_command, args) => {
+            const outputPath = args[args.indexOf('--output-last-message') + 1]
+            await writeFile(outputPath, 'chore: no pending changes\n')
+            return {stdout: '', stderr: ''}
+        })
+        const logWarning = vi.fn()
+
+        const result = await suggestReleaseCommitMessage('/workspace/demo', {
+            runCommand,
+            commandExistsImpl: mockCommandExists,
+            logStep: vi.fn(),
+            logWarning,
+            statusEntries: [
+                {indexStatus: ' ', worktreeStatus: 'M', path: 'src/components/FullscreenPreviewRail.vue', previousPath: null},
+                {indexStatus: ' ', worktreeStatus: 'M', path: 'tests/unit/FullscreenSurfaceLayout.test.ts', previousPath: null}
+            ]
+        })
+
+        expect(result).toBe('feat: refine fullscreen preview rail')
+        expect(logWarning).toHaveBeenCalledWith('Codex suggested an unusable commit message.')
+        expect(logWarning).toHaveBeenCalledWith('Using path-based fallback commit message "feat: refine fullscreen preview rail".')
     })
 
     it('validates release dependencies with the provided prompt and logger', async () => {
