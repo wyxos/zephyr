@@ -55,7 +55,7 @@ describe('application/consumer/release-package-then-deploy-consumer', () => {
         const createAppContextImpl = vi.fn(() => context)
         const waitForNpmPackageVersionImpl = vi.fn().mockResolvedValue({packageName: '@wyxos/vibe', version: '3.1.23'})
         const updateConsumerDependencyImpl = vi.fn().mockResolvedValue({committed: true})
-        const assertCleanConsumerRepoImpl = vi.fn().mockResolvedValue(undefined)
+        const ensureConsumerRepoReadyImpl = vi.fn().mockResolvedValue({committed: false, pushed: false})
         const validateLocalDependenciesImpl = vi.fn().mockResolvedValue(undefined)
         const deploymentConfig = {
             serverIp: '203.0.113.10',
@@ -102,7 +102,7 @@ describe('application/consumer/release-package-then-deploy-consumer', () => {
             createAppContextImpl,
             waitForNpmPackageVersionImpl,
             updateConsumerDependencyImpl,
-            assertCleanConsumerRepoImpl,
+            ensureConsumerRepoReadyImpl,
             validateLocalDependenciesImpl,
             selectDeploymentTargetImpl,
             resolvePendingSnapshotImpl,
@@ -122,9 +122,13 @@ describe('application/consumer/release-package-then-deploy-consumer', () => {
             })
         })
         expect(mockCreateConfigurationService).toHaveBeenCalledWith(context)
-        expect(assertCleanConsumerRepoImpl).toHaveBeenCalledWith(consumerRootDir, {
-            runCommandCapture: context.runCommandCapture
-        })
+        expect(ensureConsumerRepoReadyImpl).toHaveBeenCalledWith(consumerRootDir, expect.objectContaining({
+            runCommand: context.runCommand,
+            runCommandCapture: context.runCommandCapture,
+            runPrompt: context.runPrompt,
+            autoCommit: true,
+            skipGitHooks: true
+        }))
         expect(bootstrapImpl.ensureGitignoreEntry).toHaveBeenCalledWith(consumerRootDir, expect.objectContaining({
             skipGitHooks: true
         }))
@@ -161,6 +165,8 @@ describe('application/consumer/release-package-then-deploy-consumer', () => {
             rootDir: consumerRootDir,
             packageName: '@wyxos/vibe',
             version: '3.1.23',
+            runPrompt: context.runPrompt,
+            autoCommit: true,
             skipGitHooks: true
         }))
         expect(resolvePendingSnapshotImpl).toHaveBeenCalledWith(consumerRootDir, deploymentConfig, expect.objectContaining({
@@ -174,12 +180,12 @@ describe('application/consumer/release-package-then-deploy-consumer', () => {
             context,
             presetState
         })
-        expect(assertCleanConsumerRepoImpl.mock.invocationCallOrder[0]).toBeLessThan(bootstrapImpl.ensureGitignoreEntry.mock.invocationCallOrder[0])
+        expect(ensureConsumerRepoReadyImpl.mock.invocationCallOrder[0]).toBeLessThan(bootstrapImpl.ensureGitignoreEntry.mock.invocationCallOrder[0])
         expect(waitForNpmPackageVersionImpl.mock.invocationCallOrder[0]).toBeLessThan(updateConsumerDependencyImpl.mock.invocationCallOrder[0])
         expect(updateConsumerDependencyImpl.mock.invocationCallOrder[0]).toBeLessThan(runDeploymentImpl.mock.invocationCallOrder[0])
     })
 
-    it('fails before bootstrapping the consumer when the consumer repo is already dirty', async () => {
+    it('fails before bootstrapping the consumer when dirty consumer changes cannot be committed', async () => {
         const consumerRootDir = await createConsumerRoot()
         const context = {
             logProcessing: vi.fn(),
@@ -195,7 +201,7 @@ describe('application/consumer/release-package-then-deploy-consumer', () => {
             ensureGitignoreEntry: vi.fn(),
             ensureProjectReleaseScript: vi.fn()
         }
-        const assertCleanConsumerRepoImpl = vi.fn().mockRejectedValue(new Error('Consumer repository has uncommitted changes.'))
+        const ensureConsumerRepoReadyImpl = vi.fn().mockRejectedValue(new Error('Consumer repository has uncommitted changes.'))
         mockCreateConfigurationService.mockReturnValue({})
 
         await expect(releasePackageThenDeployConsumer({
@@ -204,13 +210,15 @@ describe('application/consumer/release-package-then-deploy-consumer', () => {
             releasedPackage: {name: '@wyxos/vibe', version: '3.1.23'},
             presetName: 'wyxos-release',
             createAppContextImpl: vi.fn(() => context),
-            assertCleanConsumerRepoImpl,
+            ensureConsumerRepoReadyImpl,
             bootstrapImpl
         })).rejects.toThrow('Consumer repository has uncommitted changes.')
 
-        expect(assertCleanConsumerRepoImpl).toHaveBeenCalledWith(consumerRootDir, {
-            runCommandCapture: context.runCommandCapture
-        })
+        expect(ensureConsumerRepoReadyImpl).toHaveBeenCalledWith(consumerRootDir, expect.objectContaining({
+            runCommand: context.runCommand,
+            runCommandCapture: context.runCommandCapture,
+            autoCommit: false
+        }))
         expect(bootstrapImpl.ensureGitignoreEntry).not.toHaveBeenCalled()
         expect(bootstrapImpl.ensureProjectReleaseScript).not.toHaveBeenCalled()
     })

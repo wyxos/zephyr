@@ -15,11 +15,12 @@ async function createConsumerPackage(packageJson) {
     return rootDir
 }
 
-function createCommandMocks({initialStatus = '', trackedFiles = [], changedStatus = ''} = {}) {
+function createCommandMocks({initialStatus = '', statusResponses = null, trackedFiles = [], changedStatus = ''} = {}) {
     const runCommand = vi.fn().mockResolvedValue({stdout: '', stderr: ''})
+    const queuedStatusResponses = Array.isArray(statusResponses) ? [...statusResponses] : null
     const runCommandCapture = vi.fn(async (command, args) => {
         if (command === 'git' && args[0] === 'status' && args[1] === '--porcelain' && args.length === 2) {
-            return {stdout: initialStatus, stderr: ''}
+            return {stdout: queuedStatusResponses?.shift() ?? initialStatus, stderr: ''}
         }
 
         if (command === 'git' && args[0] === 'ls-files') {
@@ -118,6 +119,48 @@ describe('application/consumer/update-consumer-dependency', () => {
             'package-lock.json'
         ], {cwd: rootDir})
         expect(result.files).toEqual(['package.json', 'package-lock.json'])
+    })
+
+    it('auto-commits and pushes dirty consumer changes before the dependency update', async () => {
+        const rootDir = await createConsumerPackage({
+            dependencies: {
+                '@wyxos/vibe': '^3.1.22'
+            }
+        })
+        const {runCommand, runCommandCapture} = createCommandMocks({
+            statusResponses: [' M src/app.js\n', ''],
+            changedStatus: ' M package.json\n'
+        })
+        const suggestCommitMessage = vi.fn().mockResolvedValue('fix: update atlas browse layout')
+
+        const result = await updateConsumerDependency({
+            rootDir,
+            packageName: '@wyxos/vibe',
+            version: '3.1.23',
+            runCommand,
+            runCommandCapture,
+            autoCommit: true,
+            skipGitHooks: true,
+            suggestCommitMessage
+        })
+
+        expect(suggestCommitMessage).toHaveBeenCalledWith(rootDir, expect.objectContaining({
+            statusEntries: [expect.objectContaining({path: 'src/app.js'})]
+        }))
+        expect(runCommand).toHaveBeenCalledWith('git', ['add', '-A'], {cwd: rootDir})
+        expect(runCommand).toHaveBeenCalledWith('git', [
+            'commit',
+            '--no-verify',
+            '-m',
+            'fix: update atlas browse layout'
+        ], {cwd: rootDir})
+        expect(runCommand).toHaveBeenCalledWith('git', ['push', '--no-verify'], {cwd: rootDir})
+        expect(runCommand).toHaveBeenCalledWith('git', ['add', '--', 'package.json'], {cwd: rootDir})
+        expect(result).toEqual({
+            committed: true,
+            files: ['package.json'],
+            message: 'chore: update @wyxos/vibe to 3.1.23'
+        })
     })
 
     it('fails before editing when the consumer repository is dirty', async () => {

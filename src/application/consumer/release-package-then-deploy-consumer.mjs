@@ -12,7 +12,7 @@ import {resolvePendingSnapshot} from '../deploy/resolve-pending-snapshot.mjs'
 import {runDeployment} from '../deploy/run-deployment.mjs'
 import {waitForNpmPackageVersion} from './npm-publish-wait.mjs'
 import {
-  assertCleanConsumerRepo,
+  ensureConsumerRepoReady,
   updateConsumerDependency
 } from './update-consumer-dependency.mjs'
 
@@ -113,7 +113,7 @@ export async function releasePackageThenDeployConsumer({
   createAppContextImpl = createAppContext,
   waitForNpmPackageVersionImpl = waitForNpmPackageVersion,
   updateConsumerDependencyImpl = updateConsumerDependency,
-  assertCleanConsumerRepoImpl = assertCleanConsumerRepo,
+  ensureConsumerRepoReadyImpl = ensureConsumerRepoReady,
   validateLocalDependenciesImpl = validateLocalDependencies,
   selectDeploymentTargetImpl = selectDeploymentTarget,
   resolvePendingSnapshotImpl = resolvePendingSnapshot,
@@ -158,7 +158,16 @@ export async function releasePackageThenDeployConsumer({
   const configurationService = createConfigurationService(context)
 
   logProcessing?.(`Preparing consumer app at ${resolvedConsumerRootDir}...`)
-  await assertCleanConsumerRepoImpl(resolvedConsumerRootDir, {runCommandCapture})
+  await ensureConsumerRepoReadyImpl(resolvedConsumerRootDir, {
+    runCommand,
+    runCommandCapture,
+    runPrompt,
+    logProcessing,
+    logSuccess,
+    logWarning,
+    autoCommit: executionMode.autoCommit,
+    skipGitHooks: executionMode.skipGitHooks
+  })
 
   await bootstrapImpl.ensureGitignoreEntry(resolvedConsumerRootDir, {
     runCommand,
@@ -226,6 +235,8 @@ export async function releasePackageThenDeployConsumer({
     logProcessing,
     logSuccess,
     logWarning,
+    runPrompt,
+    autoCommit: executionMode.autoCommit,
     skipGitHooks: executionMode.skipGitHooks
   })
 
