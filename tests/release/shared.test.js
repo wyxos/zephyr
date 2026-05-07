@@ -31,7 +31,7 @@ import {
     suggestReleaseCommitMessage,
     validateReleaseDependencies
 } from '#src/release/shared.mjs'
-import {sanitizeSuggestedCommitMessage} from '#src/release/commit-message.mjs'
+import {sanitizeSuggestedCommitMessage, suggestFallbackCommitMessage} from '#src/release/commit-message.mjs'
 
 describe('release shared helpers', () => {
     beforeEach(() => {
@@ -334,6 +334,15 @@ describe('release shared helpers', () => {
         expect(result).toBe('feat: refine fullscreen preview rail')
         expect(logWarning).toHaveBeenCalledWith('Codex suggested an unusable commit message.')
         expect(logWarning).toHaveBeenCalledWith('Using path-based fallback commit message "feat: refine fullscreen preview rail".')
+    })
+
+    it('uses an app-aware fallback message for dirty Laravel and frontend deploy trees', () => {
+        expect(suggestFallbackCommitMessage([
+            {indexStatus: ' ', worktreeStatus: 'M', path: 'app/Services/ContainerBlacklistService.php', previousPath: null},
+            {indexStatus: ' ', worktreeStatus: 'M', path: 'resources/js/components/TabContentV2View.vue', previousPath: null},
+            {indexStatus: '?', worktreeStatus: '?', path: 'resources/js/lib/vibeMediaBarEscape.ts', previousPath: null},
+            {indexStatus: ' ', worktreeStatus: 'M', path: 'tests/Feature/ContainerBlacklist/ContainerBlacklistStoreTest.php', previousPath: null}
+        ])).toBe('fix: update application behavior and tests')
     })
 
     it('validates release dependencies with the provided prompt and logger', async () => {

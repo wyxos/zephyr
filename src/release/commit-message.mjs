@@ -161,6 +161,17 @@ export function suggestFallbackCommitMessage(statusEntries = []) {
     return null
   }
 
+  const hasTests = paths.some((entryPath) => (
+    entryPath.startsWith('tests/')
+    || entryPath.includes('.test.')
+    || entryPath.includes('.spec.')
+  ))
+  const hasApplicationCode = paths.some((entryPath) => (
+    ['app/', 'bootstrap/', 'config/', 'database/', 'extension/', 'resources/', 'routes/'].some((prefix) => entryPath.startsWith(prefix))
+    || entryPath.startsWith('artisan')
+    || entryPath.startsWith('vite.config.')
+  ))
+
   if (paths.some((entryPath) => entryPath.includes('FullscreenPreviewRail'))) {
     return 'feat: refine fullscreen preview rail'
   }
@@ -174,7 +185,7 @@ export function suggestFallbackCommitMessage(statusEntries = []) {
   }
 
   if (paths.some((entryPath) => entryPath.startsWith('src/'))) {
-    return paths.some((entryPath) => entryPath.startsWith('tests/') || entryPath.includes('.test.'))
+    return hasTests
       ? 'fix: update source behavior and tests'
       : 'fix: update source behavior'
   }
@@ -183,8 +194,19 @@ export function suggestFallbackCommitMessage(statusEntries = []) {
     return 'chore: update package metadata'
   }
 
-  return null
+  if (hasApplicationCode) {
+    return hasTests
+      ? 'fix: update application behavior and tests'
+      : 'fix: update application behavior'
+  }
+
+  if (hasTests) {
+    return 'test: update test coverage'
+  }
+
+  return 'chore: update project files'
 }
+
 
 export async function suggestCommitMessage(rootDir = process.cwd(), {
   runCommand,
