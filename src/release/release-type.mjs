@@ -107,14 +107,30 @@ function buildChoiceOrder(suggestedReleaseType) {
   ]
 }
 
-async function readLatestReleaseTag(rootDir, {runCommand, latestTag = null} = {}) {
+
+async function captureCommand(command, args, {runCommand, runCommandCapture, cwd} = {}) {
+  if (typeof runCommandCapture === 'function') {
+    return {stdout: await runCommandCapture(command, args, {cwd}), stderr: ''}
+  }
+
+  const output = await runCommand(command, args, {capture: true, cwd})
+
+  if (typeof output === 'string') {
+    return {stdout: output, stderr: ''}
+  }
+
+  return output ?? {stdout: '', stderr: ''}
+}
+
+async function readLatestReleaseTag(rootDir, {runCommand, runCommandCapture, latestTag = null} = {}) {
   if (typeof latestTag === 'string' && latestTag.trim() !== '') {
     return latestTag.trim()
   }
 
   try {
-    const {stdout} = await runCommand('git', ['describe', '--tags', '--abbrev=0'], {
-      capture: true,
+    const {stdout} = await captureCommand('git', ['describe', '--tags', '--abbrev=0'], {
+      runCommand,
+      runCommandCapture,
       cwd: rootDir
     })
 
@@ -124,14 +140,15 @@ async function readLatestReleaseTag(rootDir, {runCommand, latestTag = null} = {}
   }
 }
 
-async function readCommitLog(rootDir, {runCommand, latestTag} = {}) {
+async function readCommitLog(rootDir, {runCommand, runCommandCapture, latestTag} = {}) {
   const args = latestTag
     ? ['log', '--format=%h %s', `${latestTag}..HEAD`]
     : ['log', '--format=%h %s', '-20']
 
   try {
-    const {stdout} = await runCommand('git', args, {
-      capture: true,
+    const {stdout} = await captureCommand('git', args, {
+      runCommand,
+      runCommandCapture,
       cwd: rootDir
     })
 
@@ -141,14 +158,15 @@ async function readCommitLog(rootDir, {runCommand, latestTag} = {}) {
   }
 }
 
-async function readDiffStat(rootDir, {runCommand, latestTag} = {}) {
+async function readDiffStat(rootDir, {runCommand, runCommandCapture, latestTag} = {}) {
   const args = latestTag
     ? ['diff', '--stat', `${latestTag}..HEAD`, '--']
     : ['diff', '--stat', 'HEAD~20..HEAD', '--']
 
   try {
-    const {stdout} = await runCommand('git', args, {
-      capture: true,
+    const {stdout} = await captureCommand('git', args, {
+      runCommand,
+      runCommandCapture,
       cwd: rootDir
     })
 
@@ -160,14 +178,15 @@ async function readDiffStat(rootDir, {runCommand, latestTag} = {}) {
 
 async function buildReleaseSuggestionContext(rootDir, {
   runCommand,
+  runCommandCapture,
   currentVersion,
   packageName,
   latestTag = null,
   referenceLabel = null
 } = {}) {
-  const resolvedLatestTag = await readLatestReleaseTag(rootDir, {runCommand, latestTag})
-  const commitLog = await readCommitLog(rootDir, {runCommand, latestTag: resolvedLatestTag})
-  const diffStat = await readDiffStat(rootDir, {runCommand, latestTag: resolvedLatestTag})
+  const resolvedLatestTag = await readLatestReleaseTag(rootDir, {runCommand, runCommandCapture, latestTag})
+  const commitLog = await readCommitLog(rootDir, {runCommand, runCommandCapture, latestTag: resolvedLatestTag})
+  const diffStat = await readDiffStat(rootDir, {runCommand, runCommandCapture, latestTag: resolvedLatestTag})
 
   return {
     currentVersion,
@@ -181,6 +200,7 @@ async function buildReleaseSuggestionContext(rootDir, {
 
 async function suggestReleaseType(rootDir = process.cwd(), {
   runCommand,
+  runCommandCapture,
   currentVersion,
   packageName,
   commandExistsImpl = commandExists,
@@ -192,6 +212,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
 } = {}) {
   const context = await buildReleaseSuggestionContext(rootDir, {
     runCommand,
+    runCommandCapture,
     currentVersion,
     packageName,
     latestTag,
@@ -288,6 +309,7 @@ export async function resolveReleaseType({
   interactive = true,
   runPrompt,
   runCommand,
+  runCommandCapture,
   logStep,
   logWarning,
   latestTag = null,
@@ -300,6 +322,7 @@ export async function resolveReleaseType({
 
   const suggested = await suggestReleaseType(rootDir, {
     runCommand,
+    runCommandCapture,
     currentVersion,
     packageName,
     logStep,

@@ -121,6 +121,7 @@ describe('application/deploy/prepare-local-deployment', () => {
             interactive: true,
             runPrompt,
             runCommand,
+            runCommandCapture,
             logProcessing,
             logSuccess,
             logWarning

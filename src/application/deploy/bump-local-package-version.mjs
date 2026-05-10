@@ -22,6 +22,25 @@ async function isGitIgnored(rootDir, filePath, {runCommand} = {}) {
     }
 }
 
+
+async function captureGit(rootDir, args, {runCommand, runCommandCapture} = {}) {
+    if (typeof runCommandCapture === 'function') {
+        return await runCommandCapture('git', args, {cwd: rootDir})
+    }
+
+    if (typeof runCommand !== 'function') {
+        return ''
+    }
+
+    const output = await runCommand('git', args, {capture: true, cwd: rootDir})
+
+    if (typeof output === 'string') {
+        return output
+    }
+
+    return output?.stdout ?? ''
+}
+
 function parseVersionBumpCommit(line) {
     const [hash, shortHash, subject] = line.split('\0')
     const match = /^chore: bump version to (\d+\.\d+\.\d+(?:[-+][^\s]+)?)$/i.exec(subject ?? '')
@@ -33,15 +52,11 @@ function parseVersionBumpCommit(line) {
     return {hash, shortHash, version: match[1]}
 }
 
-async function readVersionBumpCommits(rootDir, {runCommand} = {}) {
-    if (typeof runCommand !== 'function') {
-        return []
-    }
-
+async function readVersionBumpCommits(rootDir, {runCommand, runCommandCapture} = {}) {
     try {
-        const {stdout = ''} = await runCommand('git', ['log', '--format=%H%x00%h%x00%s', '-1000'], {
-            capture: true,
-            cwd: rootDir
+        const stdout = await captureGit(rootDir, ['log', '--format=%H%x00%h%x00%s', '-1000'], {
+            runCommand,
+            runCommandCapture
         })
 
         return stdout
@@ -98,20 +113,20 @@ function formatVersionReferenceLabel(reference, currentVersion) {
 }
 
 
-async function readRecentAppCommitSubjects(rootDir, versionReference, {runCommand} = {}) {
-    if (!versionReference?.hash || typeof runCommand !== 'function') {
+async function readRecentAppCommitSubjects(rootDir, versionReference, {runCommand, runCommandCapture} = {}) {
+    if (!versionReference?.hash) {
         return ''
     }
 
     try {
-        const {stdout = ''} = await runCommand('git', [
+        const stdout = await captureGit(rootDir, [
             'log',
             '--format=%s',
             '--max-count=80',
             `${versionReference.hash}..HEAD`
         ], {
-            capture: true,
-            cwd: rootDir
+            runCommand,
+            runCommandCapture
         })
 
         return stdout.trim()
@@ -138,6 +153,7 @@ async function resolveDeploymentVersionValue(rootDir, {
     interactive = false,
     runPrompt,
     runCommand,
+    runCommandCapture,
     logProcessing,
     logWarning
 } = {}) {
@@ -145,9 +161,9 @@ async function resolveDeploymentVersionValue(rootDir, {
         return String(versionArg).trim()
     }
 
-    const versionBumps = await readVersionBumpCommits(rootDir, {runCommand})
+    const versionBumps = await readVersionBumpCommits(rootDir, {runCommand, runCommandCapture})
     const versionReference = selectVersionSuggestionReference(pkg.version, versionBumps)
-    const commitSubjects = await readRecentAppCommitSubjects(rootDir, versionReference, {runCommand})
+    const commitSubjects = await readRecentAppCommitSubjects(rootDir, versionReference, {runCommand, runCommandCapture})
 
     return await resolveReleaseType({
         currentVersion: pkg.version,
@@ -156,6 +172,7 @@ async function resolveDeploymentVersionValue(rootDir, {
         interactive,
         runPrompt,
         runCommand,
+        runCommandCapture,
         logStep: logProcessing,
         logWarning,
         latestTag: versionReference?.hash ?? null,
@@ -170,6 +187,7 @@ export async function bumpLocalPackageVersion(rootDir, {
     runPrompt,
     skipGitHooks = false,
     runCommand,
+    runCommandCapture,
     logProcessing,
     logSuccess,
     logWarning
@@ -196,6 +214,7 @@ export async function bumpLocalPackageVersion(rootDir, {
         interactive,
         runPrompt,
         runCommand,
+        runCommandCapture,
         logProcessing,
         logWarning
     })

@@ -70,6 +70,7 @@ export async function prepareLocalDeployment(config, {
                 interactive,
                 runPrompt,
                 runCommand,
+                runCommandCapture,
                 logProcessing,
                 logSuccess,
                 logWarning
