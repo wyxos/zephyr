@@ -42,7 +42,7 @@ describe('application/deploy/bump-local-package-version', () => {
 
         const runCommand = vi.fn(async (command, args, options = {}) => {
             if (command === 'git' && args[0] === 'log') {
-                return {stdout: 'patch123000000000000000000000000000000000\0patch12\0chore: bump version to 1.0.3\nbase1230000000000000000000000000000000000\0base123\0chore: bump version to 1.0.0\n'}
+                return {stdout: 'patch123000000000000000000000000000000000\0patch12\0chore: bump version to 1.0.3\nbase1230000000000000000000000000000000000\0base123\0chore: bump version to 1.0.1\n'}
             }
 
             if (command === 'git' && args[0] === 'check-ignore') {
@@ -75,7 +75,7 @@ describe('application/deploy/bump-local-package-version', () => {
             interactive: false,
             runCommand,
             latestTag: 'base1230000000000000000000000000000000000',
-            referenceLabel: 'current app minor baseline base123 (1.0.0)'
+            referenceLabel: 'earliest known app minor baseline base123 (1.0.1)'
         }))
         expect(runCommand).toHaveBeenCalledWith('npm', ['version', 'patch', '--no-git-tag-version', '--force'], {
             cwd: rootDir

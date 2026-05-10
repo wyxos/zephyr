@@ -60,17 +60,22 @@ function selectVersionSuggestionReference(currentVersion, versionBumps) {
         return versionBumps[0] ?? null
     }
 
-    const currentMinorBoundary = versionBumps.find(({version}) => {
-        const parsed = semver.parse(version)
-
-        return parsed
+    let earliestKnownCurrentMinor = null
+    const currentMinorBoundary = versionBumps.find((versionBump) => {
+        const parsed = semver.parse(versionBump.version)
+        const isCurrentMinor = parsed
             && parsed.major === current.major
             && parsed.minor === current.minor
-            && parsed.patch === 0
             && parsed.prerelease.length === 0
+
+        if (isCurrentMinor) {
+            earliestKnownCurrentMinor = versionBump
+        }
+
+        return isCurrentMinor && parsed.patch === 0
     })
 
-    return currentMinorBoundary ?? versionBumps[0] ?? null
+    return currentMinorBoundary ?? earliestKnownCurrentMinor ?? versionBumps[0] ?? null
 }
 
 function formatVersionReferenceLabel(reference, currentVersion) {
@@ -80,13 +85,14 @@ function formatVersionReferenceLabel(reference, currentVersion) {
 
     const current = semver.parse(currentVersion)
     const parsed = semver.parse(reference.version)
-    const isCurrentMinorBoundary = current
+    const isCurrentMinor = current
         && parsed
         && parsed.major === current.major
         && parsed.minor === current.minor
-        && parsed.patch === 0
         && parsed.prerelease.length === 0
-    const prefix = isCurrentMinorBoundary ? 'current app minor baseline' : 'last app version bump'
+    const prefix = isCurrentMinor
+        ? parsed.patch === 0 ? 'current app minor baseline' : 'earliest known app minor baseline'
+        : 'last app version bump'
 
     return `${prefix} ${reference.shortHash} (${reference.version})`
 }
