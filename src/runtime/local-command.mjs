@@ -6,10 +6,24 @@ export function createLocalCommandRunners({ runCommandBase, runCommandCaptureBas
   }
 
   const runCommand = async (command, args, {
+    capture = false,
     silent = false,
     cwd,
     forwardStdoutToStderr = false
   } = {}) => {
+    if (capture) {
+      const captured = await runCommandCaptureBase(command, args, {cwd})
+
+      if (typeof captured === 'string') {
+        return {stdout: captured.trim(), stderr: ''}
+      }
+
+      return {
+        stdout: (captured?.stdout ?? '').trim(),
+        stderr: (captured?.stderr ?? '').trim()
+      }
+    }
+
     const stdio = silent
       ? 'ignore'
       : forwardStdoutToStderr

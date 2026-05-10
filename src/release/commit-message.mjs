@@ -3,6 +3,7 @@ import {tmpdir} from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 
+import {describeCodexAdvisorFailure, logCapturedCodexDiagnostics} from '../runtime/codex-diagnostics.mjs'
 import {commandExists} from '../utils/command.mjs'
 
 const CONVENTIONAL_COMMIT_PATTERN = /^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test): .+/i
@@ -237,7 +238,7 @@ export async function suggestCommitMessage(rootDir = process.cwd(), {
 
     logStep?.('Generating a suggested commit message with Codex...')
 
-    await runCommand('codex', [
+    const codexResult = await runCommand('codex', [
       'exec',
       '--ephemeral',
       '--model',
@@ -258,6 +259,7 @@ export async function suggestCommitMessage(rootDir = process.cwd(), {
       capture: true,
       cwd: rootDir
     })
+    logCapturedCodexDiagnostics(codexResult, {label: 'commit-message advisor', logWarning})
 
     const rawMessage = await readFile(outputPath, 'utf8')
     const message = sanitizeSuggestedCommitMessage(rawMessage)
@@ -269,7 +271,7 @@ export async function suggestCommitMessage(rootDir = process.cwd(), {
     logWarning?.('Codex suggested an unusable commit message.')
     return fallbackMessage()
   } catch (error) {
-    logWarning?.(`Codex could not suggest a commit message: ${error.message}`)
+    logWarning?.(`${describeCodexAdvisorFailure(error, {label: 'commit-message advisor'})} Using path-based fallback.`)
     return fallbackMessage()
   } finally {
     if (tempDir) {

@@ -4,6 +4,7 @@ import path from 'node:path'
 import process from 'node:process'
 import semver from 'semver'
 
+import {describeCodexAdvisorFailure, logCapturedCodexDiagnostics} from '../runtime/codex-diagnostics.mjs'
 import {commandExists} from '../utils/command.mjs'
 
 export const RELEASE_TYPES = [
@@ -240,7 +241,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
 
     logStep?.('Evaluating the recommended version bump with Codex...')
 
-    await runCommand('codex', [
+    const codexResult = await runCommand('codex', [
       'exec',
       '--ephemeral',
       '--model',
@@ -267,6 +268,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
       capture: true,
       cwd: rootDir
     })
+    logCapturedCodexDiagnostics(codexResult, {label: 'release advisor', logWarning})
 
     const rawSuggestion = await readFile(outputPath, 'utf8')
     const releaseType = sanitizeSuggestedReleaseType(rawSuggestion, allowedSuggestedReleaseTypes)
@@ -287,7 +289,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
       source: flooredReleaseType === releaseType ? 'codex' : 'codex+heuristic-floor'
     }
   } catch (error) {
-    logWarning?.(`Codex could not suggest a release type: ${error.message}`)
+    logWarning?.(`${describeCodexAdvisorFailure(error, {label: 'release advisor'})} Using heuristic release type.`)
 
     return {
       ...context,

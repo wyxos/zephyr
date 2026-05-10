@@ -149,6 +149,34 @@ describe('release shared helpers', () => {
         expect(logSuccess).toHaveBeenCalledWith('Committed pending changes with "fix: update release workflow".')
     })
 
+    it('summarizes captured Codex commit-message diagnostics without printing raw stderr', async () => {
+        mockCommandExists.mockReturnValue(true)
+        const runCommand = vi.fn(async (command, args) => {
+            if (command === 'codex') {
+                const outputPath = args[args.indexOf('--output-last-message') + 1]
+                await writeFile(outputPath, 'fix: update release output\n')
+                return {
+                    stdout: 'codex\n',
+                    stderr: 'ERROR rmcp transport failed\nexec command rejected\n'
+                }
+            }
+
+            return {stdout: '', stderr: ''}
+        })
+        const logWarning = vi.fn()
+
+        await expect(suggestReleaseCommitMessage('/workspace/demo', {
+            runCommand,
+            logWarning,
+            statusEntries: [{path: 'src/release/release-type.mjs', status: 'M'}]
+        })).resolves.toBe('fix: update release output')
+
+        expect(logWarning).toHaveBeenCalledWith(
+            'Codex commit-message advisor emitted 2 diagnostic lines; captured and hidden because the advisor returned a usable result.'
+        )
+        expect(logWarning.mock.calls.flat().join('\n')).not.toContain('rmcp')
+    })
+
     it('fails release auto-commit when Codex cannot provide a usable message', async () => {
         const runCommand = vi.fn(async (command, args) => {
             if (command === 'git' && args[0] === 'status') {

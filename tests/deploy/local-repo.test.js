@@ -30,6 +30,22 @@ describe('deploy/local-repo', () => {
         expect(status).toBe(' M file.php')
     })
 
+    it('captures command output when capture mode is requested', async () => {
+        queueSpawnResponse({stdout: 'visible output\n', stderr: 'ERROR hidden diagnostic\n'})
+
+        const {createLocalCommandRunners} = await import('#src/runtime/local-command.mjs')
+        const {runCommand: runCommandBase, runCommandCapture: runCommandCaptureBase} = await import('#src/utils/command.mjs')
+        const {runCommand} = createLocalCommandRunners({runCommandBase, runCommandCaptureBase})
+
+        const result = await runCommand('codex', ['exec'], {
+            capture: true,
+            cwd: process.cwd()
+        })
+
+        expect(result).toEqual({stdout: 'visible output', stderr: 'ERROR hidden diagnostic'})
+        expect(mockSpawn.mock.calls[0][2].stdio).toEqual(['ignore', 'pipe', 'pipe'])
+    })
+
     it('switches to the target branch when clean', async () => {
         queueSpawnResponse({stdout: 'develop\n'})
         queueSpawnResponse({stdout: ''})

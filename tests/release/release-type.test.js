@@ -144,6 +144,51 @@ describe('release type resolver', () => {
         expect(logStep).toHaveBeenCalledWith('No release type specified. Using suggested minor bump based on changes since v1.2.3.')
     })
 
+    it('summarizes captured Codex release advisor diagnostics without printing raw stderr', async () => {
+        mockCommandExists.mockReturnValue(true)
+        const runCommand = vi.fn(async (command, args) => {
+            if (command === 'git' && args[0] === 'describe') {
+                return {stdout: 'v1.2.3', stderr: ''}
+            }
+
+            if (command === 'git' && args[0] === 'log') {
+                return {stdout: 'abc123 fix: adjust deployment output\n', stderr: ''}
+            }
+
+            if (command === 'git' && args[0] === 'diff') {
+                return {stdout: '', stderr: ''}
+            }
+
+            if (command === 'codex') {
+                const outputPath = args[args.indexOf('--output-last-message') + 1]
+                await writeFile(outputPath, 'patch\n')
+                return {
+                    stdout: 'codex\n',
+                    stderr: 'ERROR rmcp transport failed\nexec command rejected\n'
+                }
+            }
+
+            return {stdout: '', stderr: ''}
+        })
+        const logWarning = vi.fn()
+
+        const result = await resolveReleaseType({
+            currentVersion: '1.2.3',
+            packageName: '@wyxos/zephyr',
+            rootDir: '/workspace/demo',
+            interactive: false,
+            runCommand,
+            logStep: vi.fn(),
+            logWarning
+        })
+
+        expect(result).toBe('patch')
+        expect(logWarning).toHaveBeenCalledWith(
+            'Codex release advisor emitted 2 diagnostic lines; captured and hidden because the advisor returned a usable result.'
+        )
+        expect(logWarning.mock.calls.flat().join('\n')).not.toContain('rmcp')
+    })
+
     it('uses prerelease heuristics when the current version is already prerelease', async () => {
         const runCommand = vi.fn(async (command, args) => {
             if (command === 'git' && args[0] === 'describe') {
