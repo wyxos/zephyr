@@ -104,6 +104,46 @@ describe('release type resolver', () => {
         expect(logStep).toHaveBeenCalledWith('No release type specified. Using suggested minor bump based on changes since v1.2.3.')
     })
 
+
+    it('does not allow Codex to downgrade below the heuristic recommendation', async () => {
+        mockCommandExists.mockReturnValue(true)
+        const runCommand = vi.fn(async (command, args) => {
+            if (command === 'git' && args[0] === 'describe') {
+                return {stdout: 'v1.2.3', stderr: ''}
+            }
+
+            if (command === 'git' && args[0] === 'log') {
+                return {stdout: 'abc123 feat: add workflow notifications\n', stderr: ''}
+            }
+
+            if (command === 'git' && args[0] === 'diff') {
+                return {stdout: '', stderr: ''}
+            }
+
+            if (command === 'codex') {
+                const outputPath = args[args.indexOf('--output-last-message') + 1]
+                await writeFile(outputPath, 'patch\n')
+                return {stdout: '', stderr: ''}
+            }
+
+            return {stdout: '', stderr: ''}
+        })
+        const logStep = vi.fn()
+
+        const result = await resolveReleaseType({
+            currentVersion: '1.2.3',
+            packageName: '@wyxos/zephyr',
+            rootDir: '/workspace/demo',
+            interactive: false,
+            runCommand,
+            logStep,
+            logWarning: vi.fn()
+        })
+
+        expect(result).toBe('minor')
+        expect(logStep).toHaveBeenCalledWith('No release type specified. Using suggested minor bump based on changes since v1.2.3.')
+    })
+
     it('uses prerelease heuristics when the current version is already prerelease', async () => {
         const runCommand = vi.fn(async (command, args) => {
             if (command === 'git' && args[0] === 'describe') {

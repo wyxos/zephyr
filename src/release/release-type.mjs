@@ -16,6 +16,15 @@ export const RELEASE_TYPES = [
   'prerelease'
 ]
 const STABLE_RELEASE_TYPES = ['major', 'minor', 'patch']
+const RELEASE_TYPE_WEIGHTS = {
+  prerelease: 0,
+  prepatch: 1,
+  patch: 1,
+  preminor: 2,
+  minor: 2,
+  premajor: 3,
+  major: 3
+}
 
 function sanitizeSuggestedReleaseType(message, allowedTypes = RELEASE_TYPES) {
   if (typeof message !== 'string') {
@@ -68,6 +77,17 @@ function inferReleaseTypeHeuristically({
   }
 
   return 'patch'
+}
+
+function applyHeuristicFloor(releaseType, heuristicReleaseType) {
+  const releaseWeight = RELEASE_TYPE_WEIGHTS[releaseType] ?? -1
+  const heuristicWeight = RELEASE_TYPE_WEIGHTS[heuristicReleaseType] ?? -1
+
+  if (heuristicWeight > releaseWeight) {
+    return heuristicReleaseType
+  }
+
+  return releaseType
 }
 
 function resolveSuggestedReleaseTypeOptions(currentVersion = '0.0.0') {
@@ -234,10 +254,12 @@ async function suggestReleaseType(rootDir = process.cwd(), {
       }
     }
 
+    const flooredReleaseType = applyHeuristicFloor(releaseType, heuristicReleaseType)
+
     return {
       ...context,
-      releaseType,
-      source: 'codex'
+      releaseType: flooredReleaseType,
+      source: flooredReleaseType === releaseType ? 'codex' : 'codex+heuristic-floor'
     }
   } catch (error) {
     logWarning?.(`Codex could not suggest a release type: ${error.message}`)
