@@ -41,9 +41,14 @@ describe('application/deploy/bump-local-package-version', () => {
         await writeFile(join(rootDir, 'package-lock.json'), '{\n  "lockfileVersion": 3\n}\n')
 
         const runCommand = vi.fn(async (command, args, options = {}) => {
-            if (command === 'git' && args[0] === 'log') {
+            if (command === 'git' && args[0] === 'log' && args[1] === '--format=%H%x00%h%x00%s') {
                 return {stdout: 'patch123000000000000000000000000000000000\0patch12\0chore: bump version to 1.0.3\nbase1230000000000000000000000000000000000\0base123\0chore: bump version to 1.0.1\n'}
             }
+
+            if (command === 'git' && args[0] === 'log' && args[1] === '--format=%s') {
+                return {stdout: 'feat: add workflow notifications\nfix: repair deployment check\n'}
+            }
+
 
             if (command === 'git' && args[0] === 'check-ignore') {
                 throw new Error('not ignored')
@@ -75,7 +80,8 @@ describe('application/deploy/bump-local-package-version', () => {
             interactive: false,
             runCommand,
             latestTag: 'base1230000000000000000000000000000000000',
-            referenceLabel: 'earliest known app minor baseline base123 (1.0.1)'
+            referenceLabel: 'earliest known app minor baseline base123 (1.0.1)',
+            minimumReleaseType: 'minor'
         }))
         expect(runCommand).toHaveBeenCalledWith('npm', ['version', 'patch', '--no-git-tag-version', '--force'], {
             cwd: rootDir

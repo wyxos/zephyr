@@ -97,6 +97,41 @@ function formatVersionReferenceLabel(reference, currentVersion) {
     return `${prefix} ${reference.shortHash} (${reference.version})`
 }
 
+
+async function readRecentAppCommitSubjects(rootDir, versionReference, {runCommand} = {}) {
+    if (!versionReference?.hash || typeof runCommand !== 'function') {
+        return ''
+    }
+
+    try {
+        const {stdout = ''} = await runCommand('git', [
+            'log',
+            '--format=%s',
+            '--max-count=80',
+            `${versionReference.hash}..HEAD`
+        ], {
+            capture: true,
+            cwd: rootDir
+        })
+
+        return stdout.trim()
+    } catch {
+        return ''
+    }
+}
+
+function inferMinimumReleaseTypeFromCommitSubjects(commitSubjects) {
+    if (/breaking change|breaking changes|^[a-z]+(?:\(.+\))?!:/im.test(commitSubjects)) {
+        return 'major'
+    }
+
+    if (/\bfeat(?:\(.+\))?:/im.test(commitSubjects)) {
+        return 'minor'
+    }
+
+    return null
+}
+
 async function resolveDeploymentVersionValue(rootDir, {
     versionArg = null,
     pkg,
@@ -112,6 +147,7 @@ async function resolveDeploymentVersionValue(rootDir, {
 
     const versionBumps = await readVersionBumpCommits(rootDir, {runCommand})
     const versionReference = selectVersionSuggestionReference(pkg.version, versionBumps)
+    const commitSubjects = await readRecentAppCommitSubjects(rootDir, versionReference, {runCommand})
 
     return await resolveReleaseType({
         currentVersion: pkg.version,
@@ -123,7 +159,8 @@ async function resolveDeploymentVersionValue(rootDir, {
         logStep: logProcessing,
         logWarning,
         latestTag: versionReference?.hash ?? null,
-        referenceLabel: formatVersionReferenceLabel(versionReference, pkg.version)
+        referenceLabel: formatVersionReferenceLabel(versionReference, pkg.version),
+        minimumReleaseType: inferMinimumReleaseTypeFromCommitSubjects(commitSubjects)
     })
 }
 

@@ -79,12 +79,12 @@ function inferReleaseTypeHeuristically({
   return 'patch'
 }
 
-function applyHeuristicFloor(releaseType, heuristicReleaseType) {
+function applyReleaseTypeFloor(releaseType, floorReleaseType) {
   const releaseWeight = RELEASE_TYPE_WEIGHTS[releaseType] ?? -1
-  const heuristicWeight = RELEASE_TYPE_WEIGHTS[heuristicReleaseType] ?? -1
+  const floorWeight = RELEASE_TYPE_WEIGHTS[floorReleaseType] ?? -1
 
-  if (heuristicWeight > releaseWeight) {
-    return heuristicReleaseType
+  if (floorWeight > releaseWeight) {
+    return floorReleaseType
   }
 
   return releaseType
@@ -187,7 +187,8 @@ async function suggestReleaseType(rootDir = process.cwd(), {
   logStep,
   logWarning,
   latestTag = null,
-  referenceLabel = null
+  referenceLabel = null,
+  minimumReleaseType = null
 } = {}) {
   const context = await buildReleaseSuggestionContext(rootDir, {
     runCommand,
@@ -197,7 +198,10 @@ async function suggestReleaseType(rootDir = process.cwd(), {
     referenceLabel
   })
   const allowedSuggestedReleaseTypes = resolveSuggestedReleaseTypeOptions(currentVersion)
-  const heuristicReleaseType = inferReleaseTypeHeuristically(context)
+  const heuristicReleaseType = applyReleaseTypeFloor(
+    inferReleaseTypeHeuristically(context),
+    sanitizeSuggestedReleaseType(minimumReleaseType, allowedSuggestedReleaseTypes)
+  )
 
   if (!commandExistsImpl('codex')) {
     return {
@@ -254,7 +258,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
       }
     }
 
-    const flooredReleaseType = applyHeuristicFloor(releaseType, heuristicReleaseType)
+    const flooredReleaseType = applyReleaseTypeFloor(releaseType, heuristicReleaseType)
 
     return {
       ...context,
@@ -287,7 +291,8 @@ export async function resolveReleaseType({
   logStep,
   logWarning,
   latestTag = null,
-  referenceLabel = null
+  referenceLabel = null,
+  minimumReleaseType = null
 } = {}) {
   if (releaseType) {
     return releaseType
@@ -300,7 +305,8 @@ export async function resolveReleaseType({
     logStep,
     logWarning,
     latestTag,
-    referenceLabel
+    referenceLabel,
+    minimumReleaseType
   })
   const rangeLabel = suggested.referenceLabel || suggested.latestTag
     ? `based on changes since ${suggested.referenceLabel || suggested.latestTag}`
