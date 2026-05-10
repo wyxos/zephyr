@@ -36,13 +36,13 @@ describe('application/deploy/bump-local-package-version', () => {
     it('bumps package.json and commits tracked version files', async () => {
         await writeFile(join(rootDir, 'package.json'), JSON.stringify({
             name: '@wyxos/demo-app',
-            version: '1.0.0'
+            version: '1.0.3'
         }, null, 2) + '\n')
         await writeFile(join(rootDir, 'package-lock.json'), '{\n  "lockfileVersion": 3\n}\n')
 
         const runCommand = vi.fn(async (command, args, options = {}) => {
             if (command === 'git' && args[0] === 'log') {
-                return {stdout: 'abc1230000000000000000000000000000000000\0abc1230\0chore: bump version to 1.0.0\n'}
+                return {stdout: 'patch123000000000000000000000000000000000\0patch12\0chore: bump version to 1.0.3\nbase1230000000000000000000000000000000000\0base123\0chore: bump version to 1.0.0\n'}
             }
 
             if (command === 'git' && args[0] === 'check-ignore') {
@@ -52,7 +52,7 @@ describe('application/deploy/bump-local-package-version', () => {
             if (command === 'npm' && args[0] === 'version') {
                 const packagePath = join(options.cwd, 'package.json')
                 const pkg = JSON.parse(await readFile(packagePath, 'utf8'))
-                pkg.version = '1.0.1'
+                pkg.version = '1.0.4'
                 await writeFile(packagePath, JSON.stringify(pkg, null, 2) + '\n')
             }
         })
@@ -67,15 +67,15 @@ describe('application/deploy/bump-local-package-version', () => {
             logWarning: vi.fn()
         })
 
-        expect(pkg.version).toBe('1.0.1')
+        expect(pkg.version).toBe('1.0.4')
         expect(mockResolveReleaseType).toHaveBeenCalledWith(expect.objectContaining({
-            currentVersion: '1.0.0',
+            currentVersion: '1.0.3',
             packageName: '@wyxos/demo-app',
             rootDir,
             interactive: false,
             runCommand,
-            latestTag: 'abc1230000000000000000000000000000000000',
-            referenceLabel: 'last app version bump abc1230'
+            latestTag: 'base1230000000000000000000000000000000000',
+            referenceLabel: 'current app minor baseline base123 (1.0.0)'
         }))
         expect(runCommand).toHaveBeenCalledWith('npm', ['version', 'patch', '--no-git-tag-version', '--force'], {
             cwd: rootDir
@@ -83,11 +83,11 @@ describe('application/deploy/bump-local-package-version', () => {
         expect(runCommand).toHaveBeenCalledWith('git', ['add', 'package.json', 'package-lock.json'], {cwd: rootDir})
         expect(runCommand).toHaveBeenCalledWith(
             'git',
-            ['commit', '-m', 'chore: bump version to 1.0.1', '--', 'package.json', 'package-lock.json'],
+            ['commit', '-m', 'chore: bump version to 1.0.4', '--', 'package.json', 'package-lock.json'],
             {cwd: rootDir}
         )
         expect(logProcessing).toHaveBeenCalledWith('Bumping npm package version (patch)...')
-        expect(logSuccess).toHaveBeenCalledWith('Version updated to 1.0.1.')
+        expect(logSuccess).toHaveBeenCalledWith('Version updated to 1.0.4.')
     })
 
     it('uses explicit version arguments without resolving a recommended release type', async () => {

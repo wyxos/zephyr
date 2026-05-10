@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
+import semver from 'semver'
+
 import {commandExists} from '../../utils/command.mjs'
 import {gitCommitArgs} from '../../utils/git-hooks.mjs'
 import {resolveReleaseType} from '../../release/release-type.mjs'
@@ -20,28 +22,73 @@ async function isGitIgnored(rootDir, filePath, {runCommand} = {}) {
     }
 }
 
-async function readLatestVersionBumpCommit(rootDir, {runCommand} = {}) {
-    if (typeof runCommand !== 'function') {
+function parseVersionBumpCommit(line) {
+    const [hash, shortHash, subject] = line.split('\0')
+    const match = /^chore: bump version to (\d+\.\d+\.\d+(?:[-+][^\s]+)?)$/i.exec(subject ?? '')
+
+    if (!match) {
         return null
     }
 
+    return {hash, shortHash, version: match[1]}
+}
+
+async function readVersionBumpCommits(rootDir, {runCommand} = {}) {
+    if (typeof runCommand !== 'function') {
+        return []
+    }
+
     try {
-        const {stdout = ''} = await runCommand('git', ['log', '--format=%H%x00%h%x00%s', '-50'], {
+        const {stdout = ''} = await runCommand('git', ['log', '--format=%H%x00%h%x00%s', '-1000'], {
             capture: true,
             cwd: rootDir
         })
 
-        for (const line of stdout.split('\n')) {
-            const [hash, shortHash, subject] = line.split('\0')
-            if (/^chore: bump version to \d+\.\d+\.\d+(?:[-+].*)?$/i.test(subject ?? '')) {
-                return {hash, shortHash}
-            }
-        }
+        return stdout
+            .split('\n')
+            .map(parseVersionBumpCommit)
+            .filter(Boolean)
     } catch {
+        return []
+    }
+}
+
+function selectVersionSuggestionReference(currentVersion, versionBumps) {
+    const current = semver.parse(currentVersion)
+
+    if (!current) {
+        return versionBumps[0] ?? null
+    }
+
+    const currentMinorBoundary = versionBumps.find(({version}) => {
+        const parsed = semver.parse(version)
+
+        return parsed
+            && parsed.major === current.major
+            && parsed.minor === current.minor
+            && parsed.patch === 0
+            && parsed.prerelease.length === 0
+    })
+
+    return currentMinorBoundary ?? versionBumps[0] ?? null
+}
+
+function formatVersionReferenceLabel(reference, currentVersion) {
+    if (!reference) {
         return null
     }
 
-    return null
+    const current = semver.parse(currentVersion)
+    const parsed = semver.parse(reference.version)
+    const isCurrentMinorBoundary = current
+        && parsed
+        && parsed.major === current.major
+        && parsed.minor === current.minor
+        && parsed.patch === 0
+        && parsed.prerelease.length === 0
+    const prefix = isCurrentMinorBoundary ? 'current app minor baseline' : 'last app version bump'
+
+    return `${prefix} ${reference.shortHash} (${reference.version})`
 }
 
 async function resolveDeploymentVersionValue(rootDir, {
@@ -57,7 +104,8 @@ async function resolveDeploymentVersionValue(rootDir, {
         return String(versionArg).trim()
     }
 
-    const latestVersionBump = await readLatestVersionBumpCommit(rootDir, {runCommand})
+    const versionBumps = await readVersionBumpCommits(rootDir, {runCommand})
+    const versionReference = selectVersionSuggestionReference(pkg.version, versionBumps)
 
     return await resolveReleaseType({
         currentVersion: pkg.version,
@@ -68,8 +116,8 @@ async function resolveDeploymentVersionValue(rootDir, {
         runCommand,
         logStep: logProcessing,
         logWarning,
-        latestTag: latestVersionBump?.hash ?? null,
-        referenceLabel: latestVersionBump ? `last app version bump ${latestVersionBump.shortHash}` : null
+        latestTag: versionReference?.hash ?? null,
+        referenceLabel: formatVersionReferenceLabel(versionReference, pkg.version)
     })
 }
 
