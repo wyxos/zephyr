@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import {commandExists} from '../../utils/command.mjs'
 import {gitCommitArgs} from '../../utils/git-hooks.mjs'
+import {resolveReleaseType} from '../../release/release-type.mjs'
 
 async function readPackageJson(rootDir) {
     const packageJsonPath = path.join(rootDir, 'package.json')
@@ -19,8 +20,63 @@ async function isGitIgnored(rootDir, filePath, {runCommand} = {}) {
     }
 }
 
+async function readLatestVersionBumpCommit(rootDir, {runCommand} = {}) {
+    if (typeof runCommand !== 'function') {
+        return null
+    }
+
+    try {
+        const {stdout = ''} = await runCommand('git', ['log', '--format=%H%x00%h%x00%s', '-50'], {
+            capture: true,
+            cwd: rootDir
+        })
+
+        for (const line of stdout.split('\n')) {
+            const [hash, shortHash, subject] = line.split('\0')
+            if (/^chore: bump version to \d+\.\d+\.\d+(?:[-+].*)?$/i.test(subject ?? '')) {
+                return {hash, shortHash}
+            }
+        }
+    } catch {
+        return null
+    }
+
+    return null
+}
+
+async function resolveDeploymentVersionValue(rootDir, {
+    versionArg = null,
+    pkg,
+    interactive = false,
+    runPrompt,
+    runCommand,
+    logProcessing,
+    logWarning
+} = {}) {
+    if (versionArg && String(versionArg).trim().length > 0) {
+        return String(versionArg).trim()
+    }
+
+    const latestVersionBump = await readLatestVersionBumpCommit(rootDir, {runCommand})
+
+    return await resolveReleaseType({
+        currentVersion: pkg.version,
+        packageName: pkg.name ?? 'this app',
+        rootDir,
+        interactive,
+        runPrompt,
+        runCommand,
+        logStep: logProcessing,
+        logWarning,
+        latestTag: latestVersionBump?.hash ?? null,
+        referenceLabel: latestVersionBump ? `last app version bump ${latestVersionBump.shortHash}` : null
+    })
+}
+
 export async function bumpLocalPackageVersion(rootDir, {
     versionArg = null,
+    interactive = false,
+    runPrompt,
     skipGitHooks = false,
     runCommand,
     logProcessing,
@@ -43,9 +99,15 @@ export async function bumpLocalPackageVersion(rootDir, {
         return null
     }
 
-    const releaseValue = (versionArg && String(versionArg).trim().length > 0)
-        ? String(versionArg).trim()
-        : 'patch'
+    const releaseValue = await resolveDeploymentVersionValue(rootDir, {
+        versionArg,
+        pkg,
+        interactive,
+        runPrompt,
+        runCommand,
+        logProcessing,
+        logWarning
+    })
 
     logProcessing?.(`Bumping npm package version (${releaseValue})...`)
     await runCommand('npm', ['version', releaseValue, '--no-git-tag-version', '--force'], {cwd: rootDir})

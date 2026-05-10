@@ -40,7 +40,10 @@ Common workflows:
 # Deploy an app using the saved preset or the interactive prompts
 zephyr
 
-# Deploy an app with a local npm package version bump
+# Deploy an app with Zephyr's recommended local npm package version bump
+zephyr
+
+# Deploy an app with an explicit local npm package version bump
 zephyr minor
 
 # Deploy an app while bypassing Zephyr's built-in local checks
@@ -64,7 +67,7 @@ zephyr --non-interactive --preset wyxos-release --resume-pending --maintenance o
 # Emit NDJSON events for automation or agent tooling
 zephyr --non-interactive --json --preset wyxos-release --maintenance on
 
-# Release a Node/Vue package (defaults to a patch bump)
+# Release a Node/Vue package with Zephyr's recommended bump
 zephyr --type node
 
 # Release a Node/Vue package with an explicit bump
@@ -81,7 +84,7 @@ zephyr --type node --skip-versioning
 zephyr --type packagist --skip-versioning
 ```
 
-When `--type node` or `--type vue` is used without a bump argument, Zephyr defaults to `patch`.
+When an app deployment or a `--type node`/`--type vue` package release omits the bump argument, Zephyr recommends a version bump from changes since the last release reference, using Codex when available and deterministic heuristics as a fallback.
 
 ## Interactive and Non-Interactive Modes
 

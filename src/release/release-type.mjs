@@ -87,7 +87,11 @@ function buildChoiceOrder(suggestedReleaseType) {
   ]
 }
 
-async function readLatestReleaseTag(rootDir, {runCommand} = {}) {
+async function readLatestReleaseTag(rootDir, {runCommand, latestTag = null} = {}) {
+  if (typeof latestTag === 'string' && latestTag.trim() !== '') {
+    return latestTag.trim()
+  }
+
   try {
     const {stdout} = await runCommand('git', ['describe', '--tags', '--abbrev=0'], {
       capture: true,
@@ -137,16 +141,19 @@ async function readDiffStat(rootDir, {runCommand, latestTag} = {}) {
 async function buildReleaseSuggestionContext(rootDir, {
   runCommand,
   currentVersion,
-  packageName
+  packageName,
+  latestTag = null,
+  referenceLabel = null
 } = {}) {
-  const latestTag = await readLatestReleaseTag(rootDir, {runCommand})
-  const commitLog = await readCommitLog(rootDir, {runCommand, latestTag})
-  const diffStat = await readDiffStat(rootDir, {runCommand, latestTag})
+  const resolvedLatestTag = await readLatestReleaseTag(rootDir, {runCommand, latestTag})
+  const commitLog = await readCommitLog(rootDir, {runCommand, latestTag: resolvedLatestTag})
+  const diffStat = await readDiffStat(rootDir, {runCommand, latestTag: resolvedLatestTag})
 
   return {
     currentVersion,
     packageName,
-    latestTag,
+    latestTag: resolvedLatestTag,
+    referenceLabel: referenceLabel ?? resolvedLatestTag,
     commitLog,
     diffStat
   }
@@ -158,12 +165,16 @@ async function suggestReleaseType(rootDir = process.cwd(), {
   packageName,
   commandExistsImpl = commandExists,
   logStep,
-  logWarning
+  logWarning,
+  latestTag = null,
+  referenceLabel = null
 } = {}) {
   const context = await buildReleaseSuggestionContext(rootDir, {
     runCommand,
     currentVersion,
-    packageName
+    packageName,
+    latestTag,
+    referenceLabel
   })
   const allowedSuggestedReleaseTypes = resolveSuggestedReleaseTypeOptions(currentVersion)
   const heuristicReleaseType = inferReleaseTypeHeuristically(context)
@@ -201,7 +212,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
         'Prefer stable release types unless the current version already has a prerelease identifier.',
         `Package: ${packageName || 'unknown package'}`,
         `Current version: ${currentVersion || 'unknown'}`,
-        `Latest release tag: ${context.latestTag || 'none found'}`,
+        `Latest release reference: ${context.referenceLabel || context.latestTag || 'none found'}`,
         'Commits since the last release:',
         context.commitLog || '- no commits found',
         'Diff summary since the last release:',
@@ -252,7 +263,9 @@ export async function resolveReleaseType({
   runPrompt,
   runCommand,
   logStep,
-  logWarning
+  logWarning,
+  latestTag = null,
+  referenceLabel = null
 } = {}) {
   if (releaseType) {
     return releaseType
@@ -263,10 +276,12 @@ export async function resolveReleaseType({
     currentVersion,
     packageName,
     logStep,
-    logWarning
+    logWarning,
+    latestTag,
+    referenceLabel
   })
-  const rangeLabel = suggested.latestTag
-    ? `based on changes since ${suggested.latestTag}`
+  const rangeLabel = suggested.referenceLabel || suggested.latestTag
+    ? `based on changes since ${suggested.referenceLabel || suggested.latestTag}`
     : 'based on recent changes'
 
   if (!interactive || typeof runPrompt !== 'function') {

@@ -14,6 +14,7 @@ export async function prepareLocalDeployment(config, {
     skipLint = false,
     skipVersioning = false,
     autoCommit = false,
+    interactive = true,
     runPrompt,
     runCommand,
     runCommandCapture,
@@ -66,6 +67,8 @@ export async function prepareLocalDeployment(config, {
             await bumpLocalPackageVersion(rootDir, {
                 versionArg,
                 skipGitHooks,
+                interactive,
+                runPrompt,
                 runCommand,
                 logProcessing,
                 logSuccess,

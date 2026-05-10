@@ -118,6 +118,8 @@ describe('application/deploy/prepare-local-deployment', () => {
         expect(mockBumpLocalPackageVersion).toHaveBeenCalledWith('/repo/demo', {
             versionArg: null,
             skipGitHooks: false,
+            interactive: true,
+            runPrompt,
             runCommand,
             logProcessing,
             logSuccess,

@@ -385,6 +385,7 @@ export async function runDeployment(config, options = {}) {
             skipLint: executionMode?.skipLint === true,
             skipVersioning: executionMode?.skipVersioning === true,
             autoCommit: executionMode?.autoCommit === true,
+            interactive: executionMode?.interactive !== false,
             runPrompt,
             runCommand,
             runCommandCapture: context.runCommandCapture,
