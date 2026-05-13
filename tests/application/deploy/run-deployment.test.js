@@ -275,6 +275,78 @@ describe('application/deploy/run-deployment', () => {
         }))
     })
 
+    it('persists an interactive Laravel maintenance-mode answer to the selected preset', async () => {
+        mockReadFile.mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----')
+        mockAccess.mockResolvedValue(undefined)
+        mockReaddir.mockResolvedValueOnce([])
+
+        mockConnect.mockResolvedValue()
+        mockDispose.mockResolvedValue()
+        mockExecCommand.mockImplementation(async (command) => {
+            const response = {stdout: '', stderr: '', code: 0}
+
+            if (command.includes('printf "%s" "$HOME"')) {
+                return {...response, stdout: '/home/runcloud'}
+            }
+
+            if (command.includes('ls -1 /RunCloud/Packages')) {
+                return {...response, stdout: 'php84rc\n'}
+            }
+
+            if (command.includes('/RunCloud/Packages/php84rc/bin/php -r "echo PHP_VERSION;"')) {
+                return {...response, stdout: '8.4.6'}
+            }
+
+            if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
+                if (command.includes('cat')) {
+                    return {...response, stdout: 'LOCK_NOT_FOUND'}
+                }
+                return response
+            }
+
+            if (command.includes('grep -q "laravel/framework"')) {
+                return {...response, stdout: 'yes'}
+            }
+
+            if (command.includes('git diff')) {
+                return {...response, stdout: 'composer.json\n'}
+            }
+
+            return response
+        })
+
+        const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
+        const {createAppContext} = await import('#src/runtime/app-context.mjs')
+        const context = createAppContext()
+        context.runPrompt = vi.fn().mockResolvedValue({enableMaintenanceMode: false})
+        const saveOptions = vi.fn().mockResolvedValue(true)
+
+        await runDeployment({
+            serverIp: '127.0.0.1',
+            projectPath: '~/app',
+            branch: 'main',
+            sshUser: 'forge',
+            sshKey: '~/.ssh/id_rsa'
+        }, {
+            context,
+            presetState: {
+                saveOptions
+            }
+        })
+
+        expect(context.runPrompt).toHaveBeenCalledWith([
+            expect.objectContaining({
+                name: 'enableMaintenanceMode',
+                default: false
+            })
+        ])
+        expect(saveOptions).toHaveBeenCalledWith({
+            maintenanceMode: false
+        }, {
+            message: 'Saved maintenance mode preference to the selected preset.'
+        })
+    })
+
     it('skips Laravel tasks when framework is not detected remotely', async () => {
         mockReadFile.mockResolvedValue('-----BEGIN RSA PRIVATE KEY-----')
         mockReaddir.mockResolvedValueOnce([])

@@ -365,6 +365,7 @@ export async function runDeployment(config, options = {}) {
         remoteState = await resolveRemoteDeploymentState({
             snapshot,
             executionMode,
+            persistPresetOptions: presetState?.saveOptions,
             ssh,
             remoteCwd,
             runPrompt,
