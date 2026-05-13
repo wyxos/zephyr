@@ -11,7 +11,7 @@ import { createSshClientFactory } from '../runtime/ssh-client.mjs'
 
 const { logProcessing, logSuccess, logWarning, logError } = createChalkLogger(chalk)
 
-const createSshClient = createSshClientFactory({ NodeSSH })
+const createSshClient = createSshClientFactory({ NodeSSH, logWarning })
 
 function normalizeRemotePath(value) {
   if (value == null) return value
@@ -136,4 +136,3 @@ export async function deleteRemoteFile(ssh, remotePath, remoteCwd) {
     logSuccess(`Deleted remote file: ${absoluteRemotePath}`)
   }
 }
-

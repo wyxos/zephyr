@@ -54,7 +54,7 @@ export function createAppContext({
         workflow: normalizedExecutionMode.workflow
     })
     const hasInteractiveTerminal = Boolean(processInstance?.stdin?.isTTY && processInstance?.stdout?.isTTY)
-    const createSshClient = createSshClientFactory({NodeSSH: NodeSSHClass})
+    const createSshClient = createSshClientFactory({NodeSSH: NodeSSHClass, logWarning})
     const {runCommand, runCommandCapture} = createLocalCommandRunners({
         runCommandBase: runCommandImpl,
         runCommandCaptureBase: runCommandCaptureImpl
