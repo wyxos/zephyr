@@ -11,6 +11,7 @@ import {
     runReleaseCommand,
     validateReleaseDependencies
 } from '../../release/shared.mjs'
+import {waitForGitHubReleaseWorkflows} from '../../release/github-actions.mjs'
 import {resolveReleaseType} from '../../release/release-type.mjs'
 import {gitCommitArgs, gitPushArgs} from '../../utils/git-hooks.mjs'
 
@@ -322,7 +323,15 @@ export async function releasePackagistPackage({
     if (skipVersioning) {
         await createReleaseTag(updatedComposer.version, rootDir, {logStep, runCommand})
     }
+    const releasePushStartedAt = new Date()
     await pushChanges(rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
+    await waitForGitHubReleaseWorkflows(rootDir, {
+        runCommand,
+        logStep,
+        logSuccess,
+        logWarning,
+        pushStartedAt: releasePushStartedAt
+    })
 
     logSuccess?.(`Release workflow completed for ${composer.name}@${updatedComposer.version}.`)
     logStep?.('Note: Packagist will automatically detect the new git tag and update the package.')

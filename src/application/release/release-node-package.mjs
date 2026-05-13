@@ -12,6 +12,7 @@ import {
     runReleaseCommand,
     validateReleaseDependencies
 } from '../../release/shared.mjs'
+import {waitForGitHubReleaseWorkflows} from '../../release/github-actions.mjs'
 import {resolveReleaseType} from '../../release/release-type.mjs'
 import {gitCommitArgs, gitPushArgs, npmVersionArgs} from '../../utils/git-hooks.mjs'
 
@@ -469,10 +470,18 @@ export async function releaseNodePackage({
     if (skipVersioning) {
         await createReleaseTag(updatedPkg.version, rootDir, {logStep, runCommand})
     }
+    const releasePushStartedAt = new Date()
     await pushChanges(rootDir, {logStep, logSuccess, runCommand, skipGitHooks})
+    logStep?.('Publishing will be handled by GitHub Actions via trusted publishing.')
+    await waitForGitHubReleaseWorkflows(rootDir, {
+        runCommand,
+        logStep,
+        logSuccess,
+        logWarning,
+        pushStartedAt: releasePushStartedAt
+    })
     await deployGHPages(skipDeploy, updatedPkg, rootDir, {logStep, logSuccess, logWarning, runCommand, skipGitHooks})
 
-    logStep?.('Publishing will be handled by GitHub Actions via trusted publishing.')
     logSuccess?.(`Release workflow completed for ${updatedPkg.name}@${updatedPkg.version}.`)
     return updatedPkg
 }
