@@ -443,6 +443,68 @@ describe('main entrypoint', () => {
         }))
     })
 
+    it('does not treat parse-shaped default deploy options as explicit preset overrides', async () => {
+        const deploymentConfig = {
+            serverIp: '203.0.113.10',
+            branch: 'development',
+            projectPath: '~/webapps/demo'
+        }
+        const applyExecutionMode = vi.fn().mockResolvedValue(false)
+
+        mockAccess.mockImplementation(async () => {
+            throw new Error('ENOENT')
+        })
+        mockSelectDeploymentTarget.mockResolvedValue({
+            deploymentConfig,
+            presetState: {
+                name: 'Development',
+                options: {
+                    maintenanceMode: false,
+                    skipGitHooks: true,
+                    skipTests: true,
+                    skipLint: true,
+                    skipVersioning: true,
+                    autoCommit: true
+                },
+                applyExecutionMode
+            }
+        })
+
+        const {parseCliOptions} = await import('#src/cli/options.mjs')
+        const {main} = await import('#src/main.mjs')
+
+        await main(parseCliOptions(['--non-interactive', '--preset', 'Development']))
+
+        expect(applyExecutionMode).toHaveBeenCalledWith(expect.objectContaining({
+            presetName: 'Development',
+            maintenanceMode: false,
+            skipGitHooks: true,
+            skipTests: true,
+            skipLint: true,
+            skipVersioning: true,
+            autoCommit: true,
+            explicitMaintenanceMode: false,
+            explicitSkipGitHooks: false,
+            explicitSkipTests: false,
+            explicitSkipLint: false,
+            explicitSkipVersioning: false,
+            explicitAutoCommit: false
+        }))
+        expect(mockRunDeployment).toHaveBeenCalledWith(deploymentConfig, expect.objectContaining({
+            context: expect.objectContaining({
+                executionMode: expect.objectContaining({
+                    presetName: 'Development',
+                    maintenanceMode: false,
+                    skipGitHooks: true,
+                    skipTests: true,
+                    skipLint: true,
+                    skipVersioning: true,
+                    autoCommit: true
+                })
+            })
+        }))
+    })
+
     it('emits JSON lifecycle events for a successful non-interactive deployment', async () => {
         const deploymentConfig = {
             serverName: 'production',

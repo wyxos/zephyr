@@ -27,6 +27,18 @@ const RELEASE_SCRIPT_COMMAND = 'npx @wyxos/zephyr@latest'
 const require = createRequire(import.meta.url)
 const {version: ZEPHYR_VERSION} = require('../package.json')
 
+function hasOwnOption(options, key) {
+    return Object.prototype.hasOwnProperty.call(options, key)
+}
+
+function resolveExplicitOption(options, explicitKey, ...valueKeys) {
+    if (hasOwnOption(options, explicitKey)) {
+        return options[explicitKey] === true
+    }
+
+    return valueKeys.some((key) => hasOwnOption(options, key))
+}
+
 function normalizeMainOptions(firstArg = null, secondArg = null) {
     if (firstArg && typeof firstArg === 'object' && !Array.isArray(firstArg)) {
         return {
@@ -57,20 +69,20 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
             consumerSkipVersioning: firstArg.consumerSkipVersioning === true,
             consumerSkipGitHooks: firstArg.consumerSkipGitHooks === true,
             consumerAutoCommit: firstArg.consumerAutoCommit === true,
-            explicitConsumerMaintenanceMode: firstArg.explicitConsumerMaintenanceMode === true || 'consumerMaintenanceMode' in firstArg,
-            explicitConsumerSkipChecks: firstArg.explicitConsumerSkipChecks === true || 'consumerSkipChecks' in firstArg,
-            explicitConsumerSkipTests: firstArg.explicitConsumerSkipTests === true || 'consumerSkipTests' in firstArg || 'consumerSkipChecks' in firstArg,
-            explicitConsumerSkipLint: firstArg.explicitConsumerSkipLint === true || 'consumerSkipLint' in firstArg || 'consumerSkipChecks' in firstArg,
-            explicitConsumerSkipVersioning: firstArg.explicitConsumerSkipVersioning === true || 'consumerSkipVersioning' in firstArg,
-            explicitConsumerSkipGitHooks: firstArg.explicitConsumerSkipGitHooks === true || 'consumerSkipGitHooks' in firstArg,
-            explicitConsumerAutoCommit: firstArg.explicitConsumerAutoCommit === true || 'consumerAutoCommit' in firstArg,
-            explicitMaintenanceMode: firstArg.explicitMaintenanceMode === true || 'maintenanceMode' in firstArg,
-            explicitAutoCommit: firstArg.explicitAutoCommit === true || 'autoCommit' in firstArg,
-            explicitSkipVersioning: firstArg.explicitSkipVersioning === true || 'skipVersioning' in firstArg,
-            explicitSkipGitHooks: firstArg.explicitSkipGitHooks === true || 'skipGitHooks' in firstArg,
-            explicitSkipChecks: firstArg.explicitSkipChecks === true || 'skipChecks' in firstArg,
-            explicitSkipTests: firstArg.explicitSkipTests === true || 'skipTests' in firstArg || 'skipChecks' in firstArg,
-            explicitSkipLint: firstArg.explicitSkipLint === true || 'skipLint' in firstArg || 'skipChecks' in firstArg,
+            explicitConsumerMaintenanceMode: resolveExplicitOption(firstArg, 'explicitConsumerMaintenanceMode', 'consumerMaintenanceMode'),
+            explicitConsumerSkipChecks: resolveExplicitOption(firstArg, 'explicitConsumerSkipChecks', 'consumerSkipChecks'),
+            explicitConsumerSkipTests: resolveExplicitOption(firstArg, 'explicitConsumerSkipTests', 'consumerSkipTests', 'consumerSkipChecks'),
+            explicitConsumerSkipLint: resolveExplicitOption(firstArg, 'explicitConsumerSkipLint', 'consumerSkipLint', 'consumerSkipChecks'),
+            explicitConsumerSkipVersioning: resolveExplicitOption(firstArg, 'explicitConsumerSkipVersioning', 'consumerSkipVersioning'),
+            explicitConsumerSkipGitHooks: resolveExplicitOption(firstArg, 'explicitConsumerSkipGitHooks', 'consumerSkipGitHooks'),
+            explicitConsumerAutoCommit: resolveExplicitOption(firstArg, 'explicitConsumerAutoCommit', 'consumerAutoCommit'),
+            explicitMaintenanceMode: resolveExplicitOption(firstArg, 'explicitMaintenanceMode', 'maintenanceMode'),
+            explicitAutoCommit: resolveExplicitOption(firstArg, 'explicitAutoCommit', 'autoCommit'),
+            explicitSkipVersioning: resolveExplicitOption(firstArg, 'explicitSkipVersioning', 'skipVersioning'),
+            explicitSkipGitHooks: resolveExplicitOption(firstArg, 'explicitSkipGitHooks', 'skipGitHooks'),
+            explicitSkipChecks: resolveExplicitOption(firstArg, 'explicitSkipChecks', 'skipChecks'),
+            explicitSkipTests: resolveExplicitOption(firstArg, 'explicitSkipTests', 'skipTests', 'skipChecks'),
+            explicitSkipLint: resolveExplicitOption(firstArg, 'explicitSkipLint', 'skipLint', 'skipChecks'),
             context: firstArg.context ?? null
         }
     }
