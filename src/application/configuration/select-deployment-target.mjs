@@ -28,7 +28,10 @@ function createPresetState(rootDir, projectConfig, preset, {
         async saveOptions(nextOptions, {
             message = null
         } = {}) {
-            const normalizedOptions = normalizePresetOptions(nextOptions)
+            const normalizedOptions = normalizePresetOptions({
+                ...preset.options,
+                ...nextOptions
+            })
 
             if (presetOptionsEqual(preset.options, normalizedOptions)) {
                 return false

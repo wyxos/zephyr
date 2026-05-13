@@ -258,6 +258,53 @@ describe('selectDeploymentTarget', () => {
     }))
   })
 
+  it('merges partial preset option saves into existing options', async () => {
+    const { projectConfig, server, appConfig, configurationService } = createSelectionScenario()
+    const preset = {
+      name: 'Staging',
+      appId: 'app-1',
+      branch: 'main',
+      options: {
+        maintenanceMode: null,
+        skipGitHooks: true,
+        skipTests: false,
+        skipLint: false,
+        skipVersioning: true,
+        autoCommit: false
+      }
+    }
+
+    projectConfig.apps = [{...appConfig, serverId: 'server-1'}]
+    projectConfig.presets = [preset]
+    configurationService.selectPreset.mockResolvedValue(preset)
+    mockLoadServers.mockResolvedValue([{...server, id: 'server-1'}])
+    mockLoadProjectConfig.mockResolvedValue(projectConfig)
+
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
+
+    const result = await selectDeploymentTarget('/workspace/project', {
+      configurationService,
+      runPrompt: vi.fn(),
+      logProcessing: vi.fn(),
+      logSuccess: vi.fn(),
+      logWarning: vi.fn()
+    })
+
+    await result.presetState.saveOptions({
+      maintenanceMode: false
+    })
+
+    expect(projectConfig.presets[0].options).toEqual({
+      maintenanceMode: false,
+      skipGitHooks: true,
+      skipTests: false,
+      skipLint: false,
+      skipVersioning: true,
+      autoCommit: false
+    })
+    expect(mockSaveProjectConfig).toHaveBeenLastCalledWith('/workspace/project', projectConfig)
+  })
+
   it('fails when the named preset is missing in non-interactive mode', async () => {
     const { projectConfig, server, configurationService } = createSelectionScenario()
 
