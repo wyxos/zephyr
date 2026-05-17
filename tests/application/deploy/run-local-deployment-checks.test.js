@@ -146,7 +146,7 @@ describe('application/deploy/run-local-deployment-checks', () => {
                 args: ['run', 'build']
             })
         }))
-        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
+        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo', capture: true})
     })
 
     it('runs manual checks before bumping when a pre-push hook is present', async () => {
@@ -192,7 +192,7 @@ describe('application/deploy/run-local-deployment-checks', () => {
                 args: ['run', 'build']
             })
         }))
-        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
+        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo', capture: true})
     })
 
     it('skips resolving local lint and test support when skip flags are provided', async () => {
@@ -266,7 +266,7 @@ describe('application/deploy/run-local-deployment-checks', () => {
             })
         }))
         expect(mockRunBuild.mock.invocationCallOrder[0]).toBeLessThan(runCommand.mock.invocationCallOrder[0])
-        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
+        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo', capture: true})
         expect(logSuccess).toHaveBeenCalledWith('Local tests passed.')
     })
 
@@ -346,7 +346,7 @@ describe('application/deploy/run-local-deployment-checks', () => {
         expect(logWarning).toHaveBeenCalledWith('No supported lint command was found. Skipping linting checks.')
         expect(mockRunLinting).not.toHaveBeenCalled()
         expect(mockCommitLintingChanges).not.toHaveBeenCalled()
-        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo'})
+        expect(runCommand).toHaveBeenCalledWith('php', ['artisan', 'test', '--compact'], {cwd: '/repo/demo', capture: true})
     })
 
     it('returns early for hook-managed releases even when lint support is unavailable', async () => {

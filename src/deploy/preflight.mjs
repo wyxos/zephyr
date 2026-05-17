@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import {gitCommitArgs} from '../utils/git-hooks.mjs'
+import {formatCommandError} from '../utils/command.mjs'
 
 export async function hasPrePushHook(rootDir) {
   const hookPaths = [
@@ -137,14 +138,22 @@ export async function runLinting(rootDir, {
 
   if (selectedLintCommand.type === 'npm') {
     logProcessing?.('Running npm lint...')
-    await runCommand(selectedLintCommand.command, selectedLintCommand.args, { cwd: rootDir })
+    try {
+      await runCommand(selectedLintCommand.command, selectedLintCommand.args, {cwd: rootDir, capture: true})
+    } catch (error) {
+      throw new Error(`Linting failed. Fix lint failures before deploying.\n${formatCommandError(error)}`)
+    }
     logSuccess?.('Linting completed.')
     return true
   }
 
   if (selectedLintCommand.type === 'pint') {
     logProcessing?.('Running Laravel Pint...')
-    await runCommand(selectedLintCommand.command, selectedLintCommand.args, { cwd: rootDir })
+    try {
+      await runCommand(selectedLintCommand.command, selectedLintCommand.args, {cwd: rootDir, capture: true})
+    } catch (error) {
+      throw new Error(`Laravel Pint failed. Fix formatting failures before deploying.\n${formatCommandError(error)}`)
+    }
     logSuccess?.('Linting completed.')
     return true
   }
@@ -166,7 +175,7 @@ export async function runBuild(rootDir, {
   }
 
   logProcessing?.('Running local frontend build...')
-  await runCommand(selectedBuildCommand.command, selectedBuildCommand.args, {cwd: rootDir})
+  await runCommand(selectedBuildCommand.command, selectedBuildCommand.args, {cwd: rootDir, capture: true})
   logSuccess?.('Local frontend build completed.')
   return true
 }

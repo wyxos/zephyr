@@ -1,6 +1,6 @@
 import * as localRepo from '../../deploy/local-repo.mjs'
 import * as preflight from '../../deploy/preflight.mjs'
-import {commandExists} from '../../utils/command.mjs'
+import {commandExists, formatCommandError} from '../../utils/command.mjs'
 
 async function getGitStatus(rootDir, {runCommandCapture} = {}) {
     return await localRepo.getGitStatus(rootDir, {runCommandCapture})
@@ -98,7 +98,7 @@ async function runLocalLaravelBuild(rootDir, {runCommand, logProcessing, logSucc
             )
         }
 
-        throw new Error(`Local frontend build failed. Fix build failures before deploying.\n${error.message}`)
+        throw new Error(`Local frontend build failed. Fix build failures before deploying.\n${formatCommandError(error)}`)
     }
 }
 
@@ -106,7 +106,7 @@ async function runLocalLaravelTests(rootDir, {runCommand, logProcessing, logSucc
     logProcessing?.('Running Laravel tests locally...')
 
     try {
-        await runCommand(testCommand.command, testCommand.args, {cwd: rootDir})
+        await runCommand(testCommand.command, testCommand.args, {cwd: rootDir, capture: true})
         logSuccess?.('Local tests passed.')
     } catch (error) {
         if (error.code === 'ENOENT') {
@@ -116,7 +116,7 @@ async function runLocalLaravelTests(rootDir, {runCommand, logProcessing, logSucc
             )
         }
 
-        throw new Error(`Local tests failed. Fix test failures before deploying.\n${error.message}`)
+        throw new Error(`Local tests failed. Fix test failures before deploying.\n${formatCommandError(error)}`)
     }
 }
 

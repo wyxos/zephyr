@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import process from 'node:process'
 
 const spawnCalls = []
+const spawnSyncCalls = []
 
 function createMockChild({ stdout = '', stderr = '', exitCode = 0 } = {}) {
   const closeHandlers = []
@@ -42,6 +43,10 @@ vi.mock('node:child_process', () => {
     spawn: vi.fn((command, argsOrOptions, maybeOptions) => {
       spawnCalls.push([command, argsOrOptions, maybeOptions])
       return createMockChild({ stdout: 'ok\n', stderr: '', exitCode: 0 })
+    }),
+    spawnSync: vi.fn((command, args, options) => {
+      spawnSyncCalls.push([command, args, options])
+      return { status: 0 }
     })
   }
 })
@@ -76,6 +81,41 @@ describe('command spawning behavior', () => {
     expect(cmd2).toContain('--version')
     expect(args2).toMatchObject({ shell: true })
     expect(opts2).toBeUndefined()
+  })
+
+  it('checks command existence on Windows without shell args', async () => {
+    if (process.platform !== 'win32') {
+      // This behavior is Windows-specific; avoid failing on other OSes.
+      return
+    }
+
+    spawnSyncCalls.length = 0
+
+    const { commandExists } = await import('#src/utils/command.mjs')
+
+    expect(commandExists('npm')).toBe(true)
+    expect(spawnSyncCalls).toHaveLength(1)
+    expect(spawnSyncCalls[0][0]).toBe('where.exe')
+    expect(spawnSyncCalls[0][1]).toEqual(['npm.cmd'])
+    expect(spawnSyncCalls[0][2]).toEqual({
+      stdio: ['ignore', 'pipe', 'ignore']
+    })
+  })
+
+  it('captures output when runCommand capture mode is requested directly', async () => {
+    spawnCalls.length = 0
+
+    const { runCommand } = await import('#src/utils/command.mjs')
+
+    await expect(runCommand('git', ['status'], {capture: true})).resolves.toEqual({
+      stdout: 'ok\n',
+      stderr: ''
+    })
+    expect(spawnCalls[0][0]).toBe('git')
+    expect(spawnCalls[0][1]).toEqual(['status'])
+    expect(spawnCalls[0][2]).toMatchObject({
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
   })
 
   it('uses spawn(command, args, options) for non-shim commands (git)', async () => {

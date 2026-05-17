@@ -168,6 +168,15 @@ describe('deploy/local-repo', () => {
                 ([command, args]) => command === 'git' && args[0] === 'commit' && args.includes('fix: align deployment dirty tree handling')
             )
         ).toBe(true)
+
+        const commitCall = mockSpawn.mock.calls.find(
+            ([command, args]) => command === 'git' && args[0] === 'commit'
+        )
+        const pushCall = mockSpawn.mock.calls.find(
+            ([command, args]) => command === 'git' && args[0] === 'push'
+        )
+        expect(commitCall?.[2]).toMatchObject({stdio: ['ignore', 'pipe', 'pipe']})
+        expect(pushCall?.[2]).toMatchObject({stdio: ['ignore', 'pipe', 'pipe']})
     })
 
     it('commits and pushes staged changes on the target branch', async () => {

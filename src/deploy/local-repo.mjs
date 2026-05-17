@@ -1,6 +1,7 @@
 import { getCurrentBranch as getCurrentBranchImpl, getUpstreamRef as getUpstreamRefImpl } from '../utils/git.mjs'
 import {hasPrePushHook} from './preflight.mjs'
 import {gitCommitArgs, gitPushArgs} from '../utils/git-hooks.mjs'
+import {formatCommandError} from '../utils/command.mjs'
 import {
   formatWorkingTreePreview,
   parseWorkingTreeEntries,
@@ -207,6 +208,13 @@ async function commitAndPushPendingChanges(targetBranch, rootDir, {
     await runCommand(command, args, { cwd })
     return undefined
   }
+  const runCapturedCommand = async (command, args) => {
+    try {
+      await runCommand(command, args, {cwd: rootDir, capture: true})
+    } catch (error) {
+      throw new Error(formatCommandError(error))
+    }
+  }
 
   const suggestedCommitMessage = await suggestCommitMessage(rootDir, {
     runCommand: captureAwareRunCommand,
@@ -244,10 +252,10 @@ async function commitAndPushPendingChanges(targetBranch, rootDir, {
   }
 
   logProcessing?.('Staging all pending changes before deployment...')
-  await runCommand('git', ['add', '-A'], { cwd: rootDir })
+  await runCapturedCommand('git', ['add', '-A'])
 
   logProcessing?.('Committing pending changes before deployment...')
-  await runCommand('git', gitCommitArgs(['-m', message], {skipGitHooks}), { cwd: rootDir })
+  await runCapturedCommand('git', gitCommitArgs(['-m', message], {skipGitHooks}))
 
   const prePushHookPresent = await hasPrePushHook(rootDir)
   if (prePushHookPresent) {
@@ -259,10 +267,10 @@ async function commitAndPushPendingChanges(targetBranch, rootDir, {
   }
 
   try {
-    await runCommand('git', gitPushArgs(['origin', targetBranch], {skipGitHooks}), { cwd: rootDir })
+    await runCapturedCommand('git', gitPushArgs(['origin', targetBranch], {skipGitHooks}))
   } catch (error) {
     if (prePushHookPresent) {
-      throw new Error(`Git push failed while the pre-push hook was running. See hook output above.\n${error.message}`)
+      throw new Error(`Git push failed while the pre-push hook was running.\n${error.message}`)
     }
 
     throw error

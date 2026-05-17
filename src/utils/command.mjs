@@ -12,12 +12,11 @@ export function commandExists(command) {
   const resolvedCommand = resolveCommandForPlatform(command)
 
   // On Windows, use 'where', on Unix use 'which'
-  const checker = DEFAULT_IS_WINDOWS ? 'where' : 'which'
+  const checker = DEFAULT_IS_WINDOWS ? 'where.exe' : 'which'
 
   try {
     const result = spawnSync(checker, [resolvedCommand], {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      shell: DEFAULT_IS_WINDOWS
+      stdio: ['ignore', 'pipe', 'ignore']
     })
     return result.status === 0
   } catch {
@@ -67,7 +66,11 @@ function quoteForCmd(arg) {
   return value
 }
 
-export async function runCommand(command, args, { cwd = process.cwd(), stdio = 'inherit' } = {}) {
+export async function runCommand(command, args, { cwd = process.cwd(), stdio = 'inherit', capture = false } = {}) {
+  if (capture) {
+    return runCommandCapture(command, args, {cwd})
+  }
+
   const resolvedCommand = resolveCommandForPlatform(command)
   const useShell = isWindowsShellShim(resolvedCommand) || shouldUseShellOnWindows(command)
 
@@ -152,3 +155,23 @@ export async function runCommandCapture(command, args, { cwd = process.cwd() } =
   })
 }
 
+export function formatCapturedCommandOutput(error) {
+  const sections = [
+    ['stdout', error?.stdout],
+    ['stderr', error?.stderr]
+  ]
+    .map(([label, value]) => {
+      const text = typeof value === 'string' ? value.trim() : ''
+      return text ? `[${label}]\n${text}` : null
+    })
+    .filter(Boolean)
+
+  return sections.join('\n')
+}
+
+export function formatCommandError(error) {
+  const message = error?.message ?? String(error)
+  const output = formatCapturedCommandOutput(error)
+
+  return output ? `${message}\n${output}` : message
+}

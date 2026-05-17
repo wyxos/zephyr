@@ -7,7 +7,9 @@ import {afterEach, describe, expect, it, vi} from 'vitest'
 import {
     commitLintingChanges,
     hasStagedChanges,
-    resolveSupportedLintCommand
+    resolveSupportedLintCommand,
+    runBuild,
+    runLinting
 } from '#src/deploy/preflight.mjs'
 
 describe('deploy/preflight', () => {
@@ -111,5 +113,83 @@ describe('deploy/preflight', () => {
             'Release cannot run because no supported lint command was found.\n' +
             'Zephyr requires either `npm run lint` or Laravel Pint (`vendor/bin/pint`) before deployment.'
         )
+    })
+
+    it('runs npm lint with captured output on success', async () => {
+        const runCommand = vi.fn().mockResolvedValue(undefined)
+        const logProcessing = vi.fn()
+        const logSuccess = vi.fn()
+
+        await expect(runLinting('/repo/demo', {
+            runCommand,
+            logProcessing,
+            logSuccess,
+            commandExists: vi.fn(),
+            lintCommand: {
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'lint'],
+                label: 'npm lint'
+            }
+        })).resolves.toBe(true)
+
+        expect(runCommand).toHaveBeenCalledWith('npm', ['run', 'lint'], {
+            cwd: '/repo/demo',
+            capture: true
+        })
+        expect(logProcessing).toHaveBeenCalledWith('Running npm lint...')
+        expect(logSuccess).toHaveBeenCalledWith('Linting completed.')
+    })
+
+    it('surfaces captured lint output on failure', async () => {
+        const lintError = new Error('npm exited with code 1')
+        lintError.stdout = 'stdout details'
+        lintError.stderr = 'stderr details'
+
+        await expect(runLinting('/repo/demo', {
+            runCommand: vi.fn().mockRejectedValue(lintError),
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            commandExists: vi.fn(),
+            lintCommand: {
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'lint'],
+                label: 'npm lint'
+            }
+        })).rejects.toThrow(
+            'Linting failed. Fix lint failures before deploying.\n' +
+            'npm exited with code 1\n' +
+            '[stdout]\n' +
+            'stdout details\n' +
+            '[stderr]\n' +
+            'stderr details'
+        )
+    })
+
+    it('runs frontend builds with captured output on success', async () => {
+        const runCommand = vi.fn().mockResolvedValue(undefined)
+        const logProcessing = vi.fn()
+        const logSuccess = vi.fn()
+
+        await expect(runBuild('/repo/demo', {
+            runCommand,
+            logProcessing,
+            logSuccess,
+            commandExists: vi.fn(),
+            buildCommand: {
+                type: 'npm',
+                command: 'npm',
+                args: ['run', 'build'],
+                label: 'npm build'
+            }
+        })).resolves.toBe(true)
+
+        expect(runCommand).toHaveBeenCalledWith('npm', ['run', 'build'], {
+            cwd: '/repo/demo',
+            capture: true
+        })
+        expect(logProcessing).toHaveBeenCalledWith('Running local frontend build...')
+        expect(logSuccess).toHaveBeenCalledWith('Local frontend build completed.')
     })
 })
