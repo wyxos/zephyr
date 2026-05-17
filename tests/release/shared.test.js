@@ -322,6 +322,7 @@ describe('release shared helpers', () => {
         expect(runCommand).toHaveBeenCalledWith('codex', expect.arrayContaining([
             'exec',
             '--model',
+            '--ignore-user-config',
             'gpt-5.4-mini',
             '--output-last-message',
             expect.any(String)

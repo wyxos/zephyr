@@ -70,6 +70,12 @@ describe('release type resolver', () => {
             name: 'minor (recommended)',
             value: 'minor'
         })
+
+        expect(runCommand).toHaveBeenCalledWith('codex', expect.arrayContaining([
+            'exec',
+            '--ignore-user-config',
+            '--output-last-message'
+        ]), expect.any(Object))
     })
 
     it('falls back to heuristics in non-interactive mode when Codex is unavailable', async () => {

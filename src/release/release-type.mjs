@@ -244,6 +244,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
     const codexResult = await runCommand('codex', [
       'exec',
       '--ephemeral',
+      '--ignore-user-config',
       '--model',
       'gpt-5.4-mini',
       '--sandbox',
