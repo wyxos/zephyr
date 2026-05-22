@@ -42,6 +42,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .option('--json', 'Emit NDJSON events to stdout. Requires --non-interactive.')
         .option('--setup', 'Configure an app deployment target and verify SSH connectivity without deploying.')
         .option('--preset <name>', 'Preset name to use for non-interactive app deployments.')
+        .option('--group <name>', 'Deployment group name to run multiple app deployment presets in sequence.')
         .option('--resume-pending', 'Resume a saved pending deployment snapshot without prompting.')
         .option('--discard-pending', 'Discard a saved pending deployment snapshot without prompting.')
         .option('--maintenance <mode>', 'Laravel maintenance mode policy for app deployments (on|off).')
@@ -87,6 +88,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         json: Boolean(options.json),
         setup: Boolean(options.setup),
         presetName: options.preset ?? null,
+        groupName: options.group ?? null,
         resumePending: Boolean(options.resumePending),
         discardPending: Boolean(options.discardPending),
         maintenanceMode: normalizeMaintenanceMode(options.maintenance),
@@ -132,6 +134,7 @@ export function validateCliOptions(options = {}) {
         setup = false,
         thenDeploy = null,
         presetName = null,
+        groupName = null,
         resumePending = false,
         discardPending = false,
         maintenanceMode = null,
@@ -198,6 +201,10 @@ export function validateCliOptions(options = {}) {
             throw new InvalidCliOptionsError('--preset is only valid for app deployments.')
         }
 
+        if (groupName) {
+            throw new InvalidCliOptionsError('--group is only valid for app deployments.')
+        }
+
         if (resumePending || discardPending) {
             throw new InvalidCliOptionsError('--resume-pending and --discard-pending are only valid for app deployments.')
         }
@@ -210,9 +217,17 @@ export function validateCliOptions(options = {}) {
             throw new InvalidCliOptionsError('--skip-build and --skip-deploy are only valid for node/vue release workflows.')
         }
 
+        if (presetName && groupName) {
+            throw new InvalidCliOptionsError('Use either --preset <name> or --group <name>, not both.')
+        }
+
         if (setup) {
             if (versionArg) {
                 throw new InvalidCliOptionsError('--setup cannot be used with a version or bump argument.')
+            }
+
+            if (groupName) {
+                throw new InvalidCliOptionsError('--setup cannot be used with --group.')
             }
 
             if (resumePending || discardPending) {
@@ -232,8 +247,8 @@ export function validateCliOptions(options = {}) {
             }
         }
 
-        if (nonInteractive && !presetName) {
-            throw new InvalidCliOptionsError('--non-interactive app deployments require --preset <name>.')
+        if (nonInteractive && !presetName && !groupName) {
+            throw new InvalidCliOptionsError('--non-interactive app deployments require --preset <name> or --group <name>.')
         }
     }
 

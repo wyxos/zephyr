@@ -105,6 +105,43 @@ export function migratePresets(presets, apps) {
   return { presets: migrated, needsMigration }
 }
 
+export function migrateGroups(groups) {
+  if (!Array.isArray(groups)) {
+    return { groups: [], needsMigration: false }
+  }
+
+  let needsMigration = false
+  const migrated = groups.flatMap((group) => {
+    if (!group || typeof group !== 'object') {
+      needsMigration = true
+      return []
+    }
+
+    const name = typeof group.name === 'string' ? group.name.trim() : ''
+    const rawPresets = Array.isArray(group.presets)
+      ? group.presets
+      : Array.isArray(group.presetNames)
+        ? group.presetNames
+        : []
+    const presets = rawPresets
+      .map((presetName) => typeof presetName === 'string' ? presetName.trim() : '')
+      .filter((presetName) => presetName.length > 0)
+
+    if (!name || presets.length === 0) {
+      needsMigration = true
+      return []
+    }
+
+    if (name !== group.name || !Array.isArray(group.presets) || presets.length !== rawPresets.length) {
+      needsMigration = true
+    }
+
+    return [{ name, presets }]
+  })
+
+  return { groups: migrated, needsMigration }
+}
+
 export async function loadProjectConfig(rootDir, servers = [], {
   logSuccess,
   logWarning,
@@ -118,11 +155,13 @@ export async function loadProjectConfig(rootDir, servers = [], {
     const data = JSON.parse(raw)
     const apps = Array.isArray(data?.apps) ? data.apps : []
     const presets = Array.isArray(data?.presets) ? data.presets : []
+    const groups = Array.isArray(data?.groups) ? data.groups : []
 
     const { apps: migratedApps, needsMigration: appsNeedMigration } = migrateApps(apps, servers)
     const { presets: migratedPresets, needsMigration: presetsNeedMigration } = migratePresets(presets, migratedApps)
+    const { groups: migratedGroups, needsMigration: groupsNeedMigration } = migrateGroups(groups)
 
-    if (appsNeedMigration || presetsNeedMigration) {
+    if (appsNeedMigration || presetsNeedMigration || groupsNeedMigration) {
       if (!allowMigration) {
         throw new ZephyrError(
           'Zephyr cannot run non-interactively because .zephyr/config.json needs migration. Rerun interactively once to update the config.',
@@ -132,12 +171,13 @@ export async function loadProjectConfig(rootDir, servers = [], {
 
       await saveProjectConfig(rootDir, {
         apps: migratedApps,
-        presets: migratedPresets
+        presets: migratedPresets,
+        groups: migratedGroups
       })
       logSuccess?.('Migrated project configuration to use unique IDs.')
     }
 
-    return { apps: migratedApps, presets: migratedPresets }
+    return { apps: migratedApps, presets: migratedPresets, groups: migratedGroups }
   } catch (error) {
     if (error.code === 'ENOENT') {
       if (strict) {
@@ -147,7 +187,7 @@ export async function loadProjectConfig(rootDir, servers = [], {
         )
       }
 
-      return { apps: [], presets: [] }
+      return { apps: [], presets: [], groups: [] }
     }
 
     if (error instanceof ZephyrError) {
@@ -162,19 +202,24 @@ export async function loadProjectConfig(rootDir, servers = [], {
     }
 
     logWarning?.('Failed to read .zephyr/config.json, starting with an empty list of apps.')
-    return { apps: [], presets: [] }
+    return { apps: [], presets: [], groups: [] }
   }
 }
 
 export async function saveProjectConfig(rootDir, config) {
   const configDir = getProjectConfigDir(rootDir)
   await ensureDirectory(configDir)
+  const payloadData = {
+    apps: config.apps ?? [],
+    presets: config.presets ?? []
+  }
+
+  if (Array.isArray(config.groups) && config.groups.length > 0) {
+    payloadData.groups = config.groups
+  }
 
   const payload = JSON.stringify(
-    {
-      apps: config.apps ?? [],
-      presets: config.presets ?? []
-    },
+    payloadData,
     null,
     2
   )

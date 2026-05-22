@@ -25,6 +25,7 @@ describe('cli/options', () => {
             json: true,
             setup: false,
             presetName: 'production',
+            groupName: null,
             resumePending: true,
             discardPending: false,
             maintenanceMode: true,
@@ -74,6 +75,26 @@ describe('cli/options', () => {
         expect(() => validateCliOptions(options)).toThrow('--preset is only valid for app deployments.')
     })
 
+    it('parses deployment groups for app deployments', () => {
+        const options = parseCliOptions(['--non-interactive', '--group', 'Development v1-v4'])
+
+        expect(options.groupName).toBe('Development v1-v4')
+        expect(options.presetName).toBeNull()
+        expect(() => validateCliOptions(options)).not.toThrow()
+    })
+
+    it('rejects group flags on package release workflows', () => {
+        const options = parseCliOptions(['--type=node', '--group', 'Development v1-v4'])
+
+        expect(() => validateCliOptions(options)).toThrow('--group is only valid for app deployments.')
+    })
+
+    it('rejects conflicting preset and group flags', () => {
+        const options = parseCliOptions(['--preset', 'Production', '--group', 'Development v1-v4'])
+
+        expect(() => validateCliOptions(options)).toThrow('Use either --preset <name> or --group <name>, not both.')
+    })
+
     it('parses setup mode for app deployments', () => {
         const options = parseCliOptions(['--setup'])
 
@@ -102,7 +123,7 @@ describe('cli/options', () => {
     it('rejects non-interactive app deploys without a preset', () => {
         const options = parseCliOptions(['--non-interactive'])
 
-        expect(() => validateCliOptions(options)).toThrow('--non-interactive app deployments require --preset <name>.')
+        expect(() => validateCliOptions(options)).toThrow('--non-interactive app deployments require --preset <name> or --group <name>.')
     })
 
     it('normalizes maintenance off to false', () => {

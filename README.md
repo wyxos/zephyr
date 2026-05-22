@@ -52,6 +52,9 @@ zephyr minor --skip-checks
 # Deploy a configured app non-interactively
 zephyr --non-interactive --preset wyxos-release --maintenance off
 
+# Deploy several configured app presets as one grouped release
+zephyr --non-interactive --group "Development v1-v4" --maintenance off --skip-versioning
+
 # Configure a Laravel app target and verify SSH without deploying
 zephyr --setup
 
@@ -95,7 +98,7 @@ For app deployments, interactive mode now requires a real interactive terminal. 
 Non-interactive mode is strict and is intended for already-configured projects:
 
 - `--non-interactive` fails instead of prompting
-- app deployments require `--preset <name>`
+- app deployments require `--preset <name>` or `--group <name>`
 - Laravel app deployments require either a saved preset maintenance preference, `--maintenance on|off`, or a resumable snapshot that already contains the choice
 - pending deployment snapshots require either `--resume-pending` or `--discard-pending`
 - stale remote locks are never auto-removed in non-interactive mode
@@ -131,6 +134,12 @@ Recommended pattern for app deployments:
 
 ```bash
 zephyr --non-interactive --json --preset wyxos-release --maintenance off
+```
+
+Recommended pattern for grouped app deployments:
+
+```bash
+zephyr --non-interactive --json --group "Development v1-v4" --maintenance off --skip-versioning
 ```
 
 Recommended pattern for package releases:
@@ -270,11 +279,21 @@ Deployment targets are stored per-project at `.zephyr/config.json`:
       "sshUser": "forge",
       "sshKey": "~/.ssh/id_rsa"
     }
+  ],
+  "groups": [
+    {
+      "name": "Production targets",
+      "presets": [
+        "prod-main"
+      ]
+    }
   ]
 }
 ```
 
 Preset `options` capture repeatable deploy behavior so Zephyr can reuse the same maintenance, dirty-tree, and deploy-check preferences on later runs.
+
+Deployment `groups` run the named presets in order. Zephyr performs local dependency validation once before the group starts, and after the first successful target for a branch it skips local checks and versioning for later targets on that same branch. Targets on a different branch are prepared separately.
 
 ### Project Directory Structure
 

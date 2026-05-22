@@ -12,6 +12,7 @@ const {
     mockReleasePackageThenDeployConsumer,
     mockReleasePackagist,
     mockAssertLaravelSetupProject,
+    mockResolveDeploymentGroup,
     mockResolvePendingSnapshot,
     mockRunDeployment,
     mockSelectDeploymentTarget,
@@ -56,6 +57,7 @@ const {
     mockReleasePackageThenDeployConsumer: vi.fn(),
     mockReleasePackagist: vi.fn(),
     mockAssertLaravelSetupProject: vi.fn(),
+    mockResolveDeploymentGroup: vi.fn(),
     mockResolvePendingSnapshot: vi.fn(),
     mockRunDeployment: vi.fn(),
     mockSelectDeploymentTarget: vi.fn(),
@@ -111,6 +113,10 @@ vi.mock('#src/application/configuration/select-deployment-target.mjs', () => ({
     selectDeploymentTarget: mockSelectDeploymentTarget
 }))
 
+vi.mock('#src/application/configuration/deployment-groups.mjs', () => ({
+    resolveDeploymentGroup: mockResolveDeploymentGroup
+}))
+
 vi.mock('#src/application/deploy/resolve-pending-snapshot.mjs', () => ({
     resolvePendingSnapshot: mockResolvePendingSnapshot
 }))
@@ -136,6 +142,7 @@ describe('main entrypoint', () => {
         mockReleasePackageThenDeployConsumer.mockReset()
         mockReleasePackagist.mockReset()
         mockAssertLaravelSetupProject.mockReset()
+        mockResolveDeploymentGroup.mockReset()
         mockResolvePendingSnapshot.mockReset()
         mockRunDeployment.mockReset()
         mockSelectDeploymentTarget.mockReset()
@@ -175,6 +182,10 @@ describe('main entrypoint', () => {
         mockReleaseNode.mockResolvedValue({name: '@wyxos/vibe', version: '3.1.23'})
         mockReleasePackagist.mockResolvedValue({name: 'wyxos/shift-php', version: '1.2.3'})
         mockReleasePackageThenDeployConsumer.mockResolvedValue(undefined)
+        mockResolveDeploymentGroup.mockResolvedValue({
+            name: 'Development v1-v4',
+            presetNames: ['Development v1', 'Development v2']
+        })
     })
 
     it('delegates node releases to the node release command', async () => {
@@ -502,6 +513,108 @@ describe('main entrypoint', () => {
                     autoCommit: true
                 })
             })
+        }))
+    })
+
+    it('runs deployment groups and reuses local preparation for repeated branches', async () => {
+        const firstPresetState = {
+            name: 'Development v1',
+            options: {
+                maintenanceMode: false,
+                skipGitHooks: false,
+                skipTests: false,
+                skipLint: false,
+                skipVersioning: true,
+                autoCommit: false
+            },
+            applyExecutionMode: vi.fn().mockResolvedValue(false)
+        }
+        const secondPresetState = {
+            name: 'Development v2',
+            options: {
+                maintenanceMode: false,
+                skipGitHooks: false,
+                skipTests: false,
+                skipLint: false,
+                skipVersioning: true,
+                autoCommit: false
+            },
+            applyExecutionMode: vi.fn().mockResolvedValue(false)
+        }
+
+        mockAccess.mockImplementation(async () => {
+            throw new Error('ENOENT')
+        })
+        mockSelectDeploymentTarget
+            .mockResolvedValueOnce({
+                deploymentConfig: {
+                    serverIp: '203.0.113.10',
+                    branch: 'development',
+                    projectPath: '~/webapps/demo'
+                },
+                presetState: firstPresetState
+            })
+            .mockResolvedValueOnce({
+                deploymentConfig: {
+                    serverIp: '203.0.113.10',
+                    branch: 'development',
+                    projectPath: '~/webapps/demo-v2'
+                },
+                presetState: secondPresetState
+            })
+        appContext.executionMode = {
+            ...appContext.executionMode,
+            interactive: false,
+            groupName: 'Development v1-v4'
+        }
+
+        const {main} = await import('#src/main.mjs')
+
+        await main({
+            nonInteractive: true,
+            groupName: 'Development v1-v4'
+        })
+
+        expect(mockResolveDeploymentGroup).toHaveBeenCalledWith(process.cwd(), expect.objectContaining({
+            groupName: 'Development v1-v4',
+            strict: true,
+            allowMigration: false
+        }))
+        expect(mockSelectDeploymentTarget).toHaveBeenNthCalledWith(1, process.cwd(), expect.objectContaining({
+            executionMode: expect.objectContaining({
+                presetName: 'Development v1',
+                groupName: 'Development v1-v4'
+            })
+        }))
+        expect(mockSelectDeploymentTarget).toHaveBeenNthCalledWith(2, process.cwd(), expect.objectContaining({
+            executionMode: expect.objectContaining({
+                presetName: 'Development v2',
+                groupName: 'Development v1-v4'
+            })
+        }))
+        expect(mockResolvePendingSnapshot).toHaveBeenNthCalledWith(1, process.cwd(), expect.any(Object), expect.objectContaining({
+            executionMode: expect.objectContaining({
+                skipTests: false,
+                skipLint: false,
+                skipVersioning: true
+            })
+        }))
+        expect(mockResolvePendingSnapshot).toHaveBeenNthCalledWith(2, process.cwd(), expect.any(Object), expect.objectContaining({
+            executionMode: expect.objectContaining({
+                skipChecks: true,
+                skipTests: true,
+                skipLint: true,
+                skipVersioning: true
+            })
+        }))
+        expect(mockRunDeployment).toHaveBeenCalledTimes(2)
+        expect(firstPresetState.applyExecutionMode).toHaveBeenCalledWith(expect.objectContaining({
+            skipTests: false,
+            skipLint: false
+        }))
+        expect(secondPresetState.applyExecutionMode).toHaveBeenCalledWith(expect.objectContaining({
+            skipTests: false,
+            skipLint: false
         }))
     })
 

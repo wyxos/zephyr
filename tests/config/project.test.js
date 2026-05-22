@@ -58,7 +58,13 @@ describe('config/project', () => {
         mockReadFile.mockResolvedValueOnce(
             JSON.stringify({
                 apps: [],
-                presets: []
+                presets: [],
+                groups: [
+                    {
+                        name: 'Development v1-v4',
+                        presets: ['Development v1', 'Development v2']
+                    }
+                ]
             })
         )
 
@@ -95,6 +101,37 @@ describe('config/project', () => {
             skipVersioning: false,
             autoCommit: true
         })
+        expect(saved.groups).toEqual([
+            {
+                name: 'Development v1-v4',
+                presets: ['Development v1', 'Development v2']
+            }
+        ])
+    })
+
+    it('normalizes deployment groups from project config', async () => {
+        mockReadFile.mockResolvedValueOnce(
+            JSON.stringify({
+                apps: [],
+                presets: [],
+                groups: [
+                    {
+                        name: ' Development v1-v4 ',
+                        presetNames: ['Development v1', 'Development v2', '']
+                    }
+                ]
+            })
+        )
+
+        const {loadProjectConfig} = await import('#src/config/project.mjs')
+        const config = await loadProjectConfig(process.cwd())
+
+        expect(config.groups).toEqual([
+            {
+                name: 'Development v1-v4',
+                presets: ['Development v1', 'Development v2']
+            }
+        ])
     })
 
     it('removes a preset from project config when requested', async () => {

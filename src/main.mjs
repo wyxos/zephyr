@@ -11,12 +11,10 @@ import * as bootstrap from './project/bootstrap.mjs'
 import {getErrorCode, ZephyrError} from './runtime/errors.mjs'
 import {PROJECT_CONFIG_DIR} from './utils/paths.mjs'
 import {writeStderrLine} from './utils/output.mjs'
-import {mergeDeployOptions} from './config/preset-options.mjs'
 import {createAppContext} from './runtime/app-context.mjs'
 import {createConfigurationService} from './application/configuration/service.mjs'
-import {selectDeploymentTarget} from './application/configuration/select-deployment-target.mjs'
-import {resolvePendingSnapshot} from './application/deploy/resolve-pending-snapshot.mjs'
-import {runDeployment} from './application/deploy/run-deployment.mjs'
+import {resolveDeploymentGroup} from './application/configuration/deployment-groups.mjs'
+import {runPresetDeployment} from './application/deploy/run-preset-deployment.mjs'
 import {assertLaravelSetupProject} from './application/deploy/verify-laravel-setup.mjs'
 import {releasePackageThenDeployConsumer} from './application/consumer/release-package-then-deploy-consumer.mjs'
 import {SKIP_GIT_HOOKS_WARNING} from './utils/git-hooks.mjs'
@@ -49,6 +47,7 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
             json: firstArg.json === true,
             setup: firstArg.setup === true,
             presetName: firstArg.presetName ?? null,
+            groupName: firstArg.groupName ?? null,
             resumePending: firstArg.resumePending === true,
             discardPending: firstArg.discardPending === true,
             maintenanceMode: firstArg.maintenanceMode ?? null,
@@ -95,6 +94,7 @@ function normalizeMainOptions(firstArg = null, secondArg = null) {
         json: false,
         setup: false,
         presetName: null,
+        groupName: null,
         resumePending: false,
         discardPending: false,
         maintenanceMode: null,
@@ -162,13 +162,6 @@ function assertInteractiveAppDeploySession({workflowType = null, executionMode =
     )
 }
 
-async function runRemoteTasks(config, options = {}) {
-    return await runDeployment(config, {
-        ...options,
-        context: options.context
-    })
-}
-
 async function main(optionsOrWorkflowType = null, versionArg = null) {
     const options = normalizeMainOptions(optionsOrWorkflowType, versionArg)
     const rootDir = process.cwd()
@@ -179,6 +172,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
         workflow: resolveWorkflowName(options.workflowType),
         setup: options.setup === true,
         presetName: options.presetName,
+        groupName: options.groupName,
         maintenanceMode: options.maintenanceMode,
         autoCommit: options.autoCommit === true,
         skipVersioning: options.skipVersioning === true,
@@ -226,6 +220,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
                     setup: currentExecutionMode.setup === true,
                     nonInteractive: currentExecutionMode.interactive === false,
                     presetName: currentExecutionMode.presetName,
+                    groupName: currentExecutionMode.groupName,
                     maintenanceMode: currentExecutionMode.maintenanceMode,
                     autoCommit: currentExecutionMode.autoCommit === true,
                     skipVersioning: currentExecutionMode.skipVersioning === true,
@@ -371,59 +366,65 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             })
         }
 
-        const {deploymentConfig, presetState} = await selectDeploymentTarget(rootDir, {
-            configurationService,
-            runPrompt,
-            logProcessing,
-            logSuccess,
-            logWarning,
-            emitEvent,
-            executionMode: currentExecutionMode,
-            promptPresetOptions: currentExecutionMode.setup !== true
-        })
+        if (currentExecutionMode.groupName) {
+            const deploymentGroup = await resolveDeploymentGroup(rootDir, {
+                groupName: currentExecutionMode.groupName,
+                logSuccess,
+                logWarning,
+                strict: currentExecutionMode.interactive === false,
+                allowMigration: currentExecutionMode.interactive !== false
+            })
+            const preparedBranches = new Set()
+            const baseGroupExecutionMode = {...currentExecutionMode}
 
-        if (presetState) {
-            const effectiveDeployOptions = mergeDeployOptions(currentExecutionMode, presetState.options)
-            currentExecutionMode = {
-                ...currentExecutionMode,
-                presetName: presetState.name,
-                ...effectiveDeployOptions,
-                skipChecks: currentExecutionMode.skipChecks === true ||
-                    (effectiveDeployOptions.skipTests === true && effectiveDeployOptions.skipLint === true)
+            logProcessing?.(`Running deployment group "${deploymentGroup.name}" with ${deploymentGroup.presetNames.length} presets.`)
+
+            for (const [index, presetName] of deploymentGroup.presetNames.entries()) {
+                logProcessing?.(`\nDeploying group target ${index + 1}/${deploymentGroup.presetNames.length}: ${presetName}`)
+                currentExecutionMode = await runPresetDeployment({
+                    rootDir,
+                    configurationService,
+                    appContext,
+                    runPrompt,
+                    logProcessing,
+                    logSuccess,
+                    logWarning,
+                    emitEvent,
+                    baseExecutionMode: baseGroupExecutionMode,
+                    presetName,
+                    versionArg: options.versionArg,
+                    preparedBranches
+                })
             }
-            appContext.executionMode = currentExecutionMode
-            await presetState.applyExecutionMode(currentExecutionMode)
-        }
-
-        const snapshotToUse = currentExecutionMode.setup
-            ? null
-            : await resolvePendingSnapshot(rootDir, deploymentConfig, {
+        } else {
+            currentExecutionMode = await runPresetDeployment({
+                rootDir,
+                configurationService,
+                appContext,
                 runPrompt,
                 logProcessing,
+                logSuccess,
                 logWarning,
-                executionMode: currentExecutionMode
+                emitEvent,
+                baseExecutionMode: currentExecutionMode,
+                presetName: currentExecutionMode.presetName,
+                versionArg: options.versionArg
             })
-
-        await runRemoteTasks(deploymentConfig, {
-            rootDir,
-            snapshot: snapshotToUse,
-            versionArg: options.versionArg,
-            context: appContext,
-            presetState
-        })
+        }
 
         emitEvent?.('run_completed', {
             message: 'Zephyr workflow completed successfully.',
             data: {
                 version: ZEPHYR_VERSION,
-                workflow: currentExecutionMode.workflow
+                workflow: currentExecutionMode.workflow,
+                groupName: currentExecutionMode.groupName
             }
         })
         if (!currentExecutionMode.json) {
             await notifyWorkflowResult({
                 status: 'success',
                 workflow: currentExecutionMode.workflow,
-                presetName: currentExecutionMode.presetName,
+                presetName: currentExecutionMode.groupName ?? currentExecutionMode.presetName,
                 rootDir
             })
         }
@@ -446,7 +447,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             await notifyWorkflowResult({
                 status: 'failure',
                 workflow: currentExecutionMode.workflow,
-                presetName: currentExecutionMode.presetName,
+                presetName: currentExecutionMode.groupName ?? currentExecutionMode.presetName,
                 rootDir,
                 message: error.message
             })
@@ -456,4 +457,4 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
     }
 }
 
-export {main, runRemoteTasks}
+export {main}
