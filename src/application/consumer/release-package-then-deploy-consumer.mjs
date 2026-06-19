@@ -88,6 +88,42 @@ function resolvePackageDetails({releasedPackage, packageName, version}) {
   return {packageName: resolvedPackageName, version: resolvedVersion}
 }
 
+function formatMaintenanceMode(value) {
+  if (value === true) {
+    return 'on'
+  }
+
+  if (value === false) {
+    return 'off'
+  }
+
+  return 'preset/default'
+}
+
+function formatChecksMode(executionMode) {
+  if (executionMode.skipChecks || (executionMode.skipTests && executionMode.skipLint)) {
+    return 'skipped'
+  }
+
+  if (executionMode.skipTests) {
+    return 'lint only'
+  }
+
+  if (executionMode.skipLint) {
+    return 'tests only'
+  }
+
+  return 'lint and tests enabled'
+}
+
+function formatEnabled(value) {
+  return value ? 'enabled' : 'disabled'
+}
+
+function formatSkipped(value) {
+  return value ? 'skipped' : 'enabled'
+}
+
 export async function releasePackageThenDeployConsumer({
   producerRootDir,
   consumerRootDir,
@@ -157,6 +193,7 @@ export async function releasePackageThenDeployConsumer({
   } = context
   const configurationService = createConfigurationService(context)
 
+  logProcessing?.(`Consumer release chain plan: update ${details.packageName} to ${details.version} in ${resolvedConsumerRootDir}, then deploy preset "${executionMode.presetName}".`)
   logProcessing?.(`Preparing consumer app at ${resolvedConsumerRootDir}...`)
   await ensureConsumerRepoReadyImpl(resolvedConsumerRootDir, {
     runCommand,
@@ -216,6 +253,7 @@ export async function releasePackageThenDeployConsumer({
     })
     context.executionMode = executionMode
     await presetState.applyExecutionMode(executionMode)
+    logProcessing?.(`Effective consumer deployment options: maintenance ${formatMaintenanceMode(executionMode.maintenanceMode)}, checks ${formatChecksMode(executionMode)}, versioning ${formatSkipped(executionMode.skipVersioning)}, auto-commit ${formatEnabled(executionMode.autoCommit)}, git hooks ${formatSkipped(executionMode.skipGitHooks)}.`)
   }
 
   await waitForNpmPackageVersionImpl({

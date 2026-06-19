@@ -110,6 +110,12 @@ describe('application/consumer/release-package-then-deploy-consumer', () => {
             bootstrapImpl
         })
 
+        expect(context.logProcessing).toHaveBeenCalledWith(
+            `Consumer release chain plan: update @wyxos/vibe to 3.1.23 in ${consumerRootDir}, then deploy preset "wyxos-release".`
+        )
+        expect(context.logProcessing).toHaveBeenCalledWith(
+            'Effective consumer deployment options: maintenance off, checks skipped, versioning skipped, auto-commit enabled, git hooks skipped.'
+        )
         expect(createAppContextImpl).toHaveBeenCalledWith({
             executionMode: expect.objectContaining({
                 interactive: false,
