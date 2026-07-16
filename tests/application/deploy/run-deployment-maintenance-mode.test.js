@@ -67,7 +67,7 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
                 return {...response, stdout: 'yes'}
             }
 
-            if (command.includes('git diff')) {
+            if (command.includes('git diff --name-only')) {
                 return {...response, stdout: 'composer.json\n'}
             }
 
@@ -82,7 +82,7 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
                 return {...response, stdout: 'yes'}
             }
 
-            if (command.includes('composer install')) {
+            if (command.includes('install --no-dev')) {
                 return {...response, stderr: 'composer failed', code: 1}
             }
 
@@ -106,9 +106,9 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
         expect(
             executedCommands.findIndex((command) => command.includes('artisan down --render="errors::503"'))
         ).toBeGreaterThan(-1)
-        expect(executedCommands.findIndex((command) => command.includes('composer install'))).toBeGreaterThan(-1)
+        expect(executedCommands.findIndex((command) => command.includes('install --no-dev'))).toBeGreaterThan(-1)
         expect(executedCommands.findIndex((command) => command.includes('artisan up'))).toBeGreaterThan(
-            executedCommands.findIndex((command) => command.includes('composer install'))
+            executedCommands.findIndex((command) => command.includes('install --no-dev'))
         )
         expect(mockPrompt).toHaveBeenCalledTimes(2)
         expect(mockPrompt.mock.invocationCallOrder[0]).toBeLessThan(
@@ -143,7 +143,7 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
                 return {...response, stdout: 'yes'}
             }
 
-            if (command.includes('git diff')) {
+            if (command.includes('git diff --name-only')) {
                 return {...response, stdout: 'composer.json\n'}
             }
 
@@ -158,7 +158,7 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
                 return {...response, stdout: 'yes'}
             }
 
-            if (command.includes('composer install')) {
+            if (command.includes('install --no-dev')) {
                 return {
                     ...response,
                     stderr: 'composer failed',
@@ -194,7 +194,7 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
             executedCommands.findIndex((command) => command.includes('artisan down --render="errors::503"'))
         ).toBeGreaterThan(-1)
         expect(executedCommands.findIndex((command) => command.includes('artisan up'))).toBeGreaterThan(
-            executedCommands.findIndex((command) => command.includes('composer install'))
+            executedCommands.findIndex((command) => command.includes('install --no-dev'))
         )
         expect(mockPrompt).not.toHaveBeenCalled()
         expect(process.stdout.write).toHaveBeenCalledWith(

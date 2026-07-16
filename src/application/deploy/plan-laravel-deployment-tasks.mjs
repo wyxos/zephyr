@@ -53,8 +53,10 @@ export function planLaravelDeploymentTasks({
       (file) =>
         file === 'package.json' ||
         file === 'package-lock.json' ||
+        file === 'npm-shrinkwrap.json' ||
         file.endsWith('/package.json') ||
-        file.endsWith('/package-lock.json')
+        file.endsWith('/package-lock.json') ||
+        file.endsWith('/npm-shrinkwrap.json')
     )
 
   const hasFrontendChanges =
@@ -89,7 +91,7 @@ export function planLaravelDeploymentTasks({
     // Prefer `composer install --no-dev` and fail loudly if composer.lock is missing.
     steps.push({
       label: 'Install Composer dependencies',
-      command: `if [ ! -f composer.lock ]; then echo "composer.lock is missing; commit composer.lock for reproducible deploys." >&2; exit 1; fi; if [ -f composer.phar ]; then ${phpCommand} composer.phar install --no-dev --no-interaction --prefer-dist --optimize-autoloader; elif command -v composer >/dev/null 2>&1; then ${phpCommand} $(command -v composer) install --no-dev --no-interaction --prefer-dist --optimize-autoloader; else ${phpCommand} composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader; fi`
+      command: `if ! git ls-files --error-unmatch composer.lock >/dev/null 2>&1; then echo "composer.lock is not tracked; commit composer.lock for reproducible deploys." >&2; exit 1; fi; if [ -f composer.phar ]; then composer_command="${phpCommand} composer.phar"; elif command -v composer >/dev/null 2>&1; then composer_command="${phpCommand} $(command -v composer)"; else composer_command="${phpCommand} composer"; fi; $composer_command validate --no-check-publish --strict --no-interaction; $composer_command install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader; git diff --exit-code -- composer.lock`
     })
   }
 
@@ -103,7 +105,7 @@ export function planLaravelDeploymentTasks({
   if (shouldRunNpmInstall) {
     steps.push({
       label: 'Install Node dependencies',
-      command: 'npm install'
+      command: 'if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1 || git ls-files --error-unmatch npm-shrinkwrap.json >/dev/null 2>&1; then npm ci --no-audit --no-fund; git diff --exit-code -- package-lock.json npm-shrinkwrap.json; else npm install --no-package-lock --no-audit --no-fund; fi'
     })
   }
 

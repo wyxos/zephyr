@@ -225,11 +225,11 @@ npm run release
 Zephyr analyzes changed files and runs appropriate tasks:
 
 - **Always**: `git pull origin <branch>`
-- **Composer files changed** (`composer.json` / `composer.lock`): `composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader` (requires `composer.lock`)
+- **Composer files changed** (`composer.json` / `composer.lock`): require a tracked `composer.lock`, strictly validate manifest/lock agreement, run `composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader`, and fail if the lockfile changes
 - **Migrations changed** (`database/migrations/*.php`): `php artisan migrate --force`
-- **Node dependency files changed** (`package.json` / `package-lock.json`, including nested): `npm install`
+- **Node dependency files changed** (`package.json` / `package-lock.json` / `npm-shrinkwrap.json`, including nested): use `npm ci` when an npm lockfile is tracked and fail if it changes; otherwise use `npm install --no-package-lock` so an intentional no-lock policy stays non-mutating
 - **Frontend files changed** (`.vue/.js/.ts/.tsx/.css/.scss/.less`): `npm run build`
-  - Note: `npm run build` is also scheduled when `npm install` is scheduled.
+  - Note: `npm run build` is also scheduled when Node dependency installation is scheduled.
 - **PHP files changed**: clear caches + restart queue workers (Horizon if configured)
 
 ## Configuration

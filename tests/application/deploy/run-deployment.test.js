@@ -75,7 +75,7 @@ describe('application/deploy/run-deployment', () => {
                 return {...response, stdout: 'yes'}
             }
 
-            if (command.includes('git diff')) {
+            if (command.includes('git diff --name-only')) {
                 return {
                     ...response,
                     stdout:
@@ -132,7 +132,7 @@ describe('application/deploy/run-deployment', () => {
 
         const executedCommands = mockExecCommand.mock.calls.map(([cmd]) => cmd)
         expect(executedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
-        expect(executedCommands.some((cmd) => cmd.includes('composer install'))).toBe(true)
+        expect(executedCommands.some((cmd) => cmd.includes('install --no-dev'))).toBe(true)
         expect(executedCommands.some((cmd) => cmd.includes('php artisan migrate'))).toBe(true)
         expect(executedCommands.some((cmd) => cmd.includes('npm install'))).toBe(true)
         expect(executedCommands.some((cmd) => cmd.includes('npm run build'))).toBe(true)
@@ -183,7 +183,7 @@ describe('application/deploy/run-deployment', () => {
                 return {...response, stdout: 'yes'}
             }
 
-            if (command.includes('git diff')) {
+            if (command.includes('git diff --name-only')) {
                 return {...response, stdout: 'composer.json\n'}
             }
 
@@ -239,7 +239,7 @@ describe('application/deploy/run-deployment', () => {
                 return {...response, stdout: 'yes'}
             }
 
-            if (command.includes('git diff')) {
+            if (command.includes('git diff --name-only')) {
                 return {...response, stdout: 'composer.json\n'}
             }
 
@@ -308,7 +308,7 @@ describe('application/deploy/run-deployment', () => {
                 return {...response, stdout: 'yes'}
             }
 
-            if (command.includes('git diff')) {
+            if (command.includes('git diff --name-only')) {
                 return {...response, stdout: 'composer.json\n'}
             }
 
@@ -397,7 +397,7 @@ describe('application/deploy/run-deployment', () => {
         })
 
         const executedCommands = mockExecCommand.mock.calls.map(([cmd]) => cmd)
-        expect(executedCommands.every((cmd) => !cmd.includes('composer install'))).toBe(true)
+        expect(executedCommands.every((cmd) => !cmd.includes('install --no-dev'))).toBe(true)
         expect(executedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
     })
 
