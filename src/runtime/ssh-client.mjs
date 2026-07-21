@@ -1,3 +1,7 @@
+import {spawn} from 'node:child_process'
+
+import {createOpenSshClient} from './open-ssh-client.mjs'
+
 const connectionErrorHandlerSymbol = Symbol('zephyrSshConnectionErrorHandler')
 const connectWrapperSymbol = Symbol('zephyrSshConnectWrapper')
 
@@ -54,7 +58,50 @@ function wrapSshConnect(ssh, { logWarning } = {}) {
   return ssh
 }
 
-export function createSshClientFactory({ NodeSSH, logWarning }) {
+function createDelegatingSshClient({NodeSSH, spawnImpl}) {
+  let activeClient = null
+
+  function assertActiveClient() {
+    if (!activeClient) {
+      throw new Error('SSH client is not connected.')
+    }
+
+    return activeClient
+  }
+
+  return {
+    get connection() {
+      return activeClient?.connection ?? null
+    },
+
+    async connect(options = {}) {
+      activeClient = options.sshAlias
+        ? createOpenSshClient({spawnImpl})
+        : new NodeSSH()
+
+      await activeClient.connect(options)
+
+      return this
+    },
+
+    async execCommand(...args) {
+      return await assertActiveClient().execCommand(...args)
+    },
+
+    async getFile(...args) {
+      return await assertActiveClient().getFile(...args)
+    },
+
+    dispose() {
+      const result = activeClient?.dispose()
+      activeClient = null
+
+      return result
+    }
+  }
+}
+
+export function createSshClientFactory({NodeSSH, logWarning, spawnImpl = spawn}) {
   if (!NodeSSH) {
     throw new Error('createSshClientFactory requires NodeSSH')
   }
@@ -64,6 +111,6 @@ export function createSshClientFactory({ NodeSSH, logWarning }) {
       return wrapSshConnect(globalThis.__zephyrSSHFactory(), { logWarning })
     }
 
-    return wrapSshConnect(new NodeSSH(), { logWarning })
+    return wrapSshConnect(createDelegatingSshClient({NodeSSH, spawnImpl}), {logWarning})
   }
 }

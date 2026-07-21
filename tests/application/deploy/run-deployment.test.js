@@ -388,6 +388,7 @@ describe('application/deploy/run-deployment', () => {
 
         await runDeployment({
             serverIp: '127.0.0.1',
+            sshAlias: 'law-dev',
             projectPath: '~/app',
             branch: 'main',
             sshUser: 'forge',
@@ -399,6 +400,14 @@ describe('application/deploy/run-deployment', () => {
         const executedCommands = mockExecCommand.mock.calls.map(([cmd]) => cmd)
         expect(executedCommands.every((cmd) => !cmd.includes('install --no-dev'))).toBe(true)
         expect(executedCommands.some((cmd) => cmd.includes('git pull origin main'))).toBe(true)
+        expect(mockConnect).toHaveBeenCalledTimes(2)
+        expect(mockConnect).toHaveBeenCalledWith({
+            host: '127.0.0.1',
+            username: 'forge',
+            privateKey: '-----BEGIN RSA PRIVATE KEY-----',
+            sshAlias: 'law-dev',
+            privateKeyPath: '/home/local/.ssh/id_rsa'
+        })
     })
 
     it('verifies setup for a Laravel app without running remote commands', async () => {
@@ -443,6 +452,51 @@ describe('application/deploy/run-deployment', () => {
         expect(mockExecCommand).not.toHaveBeenCalled()
         expect(mockPrepareLocalDeployment).not.toHaveBeenCalled()
         expect(mockWriteFile).not.toHaveBeenCalledWith(expect.stringContaining('deploy.lock'), expect.anything())
+    })
+
+    it('verifies setup through an OpenSSH alias', async () => {
+        mockAccess.mockResolvedValue(undefined)
+        mockReadFile.mockImplementation(async (filePath) => {
+            if (String(filePath).endsWith('composer.json')) {
+                return JSON.stringify({
+                    require: {
+                        'laravel/framework': '^11.0'
+                    }
+                })
+            }
+
+            return '-----BEGIN RSA PRIVATE KEY-----'
+        })
+        mockConnect.mockResolvedValue()
+        mockDispose.mockResolvedValue()
+
+        const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
+        const {createAppContext} = await import('#src/runtime/app-context.mjs')
+
+        await runDeployment({
+            serverIp: '203.0.113.10',
+            sshAlias: 'law-dev',
+            projectPath: '~/app',
+            branch: 'main',
+            sshUser: 'runcloud',
+            sshKey: '~/.ssh/id_rsa'
+        }, {
+            context: createAppContext({
+                executionMode: {
+                    workflow: 'deploy',
+                    setup: true
+                }
+            })
+        })
+
+        expect(mockConnect).toHaveBeenCalledWith({
+            host: '203.0.113.10',
+            username: 'runcloud',
+            privateKey: '-----BEGIN RSA PRIVATE KEY-----',
+            sshAlias: 'law-dev',
+            privateKeyPath: '/home/local/.ssh/id_rsa'
+        })
+        expect(mockExecCommand).not.toHaveBeenCalled()
     })
 
     it('fails setup before connecting when the local project is not Laravel', async () => {

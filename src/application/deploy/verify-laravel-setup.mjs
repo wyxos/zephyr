@@ -28,13 +28,15 @@ export async function verifyLaravelSetup({
     const privateKeyPath = await resolveSshKeyPath(config.sshKey)
     const privateKey = await fs.readFile(privateKeyPath, 'utf8')
     const ssh = createSshClient()
+    const sshTarget = config.sshAlias || config.serverIp
 
     try {
-        logProcessing?.(`\nConnecting to ${config.serverIp} as ${sshUser} to verify SSH setup...`)
+        logProcessing?.(`\nConnecting to ${sshTarget} as ${sshUser} to verify SSH setup...`)
         await ssh.connect({
             host: config.serverIp,
             username: sshUser,
-            privateKey
+            privateKey,
+            ...(config.sshAlias ? {sshAlias: config.sshAlias, privateKeyPath} : {})
         })
         logSuccess?.('Setup verified. SSH connection succeeded for this Laravel app.')
     } finally {

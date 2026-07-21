@@ -243,10 +243,13 @@ Servers are stored globally at `~/.config/zephyr/servers.json`:
   {
     "id": "server_abc123",
     "serverName": "production",
-    "serverIp": "192.168.1.100"
+    "serverIp": "192.168.1.100",
+    "sshAlias": "production-app"
   }
 ]
 ```
+
+`sshAlias` is optional. When present, Zephyr runs remote commands through the system OpenSSH client using that `Host` entry, so settings such as `ProxyJump`, custom ports, and host-specific connection options in `~/.ssh/config` are honoured. The configured application SSH user and key are still passed explicitly. Without `sshAlias`, Zephyr keeps using its direct `node-ssh` transport.
 
 ### Project Configuration
 

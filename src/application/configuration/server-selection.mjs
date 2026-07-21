@@ -10,7 +10,8 @@ export async function promptServerDetails({
                                           } = {}) {
     const defaults = {
         serverName: existingServers.length === 0 ? 'home' : `server-${existingServers.length + 1}`,
-        serverIp: '1.1.1.1'
+        serverIp: '1.1.1.1',
+        sshAlias: ''
     }
 
     const answers = await runPrompt([
@@ -25,14 +26,27 @@ export async function promptServerDetails({
             name: 'serverIp',
             message: 'Enter the server IP address',
             default: defaults.serverIp
+        },
+        {
+            type: 'input',
+            name: 'sshAlias',
+            message: 'OpenSSH config alias (optional, supports ProxyJump)',
+            default: defaults.sshAlias
         }
     ])
 
-    return {
+    const server = {
         id: createId(),
         serverName: answers.serverName.trim() || defaults.serverName,
         serverIp: answers.serverIp.trim() || defaults.serverIp
     }
+
+    const sshAlias = answers.sshAlias?.trim()
+    if (sshAlias) {
+        server.sshAlias = sshAlias
+    }
+
+    return server
 }
 
 export async function selectServer({
@@ -53,7 +67,7 @@ export async function selectServer({
     }
 
     const choices = servers.map((server, index) => ({
-        name: `${server.serverName} (${server.serverIp})`,
+        name: `${server.serverName} (${server.sshAlias || server.serverIp})`,
         value: index
     }))
 

@@ -23,20 +23,22 @@ export async function connectToServer(config) {
   const sshUser = config.sshUser || os.userInfo().username
   const privateKeyPath = await resolveSshKeyPath(config.sshKey)
   const privateKey = await fs.readFile(privateKeyPath, 'utf8')
+  const sshTarget = config.sshAlias || config.serverIp
 
-  logProcessing(`\nConnecting to ${config.serverIp} as ${sshUser}...`)
+  logProcessing(`\nConnecting to ${sshTarget} as ${sshUser}...`)
 
   await ssh.connect({
     host: config.serverIp,
     username: sshUser,
-    privateKey
+    privateKey,
+    ...(config.sshAlias ? {sshAlias: config.sshAlias, privateKeyPath} : {})
   })
 
   const remoteHomeResult = await ssh.execCommand('printf "%s" "$HOME"')
   const remoteHome = remoteHomeResult.stdout.trim() || `/home/${sshUser}`
   const remoteCwd = resolveRemotePath(config.projectPath, remoteHome)
 
-  logSuccess(`Connected to ${config.serverIp}. Working directory: ${remoteCwd}`)
+  logSuccess(`Connected to ${sshTarget}. Working directory: ${remoteCwd}`)
 
   return { ssh, remoteCwd, remoteHome }
 }

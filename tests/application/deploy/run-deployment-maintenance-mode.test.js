@@ -174,6 +174,7 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
 
         await expect(runDeployment({
             serverIp: '127.0.0.1',
+            sshAlias: 'law-dev',
             projectPath: '~/app',
             branch: 'main',
             sshUser: 'forge',
@@ -197,6 +198,13 @@ describe('application/deploy/run-deployment maintenance mode recovery', () => {
             executedCommands.findIndex((command) => command.includes('install --no-dev'))
         )
         expect(mockPrompt).not.toHaveBeenCalled()
+        expect(mockConnect).toHaveBeenCalledWith({
+            host: '127.0.0.1',
+            username: 'forge',
+            privateKey: '-----BEGIN RSA PRIVATE KEY-----',
+            sshAlias: 'law-dev',
+            privateKeyPath: '/home/local/.ssh/id_rsa'
+        })
         expect(process.stdout.write).toHaveBeenCalledWith(
             expect.stringContaining('"message":"Deployment interrupted after Laravel maintenance mode was enabled. Running `artisan up` automatically..."')
         )

@@ -28,7 +28,11 @@ describe('application/configuration/service', () => {
     })
 
     it('registers a new server when none exist', async () => {
-        mockPrompt.mockResolvedValueOnce({serverName: 'production', serverIp: '203.0.113.10'})
+        mockPrompt.mockResolvedValueOnce({
+            serverName: 'production',
+            serverIp: '203.0.113.10',
+            sshAlias: 'law-dev'
+        })
 
         const {selectServer, promptServerDetails} = await import('#src/application/configuration/service.mjs')
         const {saveServers} = await import('#src/config/servers.mjs')
@@ -47,7 +51,11 @@ describe('application/configuration/service', () => {
                 promptServerDetails({existingServers, runPrompt: mockPrompt, createId: generateId})
         })
 
-        expect(server).toMatchObject({serverName: 'production', serverIp: '203.0.113.10'})
+        expect(server).toMatchObject({
+            serverName: 'production',
+            serverIp: '203.0.113.10',
+            sshAlias: 'law-dev'
+        })
         expect(server.id).toBeDefined()
         expect(typeof server.id).toBe('string')
         expect(servers).toHaveLength(1)
@@ -55,6 +63,7 @@ describe('application/configuration/service', () => {
         const [writePath, payload] = mockWriteFile.mock.calls.at(-1)
         expect(writePath).toContain('servers.json')
         expect(payload).toContain('production')
+        expect(payload).toContain('law-dev')
     })
 
     it('creates a new application configuration when none exist for a server', async () => {

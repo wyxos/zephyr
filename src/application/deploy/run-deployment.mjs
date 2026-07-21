@@ -11,47 +11,11 @@ import {
 import {createRemoteExecutor} from '../../deploy/remote-exec.mjs'
 import {resolveSshKeyPath} from '../../ssh/keys.mjs'
 import {cleanupOldLogs, closeLogFile, getLogFilePath, writeToLogFile} from '../../utils/log-file.mjs'
-import {resolveRemotePath} from '../../utils/remote-path.mjs'
 import {buildRemoteDeploymentPlan, resolveRemoteDeploymentState} from './build-remote-deployment-plan.mjs'
+import {connectToRemoteDeploymentTarget} from './connect-to-remote-deployment-target.mjs'
 import {executeRemoteDeploymentPlan} from './execute-remote-deployment-plan.mjs'
 import {prepareLocalDeployment} from './prepare-local-deployment.mjs'
 import {verifyLaravelSetup} from './verify-laravel-setup.mjs'
-
-async function resolveRemoteHome(ssh, sshUser) {
-    const remoteHomeResult = await ssh.execCommand('printf "%s" "$HOME"')
-    return remoteHomeResult.stdout.trim() || `/home/${sshUser}`
-}
-
-async function connectToRemoteDeploymentTarget({
-                                                   config,
-                                                   createSshClient,
-                                                   sshUser,
-                                                   privateKey,
-                                                   remoteCwd = null,
-                                                   logProcessing,
-                                                   message
-                                               } = {}) {
-    const ssh = createSshClient()
-
-    logProcessing?.(`\n${message ?? `Connecting to ${config.serverIp} as ${sshUser}...`}`)
-
-    await ssh.connect({
-        host: config.serverIp,
-        username: sshUser,
-        privateKey
-    })
-
-    if (remoteCwd) {
-        return {ssh, remoteCwd}
-    }
-
-    const remoteHome = await resolveRemoteHome(ssh, sshUser)
-
-    return {
-        ssh,
-        remoteCwd: resolveRemotePath(config.projectPath, remoteHome)
-    }
-}
 
 async function maybeRecoverLaravelMaintenanceMode({
     remotePlan,
@@ -306,9 +270,10 @@ export async function runDeployment(config, options = {}) {
                         createSshClient,
                         sshUser,
                         privateKey,
+                        privateKeyPath,
                         remoteCwd,
                         logProcessing,
-                        message: `Reconnecting to ${config.serverIp} as ${sshUser} for abnormal-exit recovery...`
+                        message: `Reconnecting to ${config.sshAlias || config.serverIp} as ${sshUser} for abnormal-exit recovery...`
                     }))
 
                     recoveryExecutor = createRemoteExecutor({
@@ -358,8 +323,9 @@ export async function runDeployment(config, options = {}) {
             createSshClient,
             sshUser,
             privateKey,
+            privateKeyPath,
             logProcessing,
-            message: `Connecting to ${config.serverIp} as ${sshUser} to inspect remote deployment state...`
+            message: `Connecting to ${config.sshAlias || config.serverIp} as ${sshUser} to inspect remote deployment state...`
         }))
 
         remoteState = await resolveRemoteDeploymentState({
@@ -400,9 +366,10 @@ export async function runDeployment(config, options = {}) {
             createSshClient,
             sshUser,
             privateKey,
+            privateKeyPath,
             remoteCwd,
             logProcessing,
-            message: `Reconnecting to ${config.serverIp} as ${sshUser}...`
+            message: `Reconnecting to ${config.sshAlias || config.serverIp} as ${sshUser}...`
         }))
 
         logProcessing('Connection established. Acquiring deployment lock on server...')

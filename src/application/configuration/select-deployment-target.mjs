@@ -215,6 +215,7 @@ export async function selectDeploymentTarget(rootDir, {
     const deploymentConfig = {
         serverName: server.serverName,
         serverIp: server.serverIp,
+        ...(server.sshAlias ? {sshAlias: server.sshAlias} : {}),
         projectPath: appConfig.projectPath,
         branch: appConfig.branch,
         sshUser: appConfig.sshUser,

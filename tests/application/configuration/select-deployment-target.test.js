@@ -83,6 +83,29 @@ describe('selectDeploymentTarget', () => {
     expect(logProcessing).toHaveBeenCalledWith('\nSelected deployment target:')
   })
 
+  it('includes an optional OpenSSH alias from the selected server', async () => {
+    const { projectConfig, server, configurationService } = createSelectionScenario()
+    server.sshAlias = 'law-dev'
+
+    mockLoadServers.mockResolvedValue([server])
+    mockLoadProjectConfig.mockResolvedValue(projectConfig)
+
+    const { selectDeploymentTarget } = await import('#src/application/configuration/select-deployment-target.mjs')
+
+    const result = await selectDeploymentTarget('/workspace/project', {
+      configurationService,
+      runPrompt: vi.fn().mockResolvedValue({ presetName: '' }),
+      logProcessing: vi.fn(),
+      logSuccess: vi.fn(),
+      logWarning: vi.fn()
+    })
+
+    expect(result.deploymentConfig).toMatchObject({
+      serverIp: '203.0.113.10',
+      sshAlias: 'law-dev'
+    })
+  })
+
   it('saves a named preset for the selected app', async () => {
     const { projectConfig, server, configurationService } = createSelectionScenario()
 

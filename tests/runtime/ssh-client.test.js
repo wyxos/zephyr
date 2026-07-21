@@ -5,6 +5,40 @@ import {describe, expect, it, vi} from 'vitest'
 import {createSshClientFactory} from '#src/runtime/ssh-client.mjs'
 
 describe('runtime/ssh-client', () => {
+    it('uses the OpenSSH transport when a host alias is configured', async () => {
+        const spawnImpl = vi.fn((_command, _args, _options) => {
+            const child = new EventEmitter()
+            child.stdout = new EventEmitter()
+            child.stderr = new EventEmitter()
+
+            queueMicrotask(() => child.emit('close', 0))
+
+            return child
+        })
+
+        class FakeNodeSSH {
+            constructor() {
+                throw new Error('direct SSH transport should not be created')
+            }
+        }
+
+        const createSshClient = createSshClientFactory({NodeSSH: FakeNodeSSH, logWarning: vi.fn(), spawnImpl})
+        const ssh = createSshClient()
+
+        await ssh.connect({
+            host: '203.0.113.10',
+            sshAlias: 'law-dev',
+            username: 'runcloud',
+            privateKeyPath: '/Users/example/.ssh/deploy_key'
+        })
+
+        expect(spawnImpl).toHaveBeenCalledWith(
+            'ssh',
+            expect.arrayContaining(['law-dev', 'true']),
+            {stdio: ['ignore', 'pipe', 'pipe']}
+        )
+    })
+
     it('handles background ssh2 errors after connect so idle sessions do not crash the process', async () => {
         const connection = new EventEmitter()
 
