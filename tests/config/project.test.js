@@ -46,6 +46,7 @@ describe('config/project', () => {
         expect(config.presets[0].branch).toBe('main')
         expect(config.presets[0].options).toEqual({
             maintenanceMode: null,
+            frontendBuildStrategy: 'remote',
             skipGitHooks: false,
             skipTests: false,
             skipLint: false,
@@ -76,6 +77,7 @@ describe('config/project', () => {
             branch: 'develop',
             options: {
                 maintenanceMode: true,
+                frontendBuildStrategy: 'local-artifact',
                 skipGitHooks: true,
                 skipTests: false,
                 skipLint: true,
@@ -95,6 +97,7 @@ describe('config/project', () => {
         expect(saved.presets[0].branch).toBe('develop')
         expect(saved.presets[0].options).toEqual({
             maintenanceMode: true,
+            frontendBuildStrategy: 'local-artifact',
             skipGitHooks: true,
             skipTests: false,
             skipLint: true,

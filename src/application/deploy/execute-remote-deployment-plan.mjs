@@ -37,6 +37,14 @@ function trackExecutionState(step, executionState) {
     if (step.kind === 'maintenance-up') {
         executionState.exitedMaintenanceMode = true
     }
+
+    if (step.kind === 'frontend-artifact-activate') {
+        executionState.frontendArtifactActivated = true
+    }
+
+    if (step.kind === 'frontend-artifact-finalize') {
+        executionState.frontendArtifactFinalized = true
+    }
 }
 
 export async function executeRemoteDeploymentPlan({

@@ -5,6 +5,7 @@ import {Command} from 'commander'
 import {InvalidCliOptionsError} from '../runtime/errors.mjs'
 
 const WORKFLOW_TYPES = new Set(['node', 'vue', 'packagist'])
+const FRONTEND_BUILD_STRATEGIES = new Set(['remote', 'local-artifact'])
 
 function hasFlag(args = [], flag) {
     return args.some((arg) => arg === flag || arg.startsWith(`${flag}=`))
@@ -24,6 +25,20 @@ function normalizeMaintenanceMode(value) {
     }
 
     throw new InvalidCliOptionsError('Invalid value for --maintenance. Use "on" or "off".')
+}
+
+function normalizeFrontendBuildStrategy(value) {
+    if (value == null) {
+        return null
+    }
+
+    if (FRONTEND_BUILD_STRATEGIES.has(value)) {
+        return value
+    }
+
+    throw new InvalidCliOptionsError(
+        'Invalid value for --frontend-build-strategy. Use one of: remote, local-artifact.'
+    )
 }
 
 export function parseCliOptions(args = process.argv.slice(2)) {
@@ -46,6 +61,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .option('--resume-pending', 'Resume a saved pending deployment snapshot without prompting.')
         .option('--discard-pending', 'Discard a saved pending deployment snapshot without prompting.')
         .option('--maintenance <mode>', 'Laravel maintenance mode policy for app deployments (on|off).')
+        .option('--frontend-build-strategy <strategy>', 'Laravel frontend deployment strategy (remote|local-artifact).')
         .option('--auto-commit', 'Automatically commit dirty changes with a Codex-generated message.')
         .option('--skip-versioning', 'Skip updating package/composer version files before continuing.')
         .option('--skip-git-hooks', 'Bypass local git hooks for any commits and pushes Zephyr performs.')
@@ -92,6 +108,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         resumePending: Boolean(options.resumePending),
         discardPending: Boolean(options.discardPending),
         maintenanceMode: normalizeMaintenanceMode(options.maintenance),
+        frontendBuildStrategy: normalizeFrontendBuildStrategy(options.frontendBuildStrategy),
         autoCommit: Boolean(options.autoCommit),
         skipVersioning: Boolean(options.skipVersioning),
         skipGitHooks: Boolean(options.skipGitHooks),
@@ -110,6 +127,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         consumerSkipGitHooks: Boolean(options.consumerSkipGitHooks),
         consumerAutoCommit: Boolean(options.consumerAutoCommit),
         explicitMaintenanceMode: hasFlag(args, '--maintenance'),
+        explicitFrontendBuildStrategy: hasFlag(args, '--frontend-build-strategy'),
         explicitAutoCommit: hasFlag(args, '--auto-commit'),
         explicitSkipVersioning: hasFlag(args, '--skip-versioning'),
         explicitSkipGitHooks: hasFlag(args, '--skip-git-hooks'),
@@ -138,6 +156,7 @@ export function validateCliOptions(options = {}) {
         resumePending = false,
         discardPending = false,
         maintenanceMode = null,
+        frontendBuildStrategy = null,
         autoCommit = false,
         skipVersioning = false,
         skipChecks = false,
@@ -212,6 +231,10 @@ export function validateCliOptions(options = {}) {
         if (maintenanceMode !== null) {
             throw new InvalidCliOptionsError('--maintenance is only valid for app deployments.')
         }
+
+        if (frontendBuildStrategy !== null) {
+            throw new InvalidCliOptionsError('--frontend-build-strategy is only valid for app deployments.')
+        }
     } else {
         if (skipBuild || skipDeploy) {
             throw new InvalidCliOptionsError('--skip-build and --skip-deploy are only valid for node/vue release workflows.')
@@ -236,6 +259,10 @@ export function validateCliOptions(options = {}) {
 
             if (maintenanceMode !== null) {
                 throw new InvalidCliOptionsError('--setup cannot be used with --maintenance.')
+            }
+
+            if (frontendBuildStrategy !== null) {
+                throw new InvalidCliOptionsError('--setup cannot be used with --frontend-build-strategy.')
             }
 
             if (autoCommit) {

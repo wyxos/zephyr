@@ -13,175 +13,15 @@ import {resolveSshKeyPath} from '../../ssh/keys.mjs'
 import {cleanupOldLogs, closeLogFile, getLogFilePath, writeToLogFile} from '../../utils/log-file.mjs'
 import {buildRemoteDeploymentPlan, resolveRemoteDeploymentState} from './build-remote-deployment-plan.mjs'
 import {connectToRemoteDeploymentTarget} from './connect-to-remote-deployment-target.mjs'
+import {
+    createAbnormalExitGuard,
+    maybeRecoverFrontendArtifact,
+    maybeRecoverLaravelMaintenanceMode
+} from './deployment-recovery.mjs'
 import {executeRemoteDeploymentPlan} from './execute-remote-deployment-plan.mjs'
+import {prepareLocalFrontendArtifact, uploadFrontendArtifact} from './frontend-artifact.mjs'
 import {prepareLocalDeployment} from './prepare-local-deployment.mjs'
 import {verifyLaravelSetup} from './verify-laravel-setup.mjs'
-
-async function maybeRecoverLaravelMaintenanceMode({
-    remotePlan,
-    executionState,
-    executeRemote,
-    runPrompt,
-    logProcessing,
-    logWarning,
-    executionMode = {},
-    forceAutoRecovery = false,
-    reason = null
-} = {}) {
-    if (!remotePlan?.remoteIsLaravel || !remotePlan?.maintenanceModeEnabled) {
-        return
-    }
-
-    if (!executionState?.enteredMaintenanceMode || executionState.exitedMaintenanceMode) {
-        return
-    }
-
-    if (typeof executeRemote !== 'function') {
-        logWarning?.('Deployment failed while Laravel maintenance mode may still be enabled.')
-        return
-    }
-
-    try {
-        if (forceAutoRecovery || executionMode?.interactive === false) {
-            const reasonSuffix = typeof reason === 'string' && reason.length > 0
-                ? ` because of ${reason}`
-                : ''
-            logProcessing?.(`Deployment interrupted${reasonSuffix} after Laravel maintenance mode was enabled. Running \`artisan up\` automatically...`)
-            await executeRemote(
-                'Disable Laravel maintenance mode',
-                remotePlan.maintenanceUpCommand ?? `${remotePlan.phpCommand} artisan up`
-            )
-            executionState.exitedMaintenanceMode = true
-            return
-        }
-
-        if (typeof runPrompt !== 'function') {
-            logWarning?.('Deployment failed while Laravel maintenance mode may still be enabled.')
-            return
-        }
-
-        const answers = await runPrompt([
-            {
-                type: 'confirm',
-                name: 'disableMaintenanceMode',
-                message: 'Deployment failed after Laravel maintenance mode was enabled. Run `artisan up` now?',
-                default: true
-            }
-        ])
-        const disableMaintenanceMode = answers?.disableMaintenanceMode === true
-
-        if (!disableMaintenanceMode) {
-            logWarning?.('Laravel maintenance mode remains enabled because recovery was not confirmed.')
-            return
-        }
-
-        await executeRemote(
-            'Disable Laravel maintenance mode',
-            remotePlan.maintenanceUpCommand ?? `${remotePlan.phpCommand} artisan up`
-        )
-        executionState.exitedMaintenanceMode = true
-    } catch (error) {
-        logWarning?.(`Failed to disable Laravel maintenance mode after deployment error: ${error.message}`)
-    }
-}
-
-function signalToExitCode(signal) {
-    const signalNumbers = {
-        SIGHUP: 1,
-        SIGINT: 2,
-        SIGTERM: 15
-    }
-
-    if (!signalNumbers[signal]) {
-        return null
-    }
-
-    return 128 + signalNumbers[signal]
-}
-
-export function createAbnormalExitGuard({
-    processRef = process,
-    cleanup = async () => {},
-    terminate = null,
-    logWarning
-} = {}) {
-    const listeners = new Map()
-    const signals = ['SIGINT', 'SIGTERM', 'SIGHUP']
-    let active = true
-    let cleanupPromise = null
-
-    const terminateProcess = typeof terminate === 'function'
-        ? terminate
-        : async (signal) => {
-            const exitCode = signalToExitCode(signal)
-
-            if (typeof exitCode === 'number') {
-                processRef.exitCode = exitCode
-            }
-
-            if (typeof processRef.kill === 'function' && typeof processRef.pid === 'number') {
-                processRef.kill(processRef.pid, signal)
-            }
-        }
-
-    const unregister = () => {
-        if (!active) {
-            return
-        }
-
-        active = false
-
-        for (const [signal, handler] of listeners.entries()) {
-            if (typeof processRef.off === 'function') {
-                processRef.off(signal, handler)
-                continue
-            }
-
-            if (typeof processRef.removeListener === 'function') {
-                processRef.removeListener(signal, handler)
-            }
-        }
-
-        listeners.clear()
-    }
-
-    const run = async (signal) => {
-        if (!active) {
-            return cleanupPromise
-        }
-
-        if (cleanupPromise) {
-            return cleanupPromise
-        }
-
-        unregister()
-        cleanupPromise = (async () => {
-            try {
-                await cleanup(signal)
-            } catch (error) {
-                logWarning?.(`Best-effort deploy recovery after ${signal} failed: ${error.message}`)
-            } finally {
-                await terminateProcess(signal)
-            }
-        })()
-
-        return cleanupPromise
-    }
-
-    for (const signal of signals) {
-        const handler = () => {
-            void run(signal)
-        }
-
-        listeners.set(signal, handler)
-        processRef.once(signal, handler)
-    }
-
-    return {
-        unregister,
-        run
-    }
-}
 
 async function cleanupDeploymentResources({
     rootDir,
@@ -206,7 +46,11 @@ async function cleanupDeploymentResources({
     }
 }
 
-export {maybeRecoverLaravelMaintenanceMode}
+export {
+    createAbnormalExitGuard,
+    maybeRecoverFrontendArtifact,
+    maybeRecoverLaravelMaintenanceMode
+} from './deployment-recovery.mjs'
 
 export async function runDeployment(config, options = {}) {
     const {
@@ -251,9 +95,12 @@ export async function runDeployment(config, options = {}) {
     let executeRemote = null
     let remotePlan = null
     let remoteState = null
+    let frontendArtifact = null
     const executionState = {
         enteredMaintenanceMode: false,
-        exitedMaintenanceMode: false
+        exitedMaintenanceMode: false,
+        frontendArtifactActivated: false,
+        frontendArtifactFinalized: false
     }
 
     let lockAcquired = false
@@ -286,6 +133,14 @@ export async function runDeployment(config, options = {}) {
                         logError
                     })
                 }
+
+                await maybeRecoverFrontendArtifact({
+                    remotePlan,
+                    executionState,
+                    executeRemote: recoveryExecutor,
+                    logProcessing,
+                    logWarning
+                })
 
                 await maybeRecoverLaravelMaintenanceMode({
                     remotePlan,
@@ -361,6 +216,20 @@ export async function runDeployment(config, options = {}) {
             logWarning
         })
 
+        const frontendBuildStrategy = snapshot?.frontendBuildStrategy ??
+            executionMode?.frontendBuildStrategy ??
+            'remote'
+
+        if (remoteState?.remoteIsLaravel && frontendBuildStrategy === 'local-artifact') {
+            frontendArtifact = await prepareLocalFrontendArtifact({
+                rootDir,
+                runCommand,
+                runCommandCapture: context.runCommandCapture,
+                logProcessing,
+                logSuccess
+            })
+        }
+
         ;({ssh} = await connectToRemoteDeploymentTarget({
             config,
             createSshClient,
@@ -407,8 +276,20 @@ export async function runDeployment(config, options = {}) {
             runPrompt,
             logProcessing,
             logSuccess,
-            logWarning
+            logWarning,
+            frontendArtifact
         })
+
+        if (remotePlan.usesFrontendArtifact) {
+            await uploadFrontendArtifact({
+                artifact: frontendArtifact,
+                ssh,
+                remoteCwd,
+                executeRemote,
+                logProcessing,
+                logSuccess
+            })
+        }
 
         await executeRemoteDeploymentPlan({
             rootDir,
@@ -429,6 +310,14 @@ export async function runDeployment(config, options = {}) {
         if (logPath) {
             logError(`\nTask output has been logged to: ${logPath}`)
         }
+
+        await maybeRecoverFrontendArtifact({
+            remotePlan,
+            executionState,
+            executeRemote,
+            logProcessing,
+            logWarning
+        })
 
         await maybeRecoverLaravelMaintenanceMode({
             remotePlan,
@@ -456,6 +345,15 @@ export async function runDeployment(config, options = {}) {
         throw new Error(`Deployment failed: ${error.message}`)
     } finally {
         abnormalExitGuard.unregister()
+
+        if (frontendArtifact) {
+            try {
+                await frontendArtifact.cleanupLocal()
+            } catch (error) {
+                logWarning?.(`Failed to clean the local frontend artifact: ${error.message}`)
+            }
+        }
+
         await cleanupDeploymentResources({
             rootDir,
             ssh,

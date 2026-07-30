@@ -60,6 +60,22 @@ function createScpArgs({sshAlias, username, privateKeyPath}, remotePath, localPa
     ]
 }
 
+function createScpUploadArgs({sshAlias, username, privateKeyPath}, localPath, remotePath) {
+    return [
+        '-q',
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'IdentitiesOnly=yes',
+        '-o',
+        `User=${username}`,
+        '-i',
+        privateKeyPath,
+        localPath,
+        `${sshAlias}:${remotePath}`
+    ]
+}
+
 function runOpenSshProcess(command, args, {spawnImpl = spawn, binaryStdout = false} = {}) {
     return new Promise((resolve, reject) => {
         const stdoutChunks = []
@@ -172,6 +188,22 @@ export function createOpenSshClient({spawnImpl = spawn} = {}) {
 
             if (result.code !== 0) {
                 throw new Error(`Failed to download remote file ${remotePath}: ${result.stderr.trim()}`)
+            }
+
+            const fileStats = await fs.stat(localPath)
+            transferOptions?.step?.(fileStats.size, fileStats.size, fileStats.size)
+        },
+
+        async putFile(localPath, remotePath, _sftp = null, transferOptions = {}) {
+            assertConnected()
+            const result = await runOpenSshProcess(
+                'scp',
+                createScpUploadArgs(connectionOptions, localPath, remotePath),
+                {spawnImpl}
+            )
+
+            if (result.code !== 0) {
+                throw new Error(`Failed to upload local file ${localPath}: ${result.stderr.trim()}`)
             }
 
             const fileStats = await fs.stat(localPath)

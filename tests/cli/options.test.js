@@ -29,6 +29,7 @@ describe('cli/options', () => {
             resumePending: true,
             discardPending: false,
             maintenanceMode: true,
+            frontendBuildStrategy: null,
             autoCommit: false,
             skipVersioning: false,
             skipGitHooks: false,
@@ -47,6 +48,7 @@ describe('cli/options', () => {
             consumerSkipGitHooks: false,
             consumerAutoCommit: false,
             explicitMaintenanceMode: true,
+            explicitFrontendBuildStrategy: false,
             explicitAutoCommit: false,
             explicitSkipVersioning: false,
             explicitSkipGitHooks: false,
@@ -130,6 +132,27 @@ describe('cli/options', () => {
         const options = parseCliOptions(['--maintenance', 'off'])
 
         expect(options.maintenanceMode).toBe(false)
+    })
+
+    it('parses and validates the local frontend artifact strategy', () => {
+        const options = parseCliOptions(['--frontend-build-strategy', 'local-artifact'])
+
+        expect(options.frontendBuildStrategy).toBe('local-artifact')
+        expect(options.explicitFrontendBuildStrategy).toBe(true)
+        expect(() => validateCliOptions(options)).not.toThrow()
+    })
+
+    it('rejects invalid and package-release frontend build strategies', () => {
+        expect(() => parseCliOptions([
+            '--frontend-build-strategy',
+            'skip'
+        ])).toThrow('Use one of: remote, local-artifact.')
+
+        expect(() => validateCliOptions(parseCliOptions([
+            '--type=node',
+            '--frontend-build-strategy',
+            'local-artifact'
+        ]))).toThrow('--frontend-build-strategy is only valid for app deployments.')
     })
 
     it('parses skip-git-hooks for release and deploy workflows', () => {

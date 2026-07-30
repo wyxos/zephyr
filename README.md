@@ -52,6 +52,9 @@ zephyr minor --skip-checks
 # Deploy a configured app non-interactively
 zephyr --non-interactive --preset wyxos-release --maintenance off
 
+# Build frontend assets locally, verify the upload, and activate them during deploy
+zephyr --non-interactive --preset wyxos-release --maintenance on --frontend-build-strategy local-artifact
+
 # Deploy several configured app presets as one grouped release
 zephyr --non-interactive --group "Development v1-v4" --maintenance off --skip-versioning
 
@@ -105,6 +108,8 @@ Non-interactive mode is strict and is intended for already-configured projects:
 - `--json` is only supported together with `--non-interactive`
 
 If Laravel maintenance mode has already been enabled and Zephyr then exits abnormally because of a signal such as `SIGINT`, `SIGTERM`, or `SIGHUP`, it now makes a best-effort attempt to run `artisan up` automatically before exiting.
+
+`--frontend-build-strategy local-artifact` builds `public/build` from the final prepared Git commit on the deploying machine. Zephyr uploads a checksummed archive before remote app mutations, verifies the remote commit before activation, retains the previous build until deployment finalization, and restores it on a failed or interrupted deployment. The default `remote` strategy keeps the existing server-side npm install/build behavior.
 
 If Zephyr would normally prompt to:
 
@@ -230,6 +235,7 @@ Zephyr analyzes changed files and runs appropriate tasks:
 - **Node dependency files changed** (`package.json` / `package-lock.json` / `npm-shrinkwrap.json`, including nested): use `npm ci` when an npm lockfile is tracked and fail if it changes; otherwise use `npm install --no-package-lock` so an intentional no-lock policy stays non-mutating
 - **Frontend files changed** (`.vue/.js/.ts/.tsx/.css/.scss/.less`): `npm run build`
   - Note: `npm run build` is also scheduled when Node dependency installation is scheduled.
+  - With the `local-artifact` frontend strategy, the build runs locally against the final prepared commit. Zephyr uploads and verifies `public/build`, then skips remote Node installation and frontend compilation for that deployment.
 - **PHP files changed**: clear caches + restart queue workers (Horizon if configured)
 
 ## Configuration
@@ -264,6 +270,7 @@ Deployment targets are stored per-project at `.zephyr/config.json`:
       "branch": "main",
       "options": {
         "maintenanceMode": true,
+        "frontendBuildStrategy": "local-artifact",
         "skipGitHooks": false,
         "skipTests": false,
         "skipLint": false,

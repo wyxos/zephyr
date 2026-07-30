@@ -15,13 +15,25 @@ import {
 } from '#tests/helpers/runtime-test-env.mjs'
 
 const {
-    mockPrepareLocalDeployment
+    mockCleanupLocalFrontendArtifact,
+    mockPrepareLocalDeployment,
+    mockPrepareLocalFrontendArtifact,
+    mockUploadFrontendArtifact
 } = vi.hoisted(() => ({
-    mockPrepareLocalDeployment: vi.fn()
+    mockCleanupLocalFrontendArtifact: vi.fn(),
+    mockPrepareLocalDeployment: vi.fn(),
+    mockPrepareLocalFrontendArtifact: vi.fn(),
+    mockUploadFrontendArtifact: vi.fn()
 }))
 
 vi.mock('#src/application/deploy/prepare-local-deployment.mjs', () => ({
     prepareLocalDeployment: mockPrepareLocalDeployment
+}))
+
+vi.mock('#src/application/deploy/frontend-artifact.mjs', async (importOriginal) => ({
+    ...(await importOriginal()),
+    prepareLocalFrontendArtifact: mockPrepareLocalFrontendArtifact,
+    uploadFrontendArtifact: mockUploadFrontendArtifact
 }))
 
 describe('application/deploy/run-deployment', () => {
@@ -33,6 +45,22 @@ describe('application/deploy/run-deployment', () => {
             isLaravel: true,
             hasHook: false
         })
+        mockCleanupLocalFrontendArtifact.mockReset()
+        mockCleanupLocalFrontendArtifact.mockResolvedValue()
+        mockPrepareLocalFrontendArtifact.mockReset()
+        mockPrepareLocalFrontendArtifact.mockResolvedValue({
+            archivePath: '/tmp/public-build.tar.gz',
+            checksum: 'a'.repeat(64),
+            commit: 'b'.repeat(40),
+            remoteArchivePath: '.zephyr/artifacts/example.tar.gz',
+            remoteStagingPath: '.zephyr/artifacts/example.staging',
+            remoteBackupPath: '.zephyr/artifacts/example.previous',
+            remoteFailedPath: '.zephyr/artifacts/example.failed',
+            remoteMarkerPath: '.zephyr/artifacts/example.activated',
+            cleanupLocal: mockCleanupLocalFrontendArtifact
+        })
+        mockUploadFrontendArtifact.mockReset()
+        mockUploadFrontendArtifact.mockResolvedValue()
     })
 
     afterEach(() => {
@@ -143,6 +171,100 @@ describe('application/deploy/run-deployment', () => {
             filePath.includes('deploy.lock')
         )
         expect(lockFileWrites.length).toBeGreaterThan(0)
+    })
+
+    it('rebuilds a resumed local frontend artifact before remote app mutations', async () => {
+        mockReadFile.mockResolvedValueOnce('-----BEGIN RSA PRIVATE KEY-----')
+        mockAccess.mockResolvedValue(undefined)
+        mockReaddir.mockResolvedValueOnce([])
+        mockConnect.mockResolvedValue()
+        mockDispose.mockResolvedValue()
+        mockExecCommand.mockImplementation(async (command) => {
+            const response = {stdout: '', stderr: '', code: 0}
+
+            if (command.includes('printf "%s" "$HOME"')) {
+                return {...response, stdout: '/home/runcloud'}
+            }
+
+            if (command.includes('ls -1 /RunCloud/Packages')) {
+                return {...response, stdout: 'php84rc\n'}
+            }
+
+            if (command.includes('/RunCloud/Packages/php84rc/bin/php -r "echo PHP_VERSION;"')) {
+                return {...response, stdout: '8.4.6'}
+            }
+
+            if (command.includes('LOCK_NOT_FOUND') || command.includes('deploy.lock')) {
+                if (command.includes('cat')) {
+                    return {...response, stdout: 'LOCK_NOT_FOUND'}
+                }
+
+                return response
+            }
+
+            if (command.includes('grep -q "laravel/framework"')) {
+                return {...response, stdout: 'yes'}
+            }
+
+            if (command.includes('git diff --name-only')) {
+                return {...response, stdout: 'resources/js/app.js\n'}
+            }
+
+            return response
+        })
+
+        const {runDeployment} = await import('#src/application/deploy/run-deployment.mjs')
+        const {createAppContext} = await import('#src/runtime/app-context.mjs')
+
+        await runDeployment({
+            serverIp: '127.0.0.1',
+            projectPath: '~/app',
+            branch: 'main',
+            sshUser: 'forge',
+            sshKey: '~/.ssh/id_rsa'
+        }, {
+            context: createAppContext({
+                executionMode: {
+                    workflow: 'deploy',
+                    frontendBuildStrategy: 'remote'
+                }
+            }),
+            snapshot: {
+                serverName: 'production',
+                branch: 'main',
+                projectPath: '~/app',
+                sshUser: 'forge',
+                maintenanceModeEnabled: false,
+                frontendBuildStrategy: 'local-artifact',
+                changedFiles: ['resources/js/app.js'],
+                taskLabels: ['Pull latest changes', 'Activate local frontend artifact']
+            }
+        })
+
+        const pullCallIndex = mockExecCommand.mock.calls.findIndex(([command]) =>
+            command.includes('git pull origin main')
+        )
+
+        expect(mockPrepareLocalFrontendArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            rootDir: process.cwd()
+        }))
+        expect(mockUploadFrontendArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            artifact: expect.objectContaining({commit: 'b'.repeat(40)})
+        }))
+        expect(mockPrepareLocalDeployment.mock.invocationCallOrder[0]).toBeLessThan(
+            mockPrepareLocalFrontendArtifact.mock.invocationCallOrder[0]
+        )
+        expect(mockPrepareLocalFrontendArtifact.mock.invocationCallOrder[0]).toBeLessThan(
+            mockUploadFrontendArtifact.mock.invocationCallOrder[0]
+        )
+        expect(mockUploadFrontendArtifact.mock.invocationCallOrder[0]).toBeLessThan(
+            mockExecCommand.mock.invocationCallOrder[pullCallIndex]
+        )
+        expect(mockCleanupLocalFrontendArtifact).toHaveBeenCalledOnce()
+
+        const executedCommands = mockExecCommand.mock.calls.map(([command]) => command)
+        expect(executedCommands.some((command) => command.includes('npm install'))).toBe(false)
+        expect(executedCommands.some((command) => command.includes('npm run build'))).toBe(false)
     })
 
     it('skips Laravel tests when pre-push hook exists', async () => {

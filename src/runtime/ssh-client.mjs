@@ -92,6 +92,10 @@ function createDelegatingSshClient({NodeSSH, spawnImpl}) {
       return await assertActiveClient().getFile(...args)
     },
 
+    async putFile(...args) {
+      return await assertActiveClient().putFile(...args)
+    },
+
     dispose() {
       const result = activeClient?.dispose()
       activeClient = null

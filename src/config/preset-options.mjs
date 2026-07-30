@@ -1,5 +1,6 @@
 export const DEFAULT_PRESET_OPTIONS = Object.freeze({
   maintenanceMode: null,
+  frontendBuildStrategy: 'remote',
   skipGitHooks: false,
   skipTests: false,
   skipLint: false,
@@ -15,9 +16,14 @@ function normalizeMaintenanceMode(value) {
   return typeof value === 'boolean' ? value : null
 }
 
+function normalizeFrontendBuildStrategy(value) {
+  return value === 'local-artifact' ? 'local-artifact' : 'remote'
+}
+
 export function normalizePresetOptions(options = {}) {
   return {
     maintenanceMode: normalizeMaintenanceMode(options?.maintenanceMode),
+    frontendBuildStrategy: normalizeFrontendBuildStrategy(options?.frontendBuildStrategy),
     skipGitHooks: normalizeBoolean(options?.skipGitHooks),
     skipTests: normalizeBoolean(options?.skipTests),
     skipLint: normalizeBoolean(options?.skipLint),
@@ -33,6 +39,9 @@ export function mergeDeployOptions(executionMode = {}, presetOptions = {}) {
     maintenanceMode: executionMode.explicitMaintenanceMode === true
       ? executionMode.maintenanceMode
       : normalizedPresetOptions.maintenanceMode,
+    frontendBuildStrategy: executionMode.explicitFrontendBuildStrategy === true
+      ? normalizeFrontendBuildStrategy(executionMode.frontendBuildStrategy)
+      : normalizedPresetOptions.frontendBuildStrategy,
     skipGitHooks: executionMode.explicitSkipGitHooks === true
       ? executionMode.skipGitHooks === true
       : normalizedPresetOptions.skipGitHooks,
@@ -56,6 +65,10 @@ export function buildPresetOptionsFromExecutionMode(executionMode = {}, existing
 
   if (executionMode.explicitMaintenanceMode === true) {
     normalizedOptions.maintenanceMode = executionMode.maintenanceMode
+  }
+
+  if (executionMode.explicitFrontendBuildStrategy === true) {
+    normalizedOptions.frontendBuildStrategy = normalizeFrontendBuildStrategy(executionMode.frontendBuildStrategy)
   }
 
   if (executionMode.explicitSkipGitHooks === true) {

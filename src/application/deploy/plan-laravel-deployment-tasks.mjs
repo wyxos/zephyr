@@ -1,3 +1,5 @@
+import {createFrontendArtifactRemotePlan} from './frontend-artifact.mjs'
+
 const FRONTEND_BUILD_EXTENSIONS = [
   '.vue',
   '.css',
@@ -27,7 +29,9 @@ export function planLaravelDeploymentTasks({
   phpCommand = 'php',
   maintenanceMode = false,
   maintenanceDownCommand = null,
-  maintenanceUpCommand = null
+  maintenanceUpCommand = null,
+  frontendBuildStrategy = 'remote',
+  frontendArtifact = null
 }) {
   const safeChangedFiles = Array.isArray(changedFiles) ? changedFiles : []
 
@@ -66,6 +70,16 @@ export function planLaravelDeploymentTasks({
     )
 
   const shouldRunBuild = isLaravel && (hasFrontendChanges || shouldRunNpmInstall)
+  const usesLocalFrontendArtifact = shouldRunBuild && frontendBuildStrategy === 'local-artifact'
+  let frontendArtifactPlan = null
+
+  if (usesLocalFrontendArtifact) {
+    if (!frontendArtifact) {
+      throw new Error('Local-artifact deployment requires a prepared frontend artifact.')
+    }
+
+    frontendArtifactPlan = createFrontendArtifactRemotePlan(frontendArtifact)
+  }
   const shouldClearCaches = hasPhpChanges
   const shouldRestartQueues = hasPhpChanges
 
@@ -102,14 +116,20 @@ export function planLaravelDeploymentTasks({
     })
   }
 
-  if (shouldRunNpmInstall) {
+  if (shouldRunNpmInstall && !usesLocalFrontendArtifact) {
     steps.push({
       label: 'Install Node dependencies',
       command: 'if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1 || git ls-files --error-unmatch npm-shrinkwrap.json >/dev/null 2>&1; then npm ci --no-audit --no-fund; git diff --exit-code -- package-lock.json npm-shrinkwrap.json; else npm install --no-package-lock --no-audit --no-fund; fi'
     })
   }
 
-  if (shouldRunBuild) {
+  if (usesLocalFrontendArtifact) {
+    steps.push({
+      label: 'Activate local frontend artifact',
+      command: frontendArtifactPlan.activationCommand,
+      kind: 'frontend-artifact-activate'
+    })
+  } else if (shouldRunBuild) {
     steps.push({
       label: 'Compile frontend assets',
       command: 'npm run build'
@@ -127,6 +147,14 @@ export function planLaravelDeploymentTasks({
     steps.push({
       label: horizonConfigured ? 'Restart Horizon workers' : 'Restart queue workers',
       command: horizonConfigured ? `${phpCommand} artisan horizon:terminate` : `${phpCommand} artisan queue:restart`
+    })
+  }
+
+  if (usesLocalFrontendArtifact) {
+    steps.push({
+      label: 'Finalize local frontend artifact',
+      command: frontendArtifactPlan.finalizeCommand,
+      kind: 'frontend-artifact-finalize'
     })
   }
 

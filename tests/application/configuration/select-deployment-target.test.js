@@ -132,6 +132,7 @@ describe('selectDeploymentTarget', () => {
         branch: 'main',
         options: {
           maintenanceMode: null,
+          frontendBuildStrategy: 'remote',
           skipGitHooks: false,
           skipTests: false,
           skipLint: false,
@@ -289,6 +290,7 @@ describe('selectDeploymentTarget', () => {
       branch: 'main',
       options: {
         maintenanceMode: null,
+        frontendBuildStrategy: 'remote',
         skipGitHooks: true,
         skipTests: false,
         skipLint: false,
@@ -319,6 +321,7 @@ describe('selectDeploymentTarget', () => {
 
     expect(projectConfig.presets[0].options).toEqual({
       maintenanceMode: false,
+      frontendBuildStrategy: 'remote',
       skipGitHooks: true,
       skipTests: false,
       skipLint: false,

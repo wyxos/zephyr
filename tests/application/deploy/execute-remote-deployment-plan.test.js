@@ -111,4 +111,28 @@ describe('application/deploy/execute-remote-deployment-plan', () => {
             exitedMaintenanceMode: true
         })
     })
+
+    it('tracks local frontend artifact activation and finalization', async () => {
+        const executionState = {
+            frontendArtifactActivated: false,
+            frontendArtifactFinalized: false
+        }
+
+        await executeRemoteDeploymentPlan({
+            rootDir: '/workspace/demo',
+            executeRemote: vi.fn(async () => ({stdout: ''})),
+            steps: [
+                {label: 'Pull latest changes for main', command: 'git pull origin main'},
+                {label: 'Activate local frontend artifact', command: 'activate', kind: 'frontend-artifact-activate'},
+                {label: 'Finalize local frontend artifact', command: 'finalize', kind: 'frontend-artifact-finalize'}
+            ],
+            usefulSteps: false,
+            executionState
+        })
+
+        expect(executionState).toEqual({
+            frontendArtifactActivated: true,
+            frontendArtifactFinalized: true
+        })
+    })
 })

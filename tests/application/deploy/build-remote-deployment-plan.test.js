@@ -79,7 +79,9 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             phpCommand: 'php8.4',
             maintenanceMode: true,
             maintenanceDownCommand: 'php8.4 artisan down --render="errors::503"',
-            maintenanceUpCommand: 'php8.4 artisan up'
+            maintenanceUpCommand: 'php8.4 artisan up',
+            frontendBuildStrategy: 'remote',
+            frontendArtifact: null
         })
         expect(result.pendingSnapshot).toBe(snapshot)
         expect(result.maintenanceModeUsesPrerender).toBe(true)
@@ -191,7 +193,9 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             phpCommand: 'php',
             maintenanceMode: false,
             maintenanceDownCommand: null,
-            maintenanceUpCommand: 'php artisan up'
+            maintenanceUpCommand: 'php artisan up',
+            frontendBuildStrategy: 'remote',
+            frontendArtifact: null
         })
         expect(result.maintenanceModeEnabled).toBe(false)
         expect(result.pendingSnapshot).toEqual(expect.objectContaining({
@@ -247,6 +251,70 @@ describe('application/deploy/build-remote-deployment-plan', () => {
 
         expect(mockPlanLaravelDeploymentTasks).toHaveBeenCalledWith(expect.objectContaining({
             changedFiles: ['resources/images/logo.svg', 'resources/images/banner.png']
+        }))
+    })
+
+    it('persists and exposes the local-artifact recovery plan', async () => {
+        mockPlanLaravelDeploymentTasks.mockReturnValue([
+            {label: 'Pull latest changes for main', command: 'git pull origin main'},
+            {label: 'Activate local frontend artifact', command: 'activate', kind: 'frontend-artifact-activate'},
+            {label: 'Finalize local frontend artifact', command: 'finalize', kind: 'frontend-artifact-finalize'}
+        ])
+
+        const artifact = {
+            commit: 'a'.repeat(40),
+            checksum: 'b'.repeat(64),
+            remoteArchivePath: '.zephyr/artifacts/build.tar.gz',
+            remoteStagingPath: '.zephyr/artifacts/build.staging',
+            remoteBackupPath: '.zephyr/artifacts/build.previous',
+            remoteFailedPath: '.zephyr/artifacts/build.failed',
+            remoteMarkerPath: '.zephyr/artifacts/build.activated'
+        }
+        const ssh = {
+            execCommand: vi.fn(async (command) => ({
+                stdout: command.includes('grep -q "laravel/framework"') ? 'yes' : 'no',
+                code: 0
+            }))
+        }
+        const executeRemote = vi.fn(async (label) => ({
+            stdout: label === 'Inspect pending changes' ? 'resources/js/app.js\n' : '',
+            stderr: '',
+            code: 0
+        }))
+
+        const result = await buildRemoteDeploymentPlan({
+            config: {
+                branch: 'main',
+                serverName: 'production',
+                projectPath: '~/webapps/demo',
+                sshUser: 'forge'
+            },
+            executionMode: {
+                interactive: true,
+                maintenanceMode: false,
+                frontendBuildStrategy: 'local-artifact'
+            },
+            frontendArtifact: artifact,
+            ssh,
+            remoteCwd: '/home/forge/webapps/demo',
+            executeRemote,
+            runPrompt: vi.fn(),
+            logProcessing: vi.fn(),
+            logSuccess: vi.fn(),
+            logWarning: vi.fn()
+        })
+
+        expect(mockPlanLaravelDeploymentTasks).toHaveBeenCalledWith(expect.objectContaining({
+            frontendBuildStrategy: 'local-artifact',
+            frontendArtifact: artifact
+        }))
+        expect(result).toEqual(expect.objectContaining({
+            frontendBuildStrategy: 'local-artifact',
+            usesFrontendArtifact: true,
+            frontendArtifactRollbackCommand: expect.stringContaining('build.previous')
+        }))
+        expect(result.pendingSnapshot).toEqual(expect.objectContaining({
+            frontendBuildStrategy: 'local-artifact'
         }))
     })
 
@@ -328,7 +396,9 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             phpCommand: 'php',
             maintenanceMode: true,
             maintenanceDownCommand: 'php artisan down --render="errors::503"',
-            maintenanceUpCommand: 'php artisan up'
+            maintenanceUpCommand: 'php artisan up',
+            frontendBuildStrategy: 'remote',
+            frontendArtifact: null
         })
         expect(runPrompt).toHaveBeenCalledTimes(1)
         expect(persistPresetOptions).toHaveBeenCalledWith({
@@ -414,7 +484,9 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             phpCommand: 'php',
             maintenanceMode: true,
             maintenanceDownCommand: 'php artisan down',
-            maintenanceUpCommand: 'php artisan up'
+            maintenanceUpCommand: 'php artisan up',
+            frontendBuildStrategy: 'remote',
+            frontendArtifact: null
         })
         expect(result.maintenanceModeUsesPrerender).toBe(false)
         expect(result.maintenanceModeRenderView).toBeNull()

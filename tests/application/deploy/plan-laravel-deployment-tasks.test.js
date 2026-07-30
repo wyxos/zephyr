@@ -2,6 +2,16 @@ import { describe, it, expect } from 'vitest'
 import { planLaravelDeploymentTasks } from '#src/application/deploy/plan-laravel-deployment-tasks.mjs'
 
 describe('application/deploy/plan-laravel-deployment-tasks', () => {
+  const frontendArtifact = {
+    commit: 'a'.repeat(40),
+    checksum: 'b'.repeat(64),
+    remoteArchivePath: '.zephyr/artifacts/build.tar.gz',
+    remoteStagingPath: '.zephyr/artifacts/build.staging',
+    remoteBackupPath: '.zephyr/artifacts/build.previous',
+    remoteFailedPath: '.zephyr/artifacts/build.failed',
+    remoteMarkerPath: '.zephyr/artifacts/build.activated'
+  }
+
   it('always includes git pull for the branch', () => {
     const steps = planLaravelDeploymentTasks({
       branch: 'main',
@@ -70,6 +80,48 @@ describe('application/deploy/plan-laravel-deployment-tasks', () => {
 
     expect(steps.some((step) => step.label === 'Install Node dependencies')).toBe(true)
     expect(steps.some((step) => step.command === 'npm run build')).toBe(true)
+  })
+
+  it('replaces remote Node work with a rollback-safe local artifact activation', () => {
+    const steps = planLaravelDeploymentTasks({
+      branch: 'main',
+      isLaravel: true,
+      changedFiles: [
+        'package-lock.json',
+        'resources/js/app.js',
+        'database/migrations/2026_01_01_000000_add_example.php',
+        'app/Models/Example.php'
+      ],
+      maintenanceMode: true,
+      frontendBuildStrategy: 'local-artifact',
+      frontendArtifact
+    })
+
+    expect(steps.some((step) => step.label === 'Install Node dependencies')).toBe(false)
+    expect(steps.some((step) => step.label === 'Compile frontend assets')).toBe(false)
+
+    const activationIndex = steps.findIndex((step) => step.kind === 'frontend-artifact-activate')
+    const migrationIndex = steps.findIndex((step) => step.label === 'Run database migrations')
+    const queueIndex = steps.findIndex((step) => step.label === 'Restart queue workers')
+    const finalizeIndex = steps.findIndex((step) => step.kind === 'frontend-artifact-finalize')
+    const maintenanceUpIndex = steps.findIndex((step) => step.kind === 'maintenance-up')
+
+    expect(activationIndex).toBeGreaterThan(migrationIndex)
+    expect(finalizeIndex).toBeGreaterThan(queueIndex)
+    expect(maintenanceUpIndex).toBeGreaterThan(finalizeIndex)
+    expect(steps[activationIndex].command).toContain('git rev-parse HEAD')
+    expect(steps[activationIndex].command).toContain('sha256sum')
+    expect(steps[activationIndex].command).toContain('public/build/manifest.json')
+    expect(steps[activationIndex].command).toContain('mv public/build')
+  })
+
+  it('requires a prepared artifact when local activation is needed', () => {
+    expect(() => planLaravelDeploymentTasks({
+      branch: 'main',
+      isLaravel: true,
+      changedFiles: ['resources/js/app.js'],
+      frontendBuildStrategy: 'local-artifact'
+    })).toThrow('requires a prepared frontend artifact')
   })
 
   it('schedules queue restart choice based on horizonConfigured', () => {

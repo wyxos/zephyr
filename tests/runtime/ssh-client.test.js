@@ -68,6 +68,27 @@ describe('runtime/ssh-client', () => {
         expect(logWarning).toHaveBeenCalledTimes(1)
     })
 
+    it('delegates uploads to the active direct SSH transport', async () => {
+        const putFile = vi.fn().mockResolvedValue(undefined)
+
+        class FakeNodeSSH {
+            async connect() {
+                return this
+            }
+
+            async putFile(...args) {
+                return await putFile(...args)
+            }
+        }
+
+        const createSshClient = createSshClientFactory({NodeSSH: FakeNodeSSH, logWarning: vi.fn()})
+        const ssh = createSshClient()
+        await ssh.connect({host: '127.0.0.1'})
+        await ssh.putFile('/tmp/local.tar.gz', '/remote/artifact.tar.gz')
+
+        expect(putFile).toHaveBeenCalledWith('/tmp/local.tar.gz', '/remote/artifact.tar.gz')
+    })
+
     it('still lets failed SSH connects reject normally', async () => {
         const connection = new EventEmitter()
 

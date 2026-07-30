@@ -136,6 +136,40 @@ describe('runtime/open-ssh-client', () => {
         }
     })
 
+    it('uploads files through scp using the same OpenSSH alias', async () => {
+        const payload = Buffer.from('frontend artifact')
+        const {spawnImpl, calls} = createSpawnMock([{}, {}])
+        const ssh = createOpenSshClient({spawnImpl})
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'zephyr-open-ssh-upload-'))
+        const localPath = path.join(tempDir, 'artifact.tar.gz')
+        const step = vi.fn()
+
+        try {
+            await fs.writeFile(localPath, payload)
+            await ssh.connect({
+                sshAlias: 'law-dev',
+                username: 'runcloud',
+                privateKeyPath: '/Users/example/.ssh/deploy_key'
+            })
+            await ssh.putFile(localPath, '/remote/path/artifact.tar.gz', null, {step})
+
+            expect(calls[1]).toMatchObject({
+                command: 'scp',
+                args: expect.arrayContaining([
+                    'User=runcloud',
+                    localPath,
+                    'law-dev:/remote/path/artifact.tar.gz'
+                ])
+            })
+            expect(calls[1].args.indexOf(localPath)).toBeLessThan(
+                calls[1].args.indexOf('law-dev:/remote/path/artifact.tar.gz')
+            )
+            expect(step).toHaveBeenCalledWith(payload.length, payload.length, payload.length)
+        } finally {
+            await fs.rm(tempDir, {recursive: true, force: true})
+        }
+    })
+
     it('rejects failed connection checks with the alias and OpenSSH error', async () => {
         const {spawnImpl} = createSpawnMock([
             {code: 255, stderr: 'jump host unavailable\n'}
