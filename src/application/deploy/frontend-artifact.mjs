@@ -96,6 +96,8 @@ export function createFrontendArtifactRemotePlan(artifact) {
         `  rm -rf ${staging};`,
         '  exit 1;',
         'fi;',
+        `find ${staging}/public/build -type d -exec chmod 755 {} +;`,
+        `find ${staging}/public/build -type f -exec chmod 644 {} +;`,
         `rm -rf ${backup};`,
         'if [ -e public/build ] || [ -L public/build ]; then',
         `  printf "previous" > ${marker};`,

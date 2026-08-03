@@ -1,4 +1,5 @@
 import {execFile} from 'node:child_process'
+import {createHash} from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -103,7 +104,12 @@ describe('application/deploy/frontend-artifact', () => {
         expect(plan.verifyCommand).toContain('Uploaded frontend artifact checksum does not match')
         expect(plan.activationCommand).toContain('git rev-parse HEAD')
         expect(plan.activationCommand).toContain('public/build/manifest.json')
+        expect(plan.activationCommand).toContain('-type d -exec chmod 755')
+        expect(plan.activationCommand).toContain('-type f -exec chmod 644')
         expect(plan.activationCommand).toContain('mv public/build')
+        expect(plan.activationCommand.indexOf('-type d -exec chmod 755')).toBeLessThan(
+            plan.activationCommand.indexOf('printf "previous"')
+        )
         expect(plan.activationCommand.indexOf('printf "previous"')).toBeLessThan(
             plan.activationCommand.indexOf('mv public/build')
         )
@@ -118,6 +124,78 @@ describe('application/deploy/frontend-artifact', () => {
         expect(plan.finalizeCommand.indexOf('build.previous')).toBeLessThan(
             plan.finalizeCommand.lastIndexOf('build.activated')
         )
+    })
+
+    it('normalizes staged build permissions before atomic activation', async () => {
+        const rootDir = await makeTempDir('zephyr-permission-activation-')
+        const sourceDir = path.join(rootDir, 'artifact-source')
+        const sourceBuildDir = path.join(sourceDir, 'public', 'build')
+        const sourceAssetsDir = path.join(sourceBuildDir, 'assets')
+        const existingBuildDir = path.join(rootDir, 'public', 'build')
+
+        await execFileAsync('git', ['init'], {cwd: rootDir})
+        await fs.writeFile(path.join(rootDir, 'package.json'), '{}')
+        await execFileAsync('git', ['add', 'package.json'], {cwd: rootDir})
+        await execFileAsync('git', [
+            '-c', 'user.name=Zephyr Test',
+            '-c', 'user.email=zephyr@example.test',
+            '-c', 'commit.gpgsign=false',
+            'commit', '-m', 'test fixture'
+        ], {cwd: rootDir})
+
+        const {stdout: commitOutput} = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+            cwd: rootDir
+        })
+        const artifact = createArtifact({commit: commitOutput.trim()})
+        const remoteArchivePath = path.join(rootDir, artifact.remoteArchivePath)
+
+        await fs.mkdir(sourceAssetsDir, {recursive: true})
+        await fs.writeFile(path.join(sourceBuildDir, 'manifest.json'), '{}')
+        await fs.writeFile(path.join(sourceAssetsDir, 'app.js'), 'console.log("built")')
+        await fs.chmod(sourceBuildDir, 0o700)
+        await fs.chmod(sourceAssetsDir, 0o700)
+        await fs.chmod(path.join(sourceBuildDir, 'manifest.json'), 0o600)
+        await fs.chmod(path.join(sourceAssetsDir, 'app.js'), 0o600)
+
+        await fs.mkdir(path.dirname(remoteArchivePath), {recursive: true})
+        await execFileAsync('tar', [
+            '-czf', remoteArchivePath,
+            '-C', sourceDir,
+            'public/build'
+        ], {cwd: rootDir})
+        artifact.checksum = createHash('sha256')
+            .update(await fs.readFile(remoteArchivePath))
+            .digest('hex')
+
+        await fs.mkdir(existingBuildDir, {recursive: true})
+        await fs.writeFile(path.join(existingBuildDir, 'old.js'), 'old build')
+
+        const plan = createFrontendArtifactRemotePlan(artifact)
+        await execFileAsync('sh', ['-c', plan.activationCommand], {cwd: rootDir})
+
+        const activeBuildMode = (await fs.stat(existingBuildDir)).mode & 0o777
+        const activeAssetsMode = (
+            await fs.stat(path.join(existingBuildDir, 'assets'))
+        ).mode & 0o777
+        const manifestMode = (
+            await fs.stat(path.join(existingBuildDir, 'manifest.json'))
+        ).mode & 0o777
+        const assetMode = (
+            await fs.stat(path.join(existingBuildDir, 'assets', 'app.js'))
+        ).mode & 0o777
+
+        expect(activeBuildMode).toBe(0o755)
+        expect(activeAssetsMode).toBe(0o755)
+        expect(manifestMode).toBe(0o644)
+        expect(assetMode).toBe(0o644)
+        await expect(fs.readFile(
+            path.join(rootDir, artifact.remoteBackupPath, 'old.js'),
+            'utf8'
+        )).resolves.toBe('old build')
+        await expect(fs.readFile(
+            path.join(existingBuildDir, 'assets', 'app.js'),
+            'utf8'
+        )).resolves.toBe('console.log("built")')
     })
 
     it('restores the old build when interrupted after it is moved but before activation', async () => {
