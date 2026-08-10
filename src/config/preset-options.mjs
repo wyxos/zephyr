@@ -17,7 +17,7 @@ function normalizeMaintenanceMode(value) {
 }
 
 function normalizeFrontendBuildStrategy(value) {
-  return value === 'local-artifact' ? 'local-artifact' : 'remote'
+  return ['local-artifact', 'tracked-assets'].includes(value) ? value : 'remote'
 }
 
 export function normalizePresetOptions(options = {}) {

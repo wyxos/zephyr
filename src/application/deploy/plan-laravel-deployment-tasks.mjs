@@ -71,6 +71,7 @@ export function planLaravelDeploymentTasks({
 
   const shouldRunBuild = isLaravel && (hasFrontendChanges || shouldRunNpmInstall)
   const usesLocalFrontendArtifact = shouldRunBuild && frontendBuildStrategy === 'local-artifact'
+  const usesTrackedFrontendAssets = shouldRunBuild && frontendBuildStrategy === 'tracked-assets'
   let frontendArtifactPlan = null
 
   if (usesLocalFrontendArtifact) {
@@ -116,7 +117,7 @@ export function planLaravelDeploymentTasks({
     })
   }
 
-  if (shouldRunNpmInstall && !usesLocalFrontendArtifact) {
+  if (shouldRunNpmInstall && !usesLocalFrontendArtifact && !usesTrackedFrontendAssets) {
     steps.push({
       label: 'Install Node dependencies',
       command: 'if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1 || git ls-files --error-unmatch npm-shrinkwrap.json >/dev/null 2>&1; then npm ci --no-audit --no-fund; git diff --exit-code -- package-lock.json npm-shrinkwrap.json; else npm install --no-package-lock --no-audit --no-fund; fi'
@@ -129,7 +130,7 @@ export function planLaravelDeploymentTasks({
       command: frontendArtifactPlan.activationCommand,
       kind: 'frontend-artifact-activate'
     })
-  } else if (shouldRunBuild) {
+  } else if (shouldRunBuild && !usesTrackedFrontendAssets) {
     steps.push({
       label: 'Compile frontend assets',
       command: 'npm run build'

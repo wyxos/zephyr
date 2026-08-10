@@ -134,19 +134,23 @@ describe('cli/options', () => {
         expect(options.maintenanceMode).toBe(false)
     })
 
-    it('parses and validates the local frontend artifact strategy', () => {
+    it('parses and validates supported frontend deployment strategies', () => {
         const options = parseCliOptions(['--frontend-build-strategy', 'local-artifact'])
+        const trackedAssetsOptions = parseCliOptions(['--frontend-build-strategy', 'tracked-assets'])
 
         expect(options.frontendBuildStrategy).toBe('local-artifact')
         expect(options.explicitFrontendBuildStrategy).toBe(true)
         expect(() => validateCliOptions(options)).not.toThrow()
+        expect(trackedAssetsOptions.frontendBuildStrategy).toBe('tracked-assets')
+        expect(trackedAssetsOptions.explicitFrontendBuildStrategy).toBe(true)
+        expect(() => validateCliOptions(trackedAssetsOptions)).not.toThrow()
     })
 
     it('rejects invalid and package-release frontend build strategies', () => {
         expect(() => parseCliOptions([
             '--frontend-build-strategy',
             'skip'
-        ])).toThrow('Use one of: remote, local-artifact.')
+        ])).toThrow('Use one of: remote, local-artifact, tracked-assets.')
 
         expect(() => validateCliOptions(parseCliOptions([
             '--type=node',

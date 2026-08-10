@@ -5,7 +5,7 @@ import {Command} from 'commander'
 import {InvalidCliOptionsError} from '../runtime/errors.mjs'
 
 const WORKFLOW_TYPES = new Set(['node', 'vue', 'packagist'])
-const FRONTEND_BUILD_STRATEGIES = new Set(['remote', 'local-artifact'])
+const FRONTEND_BUILD_STRATEGIES = new Set(['remote', 'local-artifact', 'tracked-assets'])
 
 function hasFlag(args = [], flag) {
     return args.some((arg) => arg === flag || arg.startsWith(`${flag}=`))
@@ -37,7 +37,7 @@ function normalizeFrontendBuildStrategy(value) {
     }
 
     throw new InvalidCliOptionsError(
-        'Invalid value for --frontend-build-strategy. Use one of: remote, local-artifact.'
+        'Invalid value for --frontend-build-strategy. Use one of: remote, local-artifact, tracked-assets.'
     )
 }
 
@@ -61,7 +61,7 @@ export function parseCliOptions(args = process.argv.slice(2)) {
         .option('--resume-pending', 'Resume a saved pending deployment snapshot without prompting.')
         .option('--discard-pending', 'Discard a saved pending deployment snapshot without prompting.')
         .option('--maintenance <mode>', 'Laravel maintenance mode policy for app deployments (on|off).')
-        .option('--frontend-build-strategy <strategy>', 'Laravel frontend deployment strategy (remote|local-artifact).')
+        .option('--frontend-build-strategy <strategy>', 'Laravel frontend deployment strategy (remote|local-artifact|tracked-assets).')
         .option('--auto-commit', 'Automatically commit dirty changes with a Codex-generated message.')
         .option('--skip-versioning', 'Skip updating package/composer version files before continuing.')
         .option('--skip-git-hooks', 'Bypass local git hooks for any commits and pushes Zephyr performs.')

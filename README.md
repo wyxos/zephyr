@@ -109,7 +109,7 @@ Non-interactive mode is strict and is intended for already-configured projects:
 
 If Laravel maintenance mode has already been enabled and Zephyr then exits abnormally because of a signal such as `SIGINT`, `SIGTERM`, or `SIGHUP`, it now makes a best-effort attempt to run `artisan up` automatically before exiting.
 
-`--frontend-build-strategy local-artifact` builds `public/build` from the final prepared Git commit on the deploying machine. Zephyr uploads a checksummed archive before remote app mutations, verifies the remote commit before activation, retains the previous build until deployment finalization, and restores it on a failed or interrupted deployment. The default `remote` strategy keeps the existing server-side npm install/build behavior.
+`--frontend-build-strategy local-artifact` builds `public/build` from the final prepared Git commit on the deploying machine. Zephyr uploads a checksummed archive before remote app mutations, verifies the remote commit before activation, retains the previous build until deployment finalization, and restores it on a failed or interrupted deployment. `tracked-assets` is for legacy applications that compile locally and commit their generated frontend assets; Zephyr pulls those files from Git and skips remote Node installation and compilation. The default `remote` strategy keeps the existing server-side npm install/build behavior.
 
 If Zephyr would normally prompt to:
 

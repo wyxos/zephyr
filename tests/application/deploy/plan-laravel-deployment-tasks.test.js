@@ -124,6 +124,24 @@ describe('application/deploy/plan-laravel-deployment-tasks', () => {
     })).toThrow('requires a prepared frontend artifact')
   })
 
+  it('trusts committed frontend assets without running Node on the server', () => {
+    const steps = planLaravelDeploymentTasks({
+      branch: 'master',
+      isLaravel: true,
+      changedFiles: ['package.json', 'resources/js/app.js', 'public/js/app.js'],
+      frontendBuildStrategy: 'tracked-assets'
+    })
+
+    expect(steps.some((step) => step.label === 'Install Node dependencies')).toBe(false)
+    expect(steps.some((step) => step.label === 'Compile frontend assets')).toBe(false)
+    expect(steps).toEqual([
+      {
+        label: 'Pull latest changes for master',
+        command: 'git pull origin master'
+      }
+    ])
+  })
+
   it('schedules queue restart choice based on horizonConfigured', () => {
     const horizonSteps = planLaravelDeploymentTasks({
       branch: 'main',

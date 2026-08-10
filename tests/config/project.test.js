@@ -112,6 +112,25 @@ describe('config/project', () => {
         ])
     })
 
+    it('preserves tracked frontend asset presets', async () => {
+        mockReadFile.mockResolvedValueOnce(
+            JSON.stringify({
+                apps: [],
+                presets: [{
+                    name: 'legacy-production',
+                    appId: 'app-1',
+                    branch: 'master',
+                    options: {frontendBuildStrategy: 'tracked-assets'}
+                }]
+            })
+        )
+
+        const {loadProjectConfig} = await import('#src/config/project.mjs')
+        const config = await loadProjectConfig(process.cwd())
+
+        expect(config.presets[0].options.frontendBuildStrategy).toBe('tracked-assets')
+    })
+
     it('normalizes deployment groups from project config', async () => {
         mockReadFile.mockResolvedValueOnce(
             JSON.stringify({
