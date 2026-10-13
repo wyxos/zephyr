@@ -92,6 +92,23 @@ zephyr --type packagist --skip-versioning
 
 When an app deployment or a `--type node`/`--type vue` package release omits the bump argument, Zephyr recommends a version bump from changes since the last release reference, using Codex when available and deterministic heuristics as a fallback.
 
+SDKs with custom build/tag workflows can reuse Zephyr’s adviser without running a release:
+
+```js
+import {recommendReleaseType} from '@wyxos/zephyr/release-advisor'
+
+const bump = await recommendReleaseType({
+  rootDir: process.cwd(),
+  currentVersion: '1.1.100',
+  packageName: 'wyxos/shift-php',
+  latestTag: 'v1.1.100',
+  logStep: console.log,
+  logWarning: console.warn
+})
+```
+
+This API inspects committed and pending changes, asks Codex for a bump, and returns the release type without modifying manifests, commits, tags, or published packages. If Codex is unavailable or fails, Zephyr warns and uses its existing heuristic fallback. Version assessment uses the CLI’s account-compatible default model; `ZEPHYR_CODEX_MODEL` selects an explicit model. `ZEPHYR_CODEX_COMMAND` selects an explicit CLI executable; on macOS, the installed ChatGPT/Codex app bundle is used when `codex` is absent from PATH.
+
 ## Interactive and Non-Interactive Modes
 
 Interactive mode remains the default and is the best fit for first-time setup, config repair, and one-off deployments.

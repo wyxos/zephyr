@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process'
 import process from 'node:process'
+import {existsSync} from 'node:fs'
 
 const DEFAULT_IS_WINDOWS = process.platform === 'win32'
 
@@ -24,7 +25,23 @@ export function commandExists(command) {
   }
 }
 
-export function resolveCommandForPlatform(command, { isWindows = DEFAULT_IS_WINDOWS } = {}) {
+export function resolveCommandForPlatform(command, {
+  isWindows = DEFAULT_IS_WINDOWS,
+  platform = process.platform,
+  codexCommand = process.env.ZEPHYR_CODEX_COMMAND,
+  fileExists = existsSync,
+  pathLookup = () => spawnSync('which', ['codex'], {stdio: ['ignore', 'pipe', 'ignore']}).status === 0
+} = {}) {
+  if (command === 'codex') {
+    if (codexCommand) return codexCommand
+    if (!isWindows && platform === 'darwin' && !pathLookup()) {
+      const bundled = [
+        '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+        '/Applications/Codex.app/Contents/Resources/codex'
+      ].find(fileExists)
+      if (bundled) return bundled
+    }
+  }
   if (!isWindows) {
     return command
   }

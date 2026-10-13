@@ -9,7 +9,8 @@ describe('public API', () => {
         expect(packageJson.exports).toEqual({
             '.': './src/index.mjs',
             './targets': './src/targets/index.mjs',
-            './ssh': './src/ssh/index.mjs'
+            './ssh': './src/ssh/index.mjs',
+            './release-advisor': './src/release-advisor.mjs'
         })
         expect(packageJson.scripts.lint).toBe('eslint . --fix')
     })

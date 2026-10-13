@@ -159,9 +159,9 @@ async function readCommitLog(rootDir, {runCommand, runCommandCapture, latestTag}
   }
 }
 
-async function readDiffStat(rootDir, {runCommand, runCommandCapture, latestTag} = {}) {
+async function readDiffStat(rootDir, {runCommand, runCommandCapture, latestTag, includeWorkingTree = false} = {}) {
   const args = latestTag
-    ? ['diff', '--stat', `${latestTag}..HEAD`, '--']
+    ? ['diff', '--stat', includeWorkingTree ? latestTag : `${latestTag}..HEAD`, '--']
     : ['diff', '--stat', 'HEAD~20..HEAD', '--']
 
   try {
@@ -170,6 +170,11 @@ async function readDiffStat(rootDir, {runCommand, runCommandCapture, latestTag} 
       runCommandCapture,
       cwd: rootDir
     })
+
+    if (includeWorkingTree) {
+      const status = await captureCommand('git', ['status', '--short'], {runCommand, runCommandCapture, cwd: rootDir})
+      return [stdout.trim(), status.stdout.trim()].filter(Boolean).join('\n')
+    }
 
     return stdout.trim()
   } catch {
@@ -183,11 +188,12 @@ async function buildReleaseSuggestionContext(rootDir, {
   currentVersion,
   packageName,
   latestTag = null,
-  referenceLabel = null
+  referenceLabel = null,
+  includeWorkingTree = false
 } = {}) {
   const resolvedLatestTag = await readLatestReleaseTag(rootDir, {runCommand, runCommandCapture, latestTag})
   const commitLog = await readCommitLog(rootDir, {runCommand, runCommandCapture, latestTag: resolvedLatestTag})
-  const diffStat = await readDiffStat(rootDir, {runCommand, runCommandCapture, latestTag: resolvedLatestTag})
+  const diffStat = await readDiffStat(rootDir, {runCommand, runCommandCapture, latestTag: resolvedLatestTag, includeWorkingTree})
 
   return {
     currentVersion,
@@ -209,7 +215,8 @@ async function suggestReleaseType(rootDir = process.cwd(), {
   logWarning,
   latestTag = null,
   referenceLabel = null,
-  minimumReleaseType = null
+  minimumReleaseType = null,
+  includeWorkingTree = false
 } = {}) {
   const context = await buildReleaseSuggestionContext(rootDir, {
     runCommand,
@@ -217,7 +224,8 @@ async function suggestReleaseType(rootDir = process.cwd(), {
     currentVersion,
     packageName,
     latestTag,
-    referenceLabel
+    referenceLabel,
+    includeWorkingTree
   })
   const allowedSuggestedReleaseTypes = resolveSuggestedReleaseTypeOptions(currentVersion)
   const heuristicReleaseType = applyReleaseTypeFloor(
@@ -226,6 +234,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
   )
 
   if (!commandExistsImpl('codex')) {
+    logWarning?.('Codex is unavailable. Using heuristic release type.')
     return {
       ...context,
       releaseType: heuristicReleaseType,
@@ -245,8 +254,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
       'exec',
       '--ephemeral',
       '--ignore-user-config',
-      '--model',
-      'gpt-5.4-mini',
+      ...(process.env.ZEPHYR_CODEX_MODEL ? ['--model', process.env.ZEPHYR_CODEX_MODEL] : []),
       '--sandbox',
       'read-only',
       '--skip-git-repo-check',
@@ -256,6 +264,7 @@ async function suggestReleaseType(rootDir = process.cwd(), {
         'Choose exactly one semver release type for the next release.',
         `Reply with exactly one of: ${allowedSuggestedReleaseTypes.join(', ')}.`,
         'Base the choice on the actual code and workflow changes since the last release tag.',
+        ...(includeWorkingTree ? ['Include pending tracked and untracked changes in the repository.'] : []),
         'Prefer stable release types unless the current version already has a prerelease identifier.',
         `Package: ${packageName || 'unknown package'}`,
         `Current version: ${currentVersion || 'unknown'}`,
@@ -317,7 +326,8 @@ export async function resolveReleaseType({
   logWarning,
   latestTag = null,
   referenceLabel = null,
-  minimumReleaseType = null
+  minimumReleaseType = null,
+  includeWorkingTree = false
 } = {}) {
   if (releaseType) {
     return releaseType
@@ -332,7 +342,8 @@ export async function resolveReleaseType({
     logWarning,
     latestTag,
     referenceLabel,
-    minimumReleaseType
+    minimumReleaseType,
+    includeWorkingTree
   })
   const rangeLabel = suggested.referenceLabel || suggested.latestTag
     ? `based on changes since ${suggested.referenceLabel || suggested.latestTag}`

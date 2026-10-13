@@ -13,4 +13,18 @@ describe('command utils', () => {
     expect(resolveCommandForPlatform('npm', { isWindows: false })).toBe('npm')
     expect(resolveCommandForPlatform('php', { isWindows: false })).toBe('php')
   })
+  it('uses the bundled macOS CLI when Codex is absent from PATH', () => {
+    expect(resolveCommandForPlatform('codex', {
+      platform: 'darwin', isWindows: false, codexCommand: null,
+      pathLookup: () => false, fileExists: path => path.includes('ChatGPT.app')
+    })).toBe('/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex')
+  })
+
+  it('prefers configured or PATH Codex commands over the app bundle', () => {
+    expect(resolveCommandForPlatform('codex', {codexCommand: '/custom/codex'})).toBe('/custom/codex')
+    expect(resolveCommandForPlatform('codex', {
+      platform: 'darwin', codexCommand: null, pathLookup: () => true, fileExists: () => true
+    })).toBe('codex')
+  })
+
 })

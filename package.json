@@ -11,7 +11,8 @@
   "exports": {
     ".": "./src/index.mjs",
     "./targets": "./src/targets/index.mjs",
-    "./ssh": "./src/ssh/index.mjs"
+    "./ssh": "./src/ssh/index.mjs",
+    "./release-advisor": "./src/release-advisor.mjs"
   },
   "bin": {
     "zephyr": "bin/zephyr.mjs"
