@@ -4,11 +4,11 @@ export function normalizeDeploymentOptions(value) {
   if (value == null) return null
   const fail = message => { throw new ZephyrError(message, {code: 'ZEPHYR_DEPLOYMENT_CONFIG_INVALID'}) }
   if (typeof value !== 'object' || Array.isArray(value)) fail('deployment must be an object.')
-  const allowed = ['packageManager', 'publishShiftAssets', 'optimizeCaches', 'restartSsr', 'healthChecks', 'healthUrl', 'healthTimeoutMs']
+  const allowed = ['packageManager', 'publishShiftAssets', 'optimizeCaches', 'restartSsr', 'linkStorage', 'restartReverb', 'keepMaintenanceOnFailure', 'healthChecks', 'healthUrl', 'healthTimeoutMs']
   for (const key of Object.keys(value)) if (!allowed.includes(key)) fail(`Unknown deployment option: ${key}`)
   const result = {...value}
   if (value.packageManager !== undefined && !['npm', 'pnpm'].includes(value.packageManager)) fail('packageManager must be npm or pnpm.')
-  for (const key of ['publishShiftAssets', 'optimizeCaches', 'restartSsr']) {
+  for (const key of ['publishShiftAssets', 'optimizeCaches', 'restartSsr', 'linkStorage', 'restartReverb', 'keepMaintenanceOnFailure']) {
     if (value[key] !== undefined && typeof value[key] !== 'boolean') fail(`${key} must be a boolean.`)
   }
   if (value.healthChecks !== undefined) {

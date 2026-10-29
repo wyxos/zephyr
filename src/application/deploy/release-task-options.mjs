@@ -10,7 +10,7 @@ export function normalizeDeploymentTasks(deployment = {}) {
   if (!['npm', 'pnpm'].includes(packageManager)) {
     throw new Error('Deployment packageManager must be npm or pnpm.')
   }
-  for (const field of ['publishShiftAssets', 'optimizeCaches', 'restartSsr']) {
+  for (const field of ['publishShiftAssets', 'optimizeCaches', 'restartSsr', 'linkStorage', 'restartReverb', 'keepMaintenanceOnFailure']) {
     if (deployment[field] !== undefined && typeof deployment[field] !== 'boolean') {
       throw new Error(`Deployment ${field} must be a boolean.`)
     }
@@ -26,6 +26,9 @@ export function normalizeDeploymentTasks(deployment = {}) {
     publishShiftAssets: deployment.publishShiftAssets === true,
     optimizeCaches: deployment.optimizeCaches === true,
     restartSsr: deployment.restartSsr === true,
+    linkStorage: deployment.linkStorage === true,
+    restartReverb: deployment.restartReverb === true,
+    keepMaintenanceOnFailure: deployment.keepMaintenanceOnFailure === true,
     healthChecks: healthChecks.map(({label, command}) => ({label, command}))
   }
 }

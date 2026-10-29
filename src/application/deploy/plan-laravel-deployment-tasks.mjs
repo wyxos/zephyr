@@ -138,6 +138,13 @@ export function planLaravelDeploymentTasks({
     })
   }
 
+  if (isLaravel && taskOptions.linkStorage) {
+    steps.push({
+      label: 'Link Laravel public storage',
+      command: `${phpCommand} artisan storage:link`
+    })
+  }
+
   if (shouldRunNpmInstall && !usesLocalFrontendArtifact && !usesTrackedFrontendAssets) {
     steps.push({
       label: 'Install Node dependencies',
@@ -180,6 +187,13 @@ export function planLaravelDeploymentTasks({
     steps.push({
       label: 'Restart Inertia SSR renderer',
       command: `${phpCommand} artisan inertia:stop-ssr --graceful`
+    })
+  }
+
+  if (isLaravel && taskOptions.restartReverb) {
+    steps.push({
+      label: 'Restart Laravel Reverb',
+      command: `${phpCommand} artisan reverb:restart`
     })
   }
 

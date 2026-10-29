@@ -389,6 +389,7 @@ export async function buildRemoteDeploymentPlan({
 
     return {
         remoteIsLaravel: remoteState.remoteIsLaravel,
+        ...(release.deployment?.keepMaintenanceOnFailure ? {keepMaintenanceOnFailure: true} : {}),
         changedFiles,
         horizonConfigured,
         phpCommand,

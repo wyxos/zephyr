@@ -15,9 +15,20 @@ export async function maybeRecoverLaravelMaintenanceMode({
         return
     }
 
-    if (!executionState?.enteredMaintenanceMode || executionState.exitedMaintenanceMode) {
+    if (!executionState?.enteredMaintenanceMode) return
+    if (remotePlan.keepMaintenanceOnFailure) {
+        if (executionState.exitedMaintenanceMode && typeof executeRemote === 'function') {
+            try {
+                await executeRemote('Keep failed release in maintenance mode', remotePlan.maintenanceDownCommand ?? `${remotePlan.phpCommand} artisan down`)
+                executionState.exitedMaintenanceMode = false
+            } catch (error) {
+                logWarning?.(`Could not restore failure maintenance mode: ${error.message}`)
+            }
+        }
+        logWarning?.('Release failed; maintenance mode is retained for operator recovery by this preset policy.')
         return
     }
+    if (executionState.exitedMaintenanceMode) return
 
     if (typeof executeRemote !== 'function') {
         logWarning?.('Deployment failed while Laravel maintenance mode may still be enabled.')
