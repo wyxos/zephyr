@@ -178,4 +178,16 @@ describe('resolvePendingSnapshot', () => {
         expect(result).toBe(snapshot)
         expect(logProcessing).toHaveBeenCalledWith('Resuming deployment using saved task snapshot...')
     })
+    it.each([
+        {serverName:'other',branch:'main'},
+        {serverName:'production',branch:'other'},
+        {serverName:'production',branch:'main',projectPath:'/other'},
+        {serverName:'production',branch:'main',sshUser:'other'}
+    ])('refuses to resume a snapshot belonging to another target', async snapshot => {
+        mockLoadPendingTasksSnapshot.mockResolvedValue(snapshot)
+        const {resolvePendingSnapshot}=await import('#src/application/deploy/resolve-pending-snapshot.mjs')
+        await expect(resolvePendingSnapshot('/workspace/project',{serverName:'production',branch:'main',projectPath:'/app',sshUser:'app'}, {executionMode:{interactive:false,resumePending:true}})).rejects.toMatchObject({code:'ZEPHYR_PENDING_TARGET_MISMATCH'})
+        expect(mockClearPendingTasksSnapshot).not.toHaveBeenCalled()
+    })
+
 })

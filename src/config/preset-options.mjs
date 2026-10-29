@@ -1,3 +1,6 @@
+import {normalizeDeploymentOptions} from './deployment-options.mjs'
+import {normalizeDeploymentCiPolicy} from '../application/deploy/github-ci-gate.mjs'
+
 export const DEFAULT_PRESET_OPTIONS = Object.freeze({
   maintenanceMode: null,
   frontendBuildStrategy: 'remote',
@@ -22,6 +25,8 @@ function normalizeFrontendBuildStrategy(value) {
 
 export function normalizePresetOptions(options = {}) {
   return {
+    ...(options?.ci !== undefined ? {ci: normalizeDeploymentCiPolicy(options.ci) ?? false} : {}),
+    ...(options?.deployment !== undefined ? {deployment: normalizeDeploymentOptions(options.deployment)} : {}),
     maintenanceMode: normalizeMaintenanceMode(options?.maintenanceMode),
     frontendBuildStrategy: normalizeFrontendBuildStrategy(options?.frontendBuildStrategy),
     skipGitHooks: normalizeBoolean(options?.skipGitHooks),
@@ -36,6 +41,8 @@ export function mergeDeployOptions(executionMode = {}, presetOptions = {}) {
   const normalizedPresetOptions = normalizePresetOptions(presetOptions)
 
   return {
+    ...(normalizedPresetOptions.ci !== undefined ? {ci: normalizedPresetOptions.ci} : {}),
+    ...(normalizedPresetOptions.deployment !== undefined ? {deployment: normalizedPresetOptions.deployment} : {}),
     maintenanceMode: executionMode.explicitMaintenanceMode === true
       ? executionMode.maintenanceMode
       : normalizedPresetOptions.maintenanceMode,

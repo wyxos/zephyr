@@ -1,3 +1,5 @@
+import path from 'node:path'
+
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 
 import {
@@ -528,7 +530,7 @@ describe('application/deploy/run-deployment', () => {
             username: 'forge',
             privateKey: '-----BEGIN RSA PRIVATE KEY-----',
             sshAlias: 'law-dev',
-            privateKeyPath: '/home/local/.ssh/id_rsa'
+            privateKeyPath: path.join('/home/local', '.ssh/id_rsa')
         })
     })
 
@@ -616,7 +618,7 @@ describe('application/deploy/run-deployment', () => {
             username: 'runcloud',
             privateKey: '-----BEGIN RSA PRIVATE KEY-----',
             sshAlias: 'law-dev',
-            privateKeyPath: '/home/local/.ssh/id_rsa'
+            privateKeyPath: path.join('/home/local', '.ssh/id_rsa')
         })
         expect(mockExecCommand).not.toHaveBeenCalled()
     })

@@ -124,7 +124,7 @@ Non-interactive mode is strict and is intended for already-configured projects:
 - stale remote locks are never auto-removed in non-interactive mode
 - `--json` is only supported together with `--non-interactive`
 
-If Laravel maintenance mode has already been enabled and Zephyr then exits abnormally because of a signal such as `SIGINT`, `SIGTERM`, or `SIGHUP`, it now makes a best-effort attempt to run `artisan up` automatically before exiting.
+If Laravel maintenance mode has already been enabled and Zephyr exits because of `SIGINT`, `SIGTERM`, or `SIGHUP` between known completed commands, it makes a best-effort attempt to run `artisan up`. If a command is in flight or its outcome is unknown, recovery is withheld and locks/state are retained for inspection.
 
 `--frontend-build-strategy local-artifact` builds `public/build` from the final prepared Git commit on the deploying machine. Zephyr uploads a checksummed archive before remote app mutations, verifies the remote commit before activation, retains the previous build until deployment finalization, and restores it on a failed or interrupted deployment. `tracked-assets` is for legacy applications that compile locally and commit their generated frontend assets; Zephyr pulls those files from Git and skips remote Node installation and compilation. The default `remote` strategy keeps the existing server-side npm install/build behavior.
 
@@ -334,7 +334,7 @@ The `.zephyr/` directory is automatically added to `.gitignore`.
 
 ## Notes
 
-- If Zephyr reports **"No upstream file changes detected"**, it means the remote repository already matches `origin/<branch>` after `git fetch`. In that case, Zephyr will only run `git pull` and skip all conditional maintenance tasks.
+- If Zephyr reports **"No upstream file changes detected"**, ordinary change-based tasks are skipped. Explicitly configured lifecycle/health tasks still run, and a pinned release verifies its exact commit even when there is no diff.
 - If Zephyr prompts to update local file dependencies (path-based deps outside the repo), it may also prompt to commit those updates before continuing.
 
 ## Requirements
@@ -342,3 +342,43 @@ The `.zephyr/` directory is automatically added to `.gitignore`.
 - Node.js 16+
 - Git
 - SSH access to target servers
+
+
+## Optional CI gate and verified application releases
+
+Existing presets keep their behavior. A preset can opt into an exact-commit GitHub Actions gate and explicit Laravel deployment tasks through its `options`:
+
+```json
+{
+  "ci": {
+    "enabled": true,
+    "requiredWorkflows": ["tests"],
+    "timeoutMs": 900000
+  },
+  "deployment": {
+    "packageManager": "pnpm",
+    "publishShiftAssets": true,
+    "optimizeCaches": true,
+    "restartSsr": true,
+    "healthChecks": [
+      {"label": "Check Inertia SSR", "command": "php8.4 artisan inertia:check-ssr"}
+    ],
+    "healthUrl": "https://your-app.example/",
+    "healthTimeoutMs": 15000
+  }
+}
+```
+
+These belong beside existing maintenance/validation preferences in the saved preset's `options`, not at the top level of `.zephyr/config.json`. Keep that file machine-local and ignored. Arbitrary health commands run as the configured deployment SSH user; configure only trusted commands and never embed credentials. `packageManager` supports `npm` and `pnpm`. Omitted lifecycle flags remain off. No CI gate means no GitHub CLI requirement or CI queries.
+
+An enabled gate checks successful **whole workflows**, matched by their unique displayed names, for the final local Git SHA, selected branch and `push` event in the origin repository. It supports private repositories when the authenticated `gh` account has Actions read access. Missing CLI/access prompts interactive users to install `gh` or run `gh auth login`, then choose Retry or Cancel. Non-interactive releases stop with actionable errors. Missing/pending workflows wait within the total deadline; failures, cancellation and unavailable providers stop deployment. The gate cannot be bypassed by `--skip-checks`. External commit statuses and individual jobs are not configuration targets in this version.
+
+The gate uses bounded periodic GitHub status requests **only while an explicitly enabled release is waiting** (a narrow release-watcher exception to the shared no-polling preference). It does not run a background monitor or require a public webhook endpoint. The default wait is fifteen minutes, including provider reads and interactive access recovery. Cancellation aborts pending GitHub subprocesses; nothing proceeds to the remote deployment lock after a cancelled or failed gate.
+
+Opting into either `deployment` settings or CI pins the deployment to the prepared commit. The remote branch and checkout must match that SHA; an advanced branch fails rather than deploying unchecked code. Pending snapshots retain the SHA and explicit CI/deployment settings, and reject another local commit or target on resume. Existing snapshots and legacy presets remain compatible.
+
+pnpm deployment uses Corepack and a tracked frozen lockfile. SHIFT publishing runs after any needed Composer installation. Cache optimization clears configuration before migrations and optimizes after the build; queue and opted-in SSR restarts follow. Named shell health checks run after maintenance mode is disabled. The optional HTTP check makes a single bounded request and requires a 2xx response; it does not follow redirects or retry. A release reports success only after its configured checks and deployed-commit verification succeed.
+
+Remote stdout/stderr now stream during each named step and remain available in the release log. JSON mode emits `remote_output` events with `data.stepLabel` and `data.stream`, preserving valid NDJSON. Confirmed command failures retain the failed step and exit code. Lost SSH or interrupted in-flight commands produce `REMOTE_OUTCOME_UNKNOWN`; Zephyr preserves pending state/locks and does not automatically rollback, disable maintenance or repeat commands that may still be running. Inspect the remote process, checkout, maintenance state and logs before explicitly resolving the lock and choosing resume/discard. There is no automatic rollback of database migrations.
+
+Forge can continue managing server provisioning, TLS and supervised services while Zephyr performs the application deployment over SSH. Disable other deployment triggers when adopting one release entrypoint. Verify the new preset against its intended host before retiring an existing deployment script.

@@ -54,6 +54,7 @@ export async function executeRemoteDeploymentPlan({
                                                       usefulSteps,
                                                       pendingSnapshot = null,
                                                       logProcessing,
+                                                      afterExecution,
                                                       executionState = undefined
                                                   } = {}) {
     if (usefulSteps && pendingSnapshot) {
@@ -70,6 +71,7 @@ export async function executeRemoteDeploymentPlan({
             trackExecutionState(step, executionState)
         }
 
+        await afterExecution?.()
         completed = true
     } finally {
         if (usefulSteps && completed) {

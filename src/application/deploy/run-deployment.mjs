@@ -1,3 +1,9 @@
+import {savePendingTasksSnapshot} from '../../deploy/snapshots.mjs'
+import {ZephyrError} from '../../runtime/errors.mjs'
+import {normalizeDeploymentOptions} from '../../config/deployment-options.mjs'
+import {normalizeDeploymentCiPolicy} from './github-ci-gate.mjs'
+import {prepareDeploymentRelease} from './prepare-release.mjs'
+import {verifyDeploymentRelease} from './verify-release.mjs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import process from 'node:process'
@@ -28,9 +34,10 @@ async function cleanupDeploymentResources({
     ssh,
     remoteCwd,
     lockAcquired,
+    preserveLocks = false,
     logWarning
 } = {}) {
-    if (lockAcquired && ssh && remoteCwd) {
+    if (!preserveLocks && lockAcquired && ssh && remoteCwd) {
         try {
             await releaseRemoteLock(ssh, remoteCwd, {logWarning})
             await releaseLocalLock(rootDir, {logWarning})
@@ -86,6 +93,8 @@ export async function runDeployment(config, options = {}) {
         return
     }
 
+    normalizeDeploymentOptions(Object.prototype.hasOwnProperty.call(snapshot ?? {}, 'deployment') ? snapshot.deployment : executionMode?.deployment)
+    normalizeDeploymentCiPolicy(Object.prototype.hasOwnProperty.call(snapshot ?? {}, 'ci') ? snapshot.ci : executionMode?.ci)
     await cleanupOldLogs(rootDir)
 
     const privateKeyPath = await resolveSshKeyPath(config.sshKey)
@@ -104,13 +113,35 @@ export async function runDeployment(config, options = {}) {
     }
 
     let lockAcquired = false
+    let preserveLocks = false
+    let release = {}
+    const releaseController = new AbortController()
+    const assertActiveRelease = () => {
+        if (releaseController.signal.aborted) throw new ZephyrError('Release cancelled before the next deployment operation.', {code: 'ZEPHYR_RELEASE_CANCELLED'})
+    }
+    const trackExecutor = executor => async (...args) => {
+        if (preserveLocks) throw new ZephyrError('Remote outcome remains unknown; inspect the server before sending more commands.', {code: 'REMOTE_OUTCOME_UNKNOWN'})
+        executionState.commandInFlight = true
+        try { return await executor(...args) }
+        catch (error) {
+            if (error.code === 'REMOTE_OUTCOME_UNKNOWN') preserveLocks = true
+            throw error
+        } finally { executionState.commandInFlight = false }
+    }
     const abnormalExitGuard = createAbnormalExitGuard({
         logWarning,
         cleanup: async (signal) => {
+            releaseController.abort()
             let recoverySsh = null
             let recoveryExecutor = executeRemote
 
             try {
+                if (preserveLocks || executionState.commandInFlight) {
+                    preserveLocks = true
+                    logWarning?.('Remote command outcome is unknown after interruption. Pending state and locks are retained; inspect the server before resuming. No recovery commands were sent.')
+                    return
+                }
+                if (!lockAcquired) return
                 if (remoteCwd) {
                     ({ssh: recoverySsh} = await connectToRemoteDeploymentTarget({
                         config,
@@ -123,7 +154,7 @@ export async function runDeployment(config, options = {}) {
                         message: `Reconnecting to ${config.sshAlias || config.serverIp} as ${sshUser} for abnormal-exit recovery...`
                     }))
 
-                    recoveryExecutor = createRemoteExecutor({
+                    recoveryExecutor = trackExecutor(createRemoteExecutor({
                         ssh: recoverySsh,
                         rootDir,
                         remoteCwd,
@@ -131,7 +162,7 @@ export async function runDeployment(config, options = {}) {
                         logProcessing,
                         logSuccess,
                         logError
-                    })
+                    }))
                 }
 
                 await maybeRecoverFrontendArtifact({
@@ -142,7 +173,7 @@ export async function runDeployment(config, options = {}) {
                     logWarning
                 })
 
-                await maybeRecoverLaravelMaintenanceMode({
+                if (!preserveLocks && remotePlan) await maybeRecoverLaravelMaintenanceMode({
                     remotePlan,
                     executionState,
                     executeRemote: recoveryExecutor,
@@ -159,6 +190,7 @@ export async function runDeployment(config, options = {}) {
                     ssh: recoverySsh ?? ssh,
                     remoteCwd,
                     lockAcquired,
+                    preserveLocks,
                     logWarning
                 })
                 lockAcquired = false
@@ -216,6 +248,9 @@ export async function runDeployment(config, options = {}) {
             logWarning
         })
 
+        release = await prepareDeploymentRelease({config, snapshot, executionMode, rootDir, context, signal: releaseController.signal})
+        assertActiveRelease()
+
         const frontendBuildStrategy = snapshot?.frontendBuildStrategy ??
             executionMode?.frontendBuildStrategy ??
             'remote'
@@ -230,6 +265,7 @@ export async function runDeployment(config, options = {}) {
             })
         }
 
+        assertActiveRelease()
         ;({ssh} = await connectToRemoteDeploymentTarget({
             config,
             createSshClient,
@@ -241,6 +277,7 @@ export async function runDeployment(config, options = {}) {
             message: `Reconnecting to ${config.sshAlias || config.serverIp} as ${sshUser}...`
         }))
 
+        assertActiveRelease()
         logProcessing('Connection established. Acquiring deployment lock on server...')
         await acquireRemoteLock(ssh, remoteCwd, rootDir, {
             runPrompt,
@@ -249,18 +286,28 @@ export async function runDeployment(config, options = {}) {
             interactive: executionMode?.interactive !== false
         })
         lockAcquired = true
+        assertActiveRelease()
         logProcessing(`Lock acquired. Running deployment commands in ${remoteCwd}...`)
 
-        executeRemote = createRemoteExecutor({
+        const remoteExecutor = createRemoteExecutor({
             ssh,
             rootDir,
             remoteCwd,
             writeToLogFile,
             logProcessing,
             logSuccess,
-            logError
+            logError,
+            logOutput: context.emitEvent ? ({label, stream, chunk}) => context.emitEvent('remote_output', {message: chunk, data: {stepLabel: label, stream}}) : undefined
         })
 
+        executeRemote = trackExecutor(remoteExecutor)
+
+        if (release.expectedCommit && !snapshot) await savePendingTasksSnapshot(rootDir, {
+            serverName: config.serverName, branch: config.branch, projectPath: config.projectPath,
+            sshUser: config.sshUser, createdAt: new Date().toISOString(), ...release,
+            maintenanceModeEnabled: remoteState.maintenanceModeEnabled,
+            taskLabels: ['Prepare verified deployment plan']
+        })
         remotePlan = await buildRemoteDeploymentPlan({
             config,
             snapshot,
@@ -277,7 +324,8 @@ export async function runDeployment(config, options = {}) {
             logProcessing,
             logSuccess,
             logWarning,
-            frontendArtifact
+            frontendArtifact,
+            release
         })
 
         if (remotePlan.usesFrontendArtifact) {
@@ -298,7 +346,8 @@ export async function runDeployment(config, options = {}) {
             usefulSteps: remotePlan.usefulSteps,
             pendingSnapshot: remotePlan.pendingSnapshot,
             logProcessing,
-            executionState
+            executionState,
+            afterExecution: () => verifyDeploymentRelease({release, executeRemote, remotePlan, logSuccess})
         })
 
         logSuccess('\nDeployment commands completed successfully.')
@@ -311,7 +360,9 @@ export async function runDeployment(config, options = {}) {
             logError(`\nTask output has been logged to: ${logPath}`)
         }
 
-        await maybeRecoverFrontendArtifact({
+        preserveLocks = preserveLocks || error.code === 'REMOTE_OUTCOME_UNKNOWN'
+        if (preserveLocks) logWarning?.('Remote command outcome is unknown. Pending state and locks are retained; inspect the server before resuming.')
+        if (!preserveLocks && remotePlan) await maybeRecoverFrontendArtifact({
             remotePlan,
             executionState,
             executeRemote,
@@ -319,7 +370,7 @@ export async function runDeployment(config, options = {}) {
             logWarning
         })
 
-        await maybeRecoverLaravelMaintenanceMode({
+        if (!preserveLocks && remotePlan) await maybeRecoverLaravelMaintenanceMode({
             remotePlan,
             executionState,
             executeRemote,
@@ -329,7 +380,7 @@ export async function runDeployment(config, options = {}) {
             executionMode
         })
 
-        if (lockAcquired && ssh && remoteCwd) {
+        if (!preserveLocks && lockAcquired && ssh && remoteCwd) {
             try {
                 await compareLocksAndPrompt(rootDir, ssh, remoteCwd, {
                     runPrompt,
@@ -342,7 +393,7 @@ export async function runDeployment(config, options = {}) {
             }
         }
 
-        throw new Error(`Deployment failed: ${error.message}`)
+        throw new ZephyrError(`Deployment failed: ${error.message}${preserveLocks ? ' Remote outcome is unknown; inspect pending state before resuming.' : ''}`, {code: preserveLocks ? 'REMOTE_OUTCOME_UNKNOWN' : error.code || 'ZEPHYR_FAILURE', data: error.data, cause: error})
     } finally {
         abnormalExitGuard.unregister()
 
@@ -359,6 +410,7 @@ export async function runDeployment(config, options = {}) {
             ssh,
             remoteCwd,
             lockAcquired,
+            preserveLocks,
             logWarning
         })
     }

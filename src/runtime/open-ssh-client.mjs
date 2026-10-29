@@ -76,7 +76,7 @@ function createScpUploadArgs({sshAlias, username, privateKeyPath}, localPath, re
     ]
 }
 
-function runOpenSshProcess(command, args, {spawnImpl = spawn, binaryStdout = false} = {}) {
+function runOpenSshProcess(command, args, {spawnImpl = spawn, binaryStdout = false, onStdout, onStderr} = {}) {
     return new Promise((resolve, reject) => {
         const stdoutChunks = []
         const stderrChunks = []
@@ -88,9 +88,11 @@ function runOpenSshProcess(command, args, {spawnImpl = spawn, binaryStdout = fal
 
         child.stdout?.on('data', (chunk) => {
             stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+            onStdout?.(chunk)
         })
         child.stderr?.on('data', (chunk) => {
             stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+            onStderr?.(chunk)
         })
 
         child.on('error', (error) => {
@@ -101,7 +103,7 @@ function runOpenSshProcess(command, args, {spawnImpl = spawn, binaryStdout = fal
             settled = true
             reject(new Error(`Unable to start ${command}: ${getErrorMessage(error)}`, {cause: error}))
         })
-        child.on('close', (code) => {
+        child.on('close', (code, signal) => {
             if (settled) {
                 return
             }
@@ -111,7 +113,8 @@ function runOpenSshProcess(command, args, {spawnImpl = spawn, binaryStdout = fal
             const stderr = Buffer.concat(stderrChunks).toString('utf8')
 
             resolve({
-                code: typeof code === 'number' ? code : 1,
+                code: typeof code === 'number' ? code : null,
+                ...(command === 'ssh' && (code === 255 || signal || code === null) ? {outcomeUnknown: true} : {}),
                 stdout: binaryStdout ? stdoutBuffer : stdoutBuffer.toString('utf8'),
                 stderr
             })
@@ -128,13 +131,13 @@ export function createOpenSshClient({spawnImpl = spawn} = {}) {
         }
     }
 
-    async function runRemoteCommand(command, {binaryStdout = false} = {}) {
+    async function runRemoteCommand(command, {binaryStdout = false, onStdout, onStderr} = {}) {
         assertConnected()
 
         return await runOpenSshProcess(
             'ssh',
             createOpenSshArgs(connectionOptions, command),
-            {spawnImpl, binaryStdout}
+            {spawnImpl, binaryStdout, onStdout, onStderr}
         )
     }
 
@@ -170,12 +173,12 @@ export function createOpenSshClient({spawnImpl = spawn} = {}) {
             return this
         },
 
-        async execCommand(command, {cwd} = {}) {
+        async execCommand(command, {cwd, onStdout, onStderr} = {}) {
             const remoteCommand = cwd
                 ? `cd -- ${quoteShellArgument(cwd)} && ${command}`
                 : command
 
-            return await runRemoteCommand(remoteCommand)
+            return await runRemoteCommand(remoteCommand, {onStdout, onStderr})
         },
 
         async getFile(localPath, remotePath, _sftp = null, transferOptions = {}) {

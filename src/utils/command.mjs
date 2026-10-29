@@ -121,7 +121,7 @@ export async function runCommand(command, args, { cwd = process.cwd(), stdio = '
   })
 }
 
-export async function runCommandCapture(command, args, { cwd = process.cwd() } = {}) {
+export async function runCommandCapture(command, args, { cwd = process.cwd(), signal } = {}) {
   const resolvedCommand = resolveCommandForPlatform(command)
   const useShell = isWindowsShellShim(resolvedCommand) || shouldUseShellOnWindows(command)
 
@@ -133,9 +133,10 @@ export async function runCommandCapture(command, args, { cwd = process.cwd() } =
       ? spawn([resolvedCommand, ...(args ?? []).map(quoteForCmd)].join(' '), {
         cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
+        ...(signal ? {signal} : {}),
         shell: true
       })
-      : spawn(resolvedCommand, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn(resolvedCommand, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], ...(signal ? {signal} : {}) })
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk

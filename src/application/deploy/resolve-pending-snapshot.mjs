@@ -15,7 +15,9 @@ export async function resolvePendingSnapshot(rootDir, deploymentConfig, {
 
     const matchesSelection =
         existingSnapshot.serverName === deploymentConfig.serverName &&
-        existingSnapshot.branch === deploymentConfig.branch
+        existingSnapshot.branch === deploymentConfig.branch &&
+        (!existingSnapshot.projectPath || existingSnapshot.projectPath === deploymentConfig.projectPath) &&
+        (!existingSnapshot.sshUser || existingSnapshot.sshUser === deploymentConfig.sshUser)
 
     const messageLines = [
         'Pending deployment tasks were detected from a previous run.',
@@ -36,6 +38,7 @@ export async function resolvePendingSnapshot(rootDir, deploymentConfig, {
         }
 
         if (executionMode.resumePending) {
+            if (!matchesSelection) throw new ZephyrError('Pending deployment belongs to a different target. Select that target or explicitly discard its snapshot.', {code: 'ZEPHYR_PENDING_TARGET_MISMATCH'})
             logProcessing?.('Resuming deployment using saved task snapshot...')
             return existingSnapshot
         }
@@ -55,6 +58,7 @@ export async function resolvePendingSnapshot(rootDir, deploymentConfig, {
     ])
 
     if (resumePendingTasks) {
+        if (!matchesSelection) throw new ZephyrError('Pending deployment belongs to a different target. Select that target or explicitly discard its snapshot.', {code: 'ZEPHYR_PENDING_TARGET_MISMATCH'})
         logProcessing?.('Resuming deployment using saved task snapshot...')
         return existingSnapshot
     }

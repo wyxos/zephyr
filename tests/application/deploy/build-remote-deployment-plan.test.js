@@ -674,4 +674,11 @@ describe('application/deploy/build-remote-deployment-plan', () => {
             code: 'ZEPHYR_MAINTENANCE_FLAG_REQUIRED'
         })
     })
+    it('retains the pinned snapshot even for a one-step non-Laravel release', async () => {
+        mockPlanLaravelDeploymentTasks.mockReturnValue([{label:'Update checkout', command:'verified merge'}])
+        const result=await buildRemoteDeploymentPlan({config:{branch:'main',serverName:'fixture',projectPath:'/fixture'},release:{expectedCommit:'a'.repeat(40),ci:false,deployment:null},remoteIsLaravel:false,ssh:{execCommand:vi.fn()},executeRemote:vi.fn()})
+        expect(result.usefulSteps).toBe(true)
+        expect(result.pendingSnapshot).toMatchObject({expectedCommit:'a'.repeat(40),ci:false,deployment:null})
+    })
+
 })

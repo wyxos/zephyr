@@ -85,7 +85,23 @@ function createDelegatingSshClient({NodeSSH, spawnImpl}) {
     },
 
     async execCommand(...args) {
-      return await assertActiveClient().execCommand(...args)
+      const client = assertActiveClient()
+      const connection = client.connection
+      if (!connection?.once || !connection?.removeListener) {
+        return await client.execCommand(...args)
+      }
+      let lostConnection
+      const disconnected = new Promise((_resolve, reject) => {
+        lostConnection = error => reject(new Error(`SSH connection interrupted: ${getErrorMessage(error)}`))
+        connection.once('error', lostConnection)
+        connection.once('close', lostConnection)
+        connection.once('end', lostConnection)
+      })
+      try {
+        return await Promise.race([client.execCommand(...args), disconnected])
+      } finally {
+        for (const event of ['error', 'close', 'end']) connection.removeListener(event, lostConnection)
+      }
     },
 
     async getFile(...args) {

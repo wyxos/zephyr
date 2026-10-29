@@ -1,3 +1,7 @@
+import {StringDecoder} from 'node:string_decoder'
+
+import {ZephyrError} from '../runtime/errors.mjs'
+
 function escapeForDoubleQuotes(value) {
   return value.replace(/(["\\$`])/g, '\\$1')
 }
@@ -26,7 +30,7 @@ function createProfileBootstrap() {
   ].join('; ')
 }
 
-export function createRemoteExecutor({ ssh, rootDir, remoteCwd, writeToLogFile, logProcessing, logSuccess, logError }) {
+export function createRemoteExecutor({ ssh, rootDir, remoteCwd, writeToLogFile, logProcessing, logSuccess, logError, logOutput }) {
   const profileBootstrap = createProfileBootstrap()
 
   return async function executeRemote(label, command, options = {}) {
@@ -34,8 +38,8 @@ export function createRemoteExecutor({ ssh, rootDir, remoteCwd, writeToLogFile, 
       cwd = remoteCwd,
       allowFailure = false,
       bootstrapEnv = true,
-      env = {}
-      // printStdout: legacy option, intentionally ignored (we log to file)
+      env = {},
+      printStdout = true
     } = options
 
     logProcessing?.(`\n${label}`)
@@ -58,41 +62,70 @@ export function createRemoteExecutor({ ssh, rootDir, remoteCwd, writeToLogFile, 
       wrappedCommand = `${envExports}${command}`
     }
 
-    const result = await ssh.execCommand(wrappedCommand, execOptions)
-
-    if (result.stdout && result.stdout.trim()) {
-      await writeToLogFile(rootDir, `[${label}] STDOUT:\n${result.stdout.trim()}`)
+    const decoders = {stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8')}
+    const streamed = {stdout: false, stderr: false}
+    let logWrites = Promise.resolve()
+    let logFailure = null
+    let acceptingOutput = true
+    function output(stream, text) {
+      if (!text) return
+      try {
+        if (stream !== 'stdout' || printStdout) {
+          if (logOutput) {
+            logOutput({label, stream, chunk: text})
+          } else {
+            logProcessing?.(`[${label}] ${stream}: ${text}`)
+          }
+        }
+      } catch (error) {
+        logFailure ??= error
+      }
+      logWrites = logWrites.then(() => writeToLogFile(rootDir, `[${label}] ${stream.toUpperCase()}:\n${text}`))
+        .catch(error => { logFailure ??= error })
     }
-
-    if (result.stderr && result.stderr.trim()) {
-      await writeToLogFile(rootDir, `[${label}] STDERR:\n${result.stderr.trim()}`)
+    function onChunk(stream, chunk) {
+      if (!acceptingOutput) return
+      streamed[stream] = true
+      output(stream, decoders[stream].write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
     }
+    execOptions.onStdout = chunk => onChunk('stdout', chunk)
+    execOptions.onStderr = chunk => onChunk('stderr', chunk)
+
+    let result
+    let transportFailure
+    try {
+      result = await ssh.execCommand(wrappedCommand, execOptions)
+    } catch (error) {
+      transportFailure = error
+    }
+    acceptingOutput = false
+    for (const stream of ['stdout', 'stderr']) {
+      output(stream, decoders[stream].end())
+      if (!streamed[stream] && result?.[stream]) output(stream, result[stream])
+    }
+    await logWrites
+    if (transportFailure || result?.outcomeUnknown || !Number.isInteger(result?.code)) {
+      throw new ZephyrError(`Remote outcome unknown for "${label}". Inspect the server before retrying; the command may still be running.`, {
+        code: 'REMOTE_OUTCOME_UNKNOWN', data: {stepLabel: label, exitCode: result?.code ?? null}, cause: transportFailure
+      })
+    }
+    if (logFailure) throw logFailure
 
     if (result.code !== 0) {
-      if (result.stdout && result.stdout.trim()) {
-        logError?.(`\n[${label}] Output:\n${result.stdout.trim()}`)
-      }
-
-      if (result.stderr && result.stderr.trim()) {
-        logError?.(`\n[${label}] Error:\n${result.stderr.trim()}`)
-      }
+      logError?.(`Remote step "${label}" failed with exit code ${result.code}.`)
     }
 
     if (result.code !== 0 && !allowFailure) {
       const stderr = result.stderr?.trim() ?? ''
-      if (/command not found/.test(stderr) || /is not recognized/.test(stderr)) {
-        throw new Error(
-          `Command failed: ${command}. Ensure the remote environment loads required tools for non-interactive shells (e.g. export PATH in profile scripts).`
-        )
-      }
-
-      throw new Error(`Command failed: ${command}`)
+      const hint = /command not found|is not recognized/.test(stderr)
+        ? ' Ensure the remote environment loads required tools for non-interactive shells (e.g. export PATH in profile scripts).'
+        : ''
+      throw new ZephyrError(`Command failed: ${command} (exit code ${result.code}).${hint}`, {
+        code: 'REMOTE_COMMAND_FAILED', data: {stepLabel: label, exitCode: result.code}
+      })
     }
 
-    if (result.code === 0) {
-      logSuccess?.(label)
-    }
-
+    if (result.code === 0) logSuccess?.(label)
     return result
   }
 }

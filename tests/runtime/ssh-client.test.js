@@ -111,4 +111,43 @@ describe('runtime/ssh-client', () => {
         expect(connection.listenerCount('error')).toBe(0)
         expect(logWarning).not.toHaveBeenCalled()
     })
+    it('passes streaming callbacks to direct SSH and removes temporary connection listeners', async () => {
+        const connection = new EventEmitter()
+        const onStdout = vi.fn()
+        const onStderr = vi.fn()
+        class FakeNodeSSH {
+            connection = connection
+            async connect() { return this }
+            async execCommand(_command, options) {
+                options.onStdout(Buffer.from('direct output'))
+                options.onStderr(Buffer.from('direct warning'))
+                return {code: 0, stdout: 'direct output', stderr: 'direct warning'}
+            }
+        }
+        const ssh = createSshClientFactory({NodeSSH: FakeNodeSSH, logWarning: vi.fn()})()
+        await ssh.connect({host: '127.0.0.1'})
+        await ssh.execCommand('build', {onStdout, onStderr})
+        expect(onStdout).toHaveBeenCalledWith(Buffer.from('direct output'))
+        expect(onStderr).toHaveBeenCalledWith(Buffer.from('direct warning'))
+        expect(connection.listenerCount('close')).toBe(0)
+        expect(connection.listenerCount('end')).toBe(0)
+        expect(connection.listenerCount('error')).toBe(1)
+    })
+
+    it.each(['close', 'end', 'error'])('rejects an in-flight direct command when SSH emits %s', async event => {
+        const connection = new EventEmitter()
+        class FakeNodeSSH {
+            connection = connection
+            async connect() { return this }
+            execCommand() { return new Promise(() => {}) }
+        }
+        const ssh = createSshClientFactory({NodeSSH: FakeNodeSSH, logWarning: vi.fn()})()
+        await ssh.connect({host: '127.0.0.1'})
+        const running = ssh.execCommand('build')
+        connection.emit(event, new Error('connection lost'))
+        await expect(running).rejects.toThrow('SSH connection interrupted')
+        expect(connection.listenerCount('close')).toBe(0)
+        expect(connection.listenerCount('end')).toBe(0)
+    })
+
 })

@@ -1,4 +1,5 @@
 import {createFrontendArtifactRemotePlan} from './frontend-artifact.mjs'
+import {createReleasePullCommand, normalizeDeploymentTasks} from './release-task-options.mjs'
 
 const FRONTEND_BUILD_EXTENSIONS = [
   '.vue',
@@ -31,9 +32,13 @@ export function planLaravelDeploymentTasks({
   maintenanceDownCommand = null,
   maintenanceUpCommand = null,
   frontendBuildStrategy = 'remote',
-  frontendArtifact = null
+  frontendArtifact = null,
+  deployment = {},
+  expectedCommit = null
 }) {
   const safeChangedFiles = Array.isArray(changedFiles) ? changedFiles : []
+  const taskOptions = normalizeDeploymentTasks(deployment)
+  const usePnpm = taskOptions.packageManager === 'pnpm'
 
   const shouldRunComposer =
     isLaravel &&
@@ -58,9 +63,11 @@ export function planLaravelDeploymentTasks({
         file === 'package.json' ||
         file === 'package-lock.json' ||
         file === 'npm-shrinkwrap.json' ||
+        (usePnpm && file === 'pnpm-lock.yaml') ||
         file.endsWith('/package.json') ||
         file.endsWith('/package-lock.json') ||
-        file.endsWith('/npm-shrinkwrap.json')
+        file.endsWith('/npm-shrinkwrap.json') ||
+        (usePnpm && file.endsWith('/pnpm-lock.yaml'))
     )
 
   const hasFrontendChanges =
@@ -81,8 +88,8 @@ export function planLaravelDeploymentTasks({
 
     frontendArtifactPlan = createFrontendArtifactRemotePlan(frontendArtifact)
   }
-  const shouldClearCaches = hasPhpChanges
-  const shouldRestartQueues = hasPhpChanges
+  const shouldClearCaches = hasPhpChanges || (isLaravel && taskOptions.optimizeCaches)
+  const shouldRestartQueues = hasPhpChanges || (isLaravel && taskOptions.optimizeCaches)
 
   const steps = []
 
@@ -96,7 +103,7 @@ export function planLaravelDeploymentTasks({
 
   steps.push({
     label: `Pull latest changes for ${branch}`,
-    command: `git pull origin ${branch}`
+    command: createReleasePullCommand(branch, expectedCommit)
   })
 
   if (shouldRunComposer) {
@@ -106,7 +113,21 @@ export function planLaravelDeploymentTasks({
     // Prefer `composer install --no-dev` and fail loudly if composer.lock is missing.
     steps.push({
       label: 'Install Composer dependencies',
-      command: `if ! git ls-files --error-unmatch composer.lock >/dev/null 2>&1; then echo "composer.lock is not tracked; commit composer.lock for reproducible deploys." >&2; exit 1; fi; if [ -f composer.phar ]; then composer_command="${phpCommand} composer.phar"; elif command -v composer >/dev/null 2>&1; then composer_command="${phpCommand} $(command -v composer)"; else composer_command="${phpCommand} composer"; fi; $composer_command validate --no-check-publish --strict --no-interaction; $composer_command install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader; git diff --exit-code -- composer.lock`
+      command: `if ! git ls-files --error-unmatch composer.lock >/dev/null 2>&1; then echo "composer.lock is not tracked; commit composer.lock for reproducible deploys." >&2; exit 1; fi; if [ -f composer.phar ]; then composer_command="${phpCommand} composer.phar"; elif command -v composer >/dev/null 2>&1; then composer_command="${phpCommand} $(command -v composer)"; else composer_command="${phpCommand} composer"; fi; $composer_command validate --no-check-publish --strict --no-interaction && $composer_command install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader && git diff --exit-code -- composer.lock`
+    })
+  }
+
+  if (isLaravel && taskOptions.publishShiftAssets) {
+    steps.push({
+      label: 'Publish SHIFT public assets',
+      command: `${phpCommand} artisan shift:publish --group=public`
+    })
+  }
+
+  if (isLaravel && taskOptions.optimizeCaches) {
+    steps.push({
+      label: 'Clear Laravel configuration before migrations',
+      command: `${phpCommand} artisan config:clear`
     })
   }
 
@@ -120,7 +141,9 @@ export function planLaravelDeploymentTasks({
   if (shouldRunNpmInstall && !usesLocalFrontendArtifact && !usesTrackedFrontendAssets) {
     steps.push({
       label: 'Install Node dependencies',
-      command: 'if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1 || git ls-files --error-unmatch npm-shrinkwrap.json >/dev/null 2>&1; then npm ci --no-audit --no-fund; git diff --exit-code -- package-lock.json npm-shrinkwrap.json; else npm install --no-package-lock --no-audit --no-fund; fi'
+      command: usePnpm
+        ? 'git ls-files --error-unmatch pnpm-lock.yaml >/dev/null 2>&1 && corepack pnpm install --frozen-lockfile && git diff --exit-code -- pnpm-lock.yaml'
+        : 'if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1 || git ls-files --error-unmatch npm-shrinkwrap.json >/dev/null 2>&1; then npm ci --no-audit --no-fund && git diff --exit-code -- package-lock.json npm-shrinkwrap.json; else npm install --no-package-lock --no-audit --no-fund; fi'
     })
   }
 
@@ -133,14 +156,16 @@ export function planLaravelDeploymentTasks({
   } else if (shouldRunBuild && !usesTrackedFrontendAssets) {
     steps.push({
       label: 'Compile frontend assets',
-      command: 'npm run build'
+      command: usePnpm ? 'corepack pnpm run build' : 'npm run build'
     })
   }
 
   if (shouldClearCaches) {
     steps.push({
       label: 'Clear Laravel caches',
-      command: `${phpCommand} artisan cache:clear && ${phpCommand} artisan config:clear && ${phpCommand} artisan view:clear`
+      command: taskOptions.optimizeCaches
+        ? `${phpCommand} artisan optimize:clear && ${phpCommand} artisan optimize`
+        : `${phpCommand} artisan cache:clear && ${phpCommand} artisan config:clear && ${phpCommand} artisan view:clear`
     })
   }
 
@@ -148,6 +173,13 @@ export function planLaravelDeploymentTasks({
     steps.push({
       label: horizonConfigured ? 'Restart Horizon workers' : 'Restart queue workers',
       command: horizonConfigured ? `${phpCommand} artisan horizon:terminate` : `${phpCommand} artisan queue:restart`
+    })
+  }
+
+  if (isLaravel && taskOptions.restartSsr) {
+    steps.push({
+      label: 'Restart Inertia SSR renderer',
+      command: `${phpCommand} artisan inertia:stop-ssr --graceful`
     })
   }
 
@@ -165,6 +197,10 @@ export function planLaravelDeploymentTasks({
       command: maintenanceUpCommand ?? `${phpCommand} artisan up`,
       kind: 'maintenance-up'
     })
+  }
+
+  for (const check of taskOptions.healthChecks) {
+    steps.push({label: check.label, command: check.command, kind: 'health-check'})
   }
 
   return steps

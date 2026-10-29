@@ -32,8 +32,8 @@ export function createLocalCommandRunners({ runCommandBase, runCommandCaptureBas
     return runCommandBase(command, args, { cwd, stdio })
   }
 
-  const runCommandCapture = async (command, args, { cwd } = {}) => {
-    const { stdout } = await runCommandCaptureBase(command, args, { cwd })
+  const runCommandCapture = async (command, args, { cwd, signal } = {}) => {
+    const { stdout } = await runCommandCaptureBase(command, args, { cwd, ...(signal ? {signal} : {}) })
     return stdout
   }
 

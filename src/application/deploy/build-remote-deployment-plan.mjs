@@ -267,6 +267,7 @@ export async function resolveRemoteDeploymentState({
 
 export async function buildRemoteDeploymentPlan({
                                                     config,
+                                                    release = {},
                                                     snapshot = null,
                                                     requiredPhpVersion = null,
                                                     executionMode = {},
@@ -348,7 +349,9 @@ export async function buildRemoteDeploymentPlan({
         maintenanceDownCommand: maintenanceModePlan.downCommand,
         maintenanceUpCommand: maintenanceModePlan.upCommand,
         frontendBuildStrategy,
-        frontendArtifact
+        frontendArtifact,
+        ...(release.deployment ? {deployment: release.deployment} : {}),
+        ...(release.expectedCommit ? {expectedCommit: release.expectedCommit} : {})
     })
 
     await validateLaravelWritablePaths({
@@ -360,15 +363,17 @@ export async function buildRemoteDeploymentPlan({
         logWarning
     })
 
-    const usefulSteps = steps.length > 1
+    const usefulSteps = steps.length > 1 || Boolean(release.expectedCommit)
     const pendingSnapshot = !usefulSteps
         ? null
-        : snapshot ?? {
+        : snapshot?.changedFiles ? snapshot : {
+        ...snapshot,
         serverName: config.serverName,
         branch: config.branch,
         projectPath: config.projectPath,
         sshUser: config.sshUser,
         createdAt: new Date().toISOString(),
+        ...release,
         maintenanceModeEnabled: maintenanceModePlan.enabled,
         maintenanceModeUsesPrerender: maintenanceModePlan.usesPrerender,
         maintenanceModeRenderView: maintenanceModePlan.renderView,
