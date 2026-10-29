@@ -8,7 +8,7 @@ import {releaseNode} from './release-node.mjs'
 import {releasePackagist} from './release-packagist.mjs'
 import {validateLocalDependencies} from './dependency-scanner.mjs'
 import * as bootstrap from './project/bootstrap.mjs'
-import {getErrorCode, ZephyrError} from './runtime/errors.mjs'
+import {getErrorCode, getSafeErrorData, ZephyrError} from './runtime/errors.mjs'
 import {PROJECT_CONFIG_DIR} from './utils/paths.mjs'
 import {writeStderrLine} from './utils/output.mjs'
 import {createAppContext} from './runtime/app-context.mjs'
@@ -445,6 +445,7 @@ async function main(optionsOrWorkflowType = null, versionArg = null) {
             message: error.message,
             code: errorCode,
             data: {
+                ...getSafeErrorData(error),
                 version: ZEPHYR_VERSION,
                 workflow: currentExecutionMode.workflow
             }

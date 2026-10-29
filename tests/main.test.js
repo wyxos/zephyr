@@ -761,4 +761,15 @@ describe('main entrypoint', () => {
             message: 'deploy blew up'
         }))
     })
+    it('retains safe structured failure details across the CLI event boundary', async () => {
+        const failure=Object.assign(new Error('Build exited 42'),{code:'REMOTE_COMMAND_FAILED',data:{stepLabel:'Compile frontend assets',exitCode:42,reason:'fixture',secret:'must-not-be-emitted'}})
+        mockReleaseNode.mockRejectedValue(failure)
+        const {main}=await import('#src/main.mjs')
+        await expect(main({workflowType:'node',json:true,nonInteractive:true})).rejects.toBe(failure)
+        const event=appContext.emitEvent.mock.calls.find(([name])=>name==='run_failed')[1]
+        expect(event).toMatchObject({code:'REMOTE_COMMAND_FAILED',data:{stepLabel:'Compile frontend assets',exitCode:42,reason:'fixture'}})
+        expect(event.data).not.toHaveProperty('secret')
+        expect(appContext.emitEvent.mock.calls.filter(([name])=>name==='run_completed')).toHaveLength(0)
+    })
+
 })

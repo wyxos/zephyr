@@ -194,7 +194,7 @@ export async function waitForDeploymentCi({
             throw fail(`${message} Deployment has not started.`, missingGh ? 'gh-unavailable' : 'unavailable', {}, error)
           }
           logWarning?.(message)
-          const answer = await runPrompt([{type: 'list', name: 'ciAccessAction', message: `${message} Fix access, then retry or cancel this release.`, choices: [{name: 'Retry', value: 'retry'}, {name: 'Cancel release', value: 'cancel'}], default: 'cancel'}])
+          const answer = await runPrompt([{type: 'list', name: 'ciAccessAction', message: `${message} Fix access, then retry or cancel this release.`, choices: [{name: 'Retry', value: 'retry'}, {name: 'Cancel release', value: 'cancel'}], default: 'cancel'}], {signal: waitSignal})
           if (answer?.ciAccessAction !== 'retry') throw fail('CI access was not restored; release cancelled before deployment.', 'cancelled')
         }
       }

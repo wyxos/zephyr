@@ -1,5 +1,6 @@
 import process from 'node:process'
 import {describe, expect, it, vi} from 'vitest'
+import {createRunPrompt} from '#src/runtime/prompt.mjs'
 import {evaluateDeploymentCiSnapshot, normalizeDeploymentCiPolicy, waitForDeploymentCi} from '#src/application/deploy/github-ci-gate.mjs'
 
 const headSha = 'a'.repeat(40)
@@ -249,6 +250,27 @@ describe('CI gate orchestration', () => {
       await vi.advanceTimersByTimeAsync(100)
       await assertion
       expect(snapshot).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('closes the real prompt abstraction when the CI deadline expires during access recovery', async () => {
+    vi.useFakeTimers()
+    try {
+      const close = vi.fn()
+      const pendingPrompt = Object.assign(new Promise(() => {}), {ui: {close}})
+      const inquirer = {prompt: vi.fn().mockReturnValue(pendingPrompt)}
+      const runPrompt = createRunPrompt({inquirer})
+      const runCommandCapture = vi.fn(async command => {
+        if (command === 'git') return 'git@github.com:owner/repo.git'
+        throw Object.assign(new Error('Command not found: gh'), {code: 'ENOENT'})
+      })
+      const result = waitForDeploymentCi({...context, policy: {...policy, timeoutMs: 100}, interactive: true, runPrompt, runCommandCapture})
+      const assertion = expect(result).rejects.toMatchObject({data: {reason: 'timeout'}})
+      await vi.advanceTimersByTimeAsync(100)
+      await assertion
+      expect(inquirer.prompt).toHaveBeenCalledOnce()
+      expect(close).toHaveBeenCalledOnce()
       expect(vi.getTimerCount()).toBe(0)
     } finally { vi.useRealTimers() }
   })

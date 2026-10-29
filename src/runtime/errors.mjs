@@ -44,3 +44,20 @@ export function getErrorCode(error) {
 
     return 'ZEPHYR_FAILURE'
 }
+
+export function getSafeErrorData(error) {
+    const source = error?.data ?? {}
+    const data = {}
+    for (const key of ['stepLabel', 'exitCode', 'reason', 'runId', 'url', 'conclusion']) {
+        if (typeof source[key] === 'string' || typeof source[key] === 'number' || source[key] === null) data[key] = source[key]
+    }
+    if (typeof source.workflow === 'string') data.requiredWorkflow = source.workflow
+    if (Array.isArray(source.pending)) data.pending = source.pending.map(item => {
+        const pending = {}
+        for (const key of ['workflow', 'reason', 'runId', 'url']) {
+            if (typeof item?.[key] === 'string' || typeof item?.[key] === 'number') pending[key] = item[key]
+        }
+        return pending
+    })
+    return data
+}

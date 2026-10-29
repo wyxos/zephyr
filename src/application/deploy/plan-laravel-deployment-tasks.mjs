@@ -113,7 +113,7 @@ export function planLaravelDeploymentTasks({
     // Prefer `composer install --no-dev` and fail loudly if composer.lock is missing.
     steps.push({
       label: 'Install Composer dependencies',
-      command: `if ! git ls-files --error-unmatch composer.lock >/dev/null 2>&1; then echo "composer.lock is not tracked; commit composer.lock for reproducible deploys." >&2; exit 1; fi; if [ -f composer.phar ]; then composer_command="${phpCommand} composer.phar"; elif command -v composer >/dev/null 2>&1; then composer_command="${phpCommand} $(command -v composer)"; else composer_command="${phpCommand} composer"; fi; $composer_command validate --no-check-publish --strict --no-interaction && $composer_command install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader && git diff --exit-code -- composer.lock`
+      command: `if ! git ls-files --error-unmatch composer.lock >/dev/null 2>&1; then echo "composer.lock is not tracked; commit composer.lock for reproducible deploys." >&2; exit 1; fi; if [ -f composer.phar ]; then composer_path="./composer.phar"; elif composer_path=$(command -v composer); then :; else echo "Composer is unavailable on the deployment target; install Composer or provide composer.phar before retrying." >&2; exit 127; fi; ${phpCommand} "$composer_path" validate --no-check-publish --strict --no-interaction && ${phpCommand} "$composer_path" install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader && git diff --exit-code -- composer.lock`
     })
   }
 

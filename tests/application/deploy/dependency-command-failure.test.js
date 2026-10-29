@@ -10,7 +10,7 @@ const commandFor = (label, changedFiles, deployment) => planLaravelDeploymentTas
 }).find(step => step.label === label).command
 
 // No dependency installer or network command runs: shell functions simulate failure.
-const fakeGit = 'git() { if [ "$1" = diff ]; then printf "FINAL_DIFF_RAN"; fi; return 0; }; '
+const fakeGit = 'composer() { :; }; git() { if [ "$1" = diff ]; then printf "FINAL_DIFF_RAN"; fi; return 0; }; '
 const run = (command, fakes) => spawnSync(bash, ['-c', fakeGit + fakes + command], {
   cwd: os.tmpdir(), encoding: 'utf8'
 })
